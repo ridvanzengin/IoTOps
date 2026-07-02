@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 import docker
@@ -72,6 +73,7 @@ class CollectorDockerManager:
         if collector.docker is None:
             return
         self._remove_container(collector.docker.container_name)
+        self._delete_config_dir(collector)
 
     def refresh_status(self, collector: Collector) -> Collector:
         container = self._get_container(collector, required=False)
@@ -106,3 +108,7 @@ class CollectorDockerManager:
         local_dir.mkdir(parents=True, exist_ok=True)
         (local_dir / "telegraf.conf").write_text(toml_config)
         return self._host_runtime_dir / "collectors" / str(collector.id) / "telegraf.conf"
+
+    def _delete_config_dir(self, collector: Collector) -> None:
+        local_dir = self._runtime_dir / "collectors" / str(collector.id)
+        shutil.rmtree(local_dir, ignore_errors=True)

@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 
 from app.collector.api import router as collector_router
 from app.config import settings
+from app.plugin.api import router as plugin_router
 from app.shared.exceptions import EntityNotFoundError, PluginConfigurationError
 
 app = FastAPI(title="IoTOps")
@@ -16,6 +17,7 @@ app.add_middleware(
 )
 
 app.include_router(collector_router)
+app.include_router(plugin_router)
 
 
 @app.exception_handler(EntityNotFoundError)

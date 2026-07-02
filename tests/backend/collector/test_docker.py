@@ -104,6 +104,19 @@ def test_deploy_removes_pre_existing_container_with_same_name(tmp_path: Path) ->
     assert stale.removed is True
 
 
+def test_remove_deletes_generated_config_directory(tmp_path: Path) -> None:
+    client = FakeDockerClient()
+    manager = _manager(tmp_path, client)
+    collector = _collector()
+    manager.deploy(collector, "toml contents")
+    config_dir = tmp_path / "runtime" / "collectors" / str(collector.id)
+    assert config_dir.exists()
+
+    manager.remove(collector)
+
+    assert not config_dir.exists()
+
+
 def test_stop_updates_status(tmp_path: Path) -> None:
     client = FakeDockerClient()
     manager = _manager(tmp_path, client)

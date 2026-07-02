@@ -1,0 +1,161 @@
+.collector-page {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 32px 20px;
+  text-align: left;
+  box-sizing: border-box;
+}
+
+.collector-page__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.collector-page__error {
+  color: #c0392b;
+  margin-bottom: 16px;
+}
+
+.button {
+  display: inline-block;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 16px;
+  text-decoration: none;
+  color: var(--text-h);
+  background: var(--accent-bg);
+  cursor: pointer;
+  font: inherit;
+}
+
+.collector-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.collector-table th,
+.collector-table td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.collector-table__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+}
+
+.status-badge--running {
+  color: #1a7f37;
+  border-color: #1a7f37;
+}
+
+.status-badge--error,
+.status-badge--unhealthy {
+  color: #c0392b;
+  border-color: #c0392b;
+}
+
+.status-badge--stopped,
+.status-badge--created {
+  color: var(--text);
+}
+
+.status-badge--starting,
+.status-badge--stopping {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.collector-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.collector-editor__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 400px;
+}
+
+.collector-editor__field input {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  background: var(--bg);
+  color: var(--text-h);
+}
+
+.collector-editor__section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.collector-editor__plugin-row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.collector-editor__plugin-row-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.collector-editor__name-field {
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.collector-editor__enabled {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.plugin-config-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.plugin-config-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 220px;
+}
+
+.plugin-config-form__field input {
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  background: var(--bg);
+  color: var(--text-h);
+}
+
+.plugin-config-form__field--checkbox {
+  flex-direction: row;
+  align-items: center;
+}
