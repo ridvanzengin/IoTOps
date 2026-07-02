@@ -1,0 +1,66 @@
+# IoTOps
+
+Self-hosted IoT Operations Platform. Users visually configure telemetry
+collection, automate event-driven workflows, and build dashboards without
+hand-writing Telegraf configuration files. Domain-agnostic core (first
+showcase: smart beekeeping).
+
+**Status:** Pre-implementation. Only planning docs exist so far — no backend,
+frontend, or infra code has been written yet.
+
+**Roadmap is phased for a fast v1 ship:** v1 = Collector + Telemetry +
+Dashboard + Beekeeping showcase (no automation, no AI). Automation Engine
+(v1.1) and AI Assistant (v1.2) are fast-follows, not blockers. Beekeeping is
+just the first showcase — more domain showcases are planned post-v1. See
+[docs/development-plan.md](docs/development-plan.md).
+
+## Stack
+
+- Backend: FastAPI (Python), Pydantic models as the canonical domain
+  representation
+- Frontend: React + TypeScript + Vite
+- Telemetry storage: TimescaleDB
+- Config storage: MongoDB
+- Messaging: MQTT broker (Mosquitto) + Redis (Celery broker)
+- Runtime: Docker containers running Telegraf (Collector + Automater
+  services)
+- Async tasks: Celery workers
+- AI: local LLM (Ollama) for SQL generation/explanation
+
+## Core principles
+
+1. **Everything is a model.** Every domain object is a Pydantic model; UI,
+   API, Docker configs, and DB documents are all derived from it. Never
+   hand-edit generated TOML.
+2. **Infrastructure is an implementation detail.** Users interact with
+   Collectors/Dashboards/Rules, not Telegraf/ECharts/processor plugins.
+3. **Configuration over code.** Features are built via forms, plugins, and
+   templates, not by writing new application code.
+4. **Domain-organized repo**, not layer-organized — see
+   [docs/repository-structure.md](docs/repository-structure.md).
+5. **Mongo stores configuration, TimescaleDB stores telemetry.** Never mix
+   the two.
+
+## Docs
+
+Read the relevant doc before working in that area:
+
+- [docs/vision.md](docs/vision.md) — product vision, scope, non-goals
+- [docs/architecture.md](docs/architecture.md) — services, data flow,
+  lifecycle diagrams
+- [docs/domain-models.md](docs/domain-models.md) — Pydantic entities and
+  their fields/relationships
+- [docs/repository-structure.md](docs/repository-structure.md) — directory
+  layout and naming conventions
+- [docs/development-plan.md](docs/development-plan.md) — phased roadmap
+  (v1/v1.1/v1.2), milestones, and current build order
+
+## Conventions (see repository-structure.md for full detail)
+
+- Python: snake_case files/functions, PascalCase classes, structured
+  `logging` module (never `print`)
+- REST: nouns only (`POST /collector`, not `/createCollector`)
+- Every object crossing an API boundary is a Pydantic model — never a raw
+  dict
+- Raise exceptions instead of returning `None` on failure; convert to HTTP
+  responses at the API layer

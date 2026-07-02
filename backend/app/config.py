@@ -1,0 +1,15 @@
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    mongo_uri: str = "mongodb://mongo:27017/iotops"
+    timescale_uri: str = "postgresql://iotops:iotops@timescaledb:5432/iotops"
+    mqtt_host: str = "mosquitto"
+    mqtt_port: int = 1883
+    redis_uri: str = "redis://redis:6379/0"
+    frontend_origin: str = "http://localhost:5173"
+
+
+settings = Settings()
