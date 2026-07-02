@@ -58,6 +58,7 @@ class CollectorDockerManager:
             restart_policy="unless-stopped",
             volumes=[f"{config_path}:/etc/telegraf/telegraf.conf:ro"],
         )
+        container.reload()
         collector.status = _CONTAINER_STATE_MAP.get(container.status, CollectorStatus.ERROR)
         return collector
 

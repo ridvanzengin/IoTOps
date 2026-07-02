@@ -1,7 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from app.collector.api import router as collector_router
 from app.config import settings
+from app.shared.exceptions import EntityNotFoundError, PluginConfigurationError
 
 app = FastAPI(title="IoTOps")
 
@@ -11,6 +14,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(collector_router)
+
+
+@app.exception_handler(EntityNotFoundError)
+async def entity_not_found_handler(request: Request, exc: EntityNotFoundError) -> JSONResponse:
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@app.exception_handler(PluginConfigurationError)
+async def plugin_configuration_error_handler(
+    request: Request, exc: PluginConfigurationError
+) -> JSONResponse:
+    return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 
 @app.get("/health")

@@ -42,24 +42,31 @@ class DockerConfig(BaseModel):
     environment: dict[str, str] = Field(default_factory=dict)
 
 
-class Collector(BaseModel):
-    schema_version: int = 1
-    id: UUID = Field(default_factory=uuid4)
+class CollectorPluginsBase(BaseModel):
     name: str
     description: str = ""
     enabled: bool = True
-    status: CollectorStatus = CollectorStatus.CREATED
     inputs: list[InputPlugin]
     processors: list[ProcessorPlugin] = Field(default_factory=list)
     outputs: list[OutputPlugin]
-    docker: DockerConfig | None = None
-    created_at: datetime = Field(default_factory=_utcnow)
-    updated_at: datetime = Field(default_factory=_utcnow)
 
     @model_validator(mode="after")
-    def _validate_plugins(self) -> "Collector":
+    def _validate_plugins(self) -> "CollectorPluginsBase":
         if not self.inputs:
             raise ValueError("Collector must contain at least one input")
         if not self.outputs:
             raise ValueError("Collector must contain at least one output")
         return self
+
+
+class CollectorInput(CollectorPluginsBase):
+    pass
+
+
+class Collector(CollectorPluginsBase):
+    schema_version: int = 1
+    id: UUID = Field(default_factory=uuid4)
+    status: CollectorStatus = CollectorStatus.CREATED
+    docker: DockerConfig | None = None
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)

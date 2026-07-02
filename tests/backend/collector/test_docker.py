@@ -9,15 +9,21 @@ from app.shared.enums import CollectorStatus
 
 
 class FakeContainer:
-    def __init__(self, name: str, status: str = "running") -> None:
+    def __init__(self, name: str, status: str = "created") -> None:
         self.name = name
+        # Mirrors real docker-py: attrs on the object returned by
+        # containers.run() are stale until reload() is called, since the
+        # daemon has already transitioned the container to "running" by
+        # the time run() returns.
         self.status = status
+        self._live_status = "running" if status == "created" else status
         self.removed = False
 
     def reload(self) -> None:
-        pass
+        self.status = self._live_status
 
     def stop(self) -> None:
+        self._live_status = "exited"
         self.status = "exited"
 
     def remove(self, force: bool = False) -> None:
