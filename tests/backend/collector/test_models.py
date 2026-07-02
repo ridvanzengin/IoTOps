@@ -9,7 +9,7 @@ def _input() -> InputPlugin:
 
 
 def _output() -> OutputPlugin:
-    return OutputPlugin(plugin_type="timescaledb", configuration={"table": "telemetry"})
+    return OutputPlugin(plugin_type="timescaledb", configuration={"connection": "postgres://"})
 
 
 def test_collector_defaults() -> None:

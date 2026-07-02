@@ -27,7 +27,6 @@ VALID_PAYLOAD = {
             "plugin_type": "timescaledb",
             "configuration": {
                 "connection": "postgres://iotops:iotops@timescaledb:5432/iotops",
-                "table": "telemetry",
             },
         }
     ],

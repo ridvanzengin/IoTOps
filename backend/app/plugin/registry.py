@@ -57,7 +57,7 @@ class PluginRegistry:
             validated = definition.config_model.model_validate(configuration)
         except ValidationError as exc:
             raise PluginConfigurationError(plugin_type, str(exc)) from exc
-        return validated.model_dump(mode="json")
+        return validated.model_dump(mode="json", by_alias=True, exclude_none=True)
 
     def _get_definition(self, plugin_type: str) -> PluginDefinition:
         try:

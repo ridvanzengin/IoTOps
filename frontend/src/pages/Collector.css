@@ -318,7 +318,8 @@
 }
 
 .plugin-config-form__field input,
-.plugin-config-form__field select {
+.plugin-config-form__field select,
+.plugin-config-form__field textarea {
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -327,7 +328,35 @@
   color: var(--text-h);
 }
 
+.plugin-config-form__field textarea {
+  font-family: var(--mono);
+  font-size: 12px;
+  resize: vertical;
+}
+
 .plugin-config-form__field--checkbox {
   flex-direction: row;
   align-items: center;
+}
+
+.plugin-config-form__field--wide {
+  flex-basis: 100%;
+}
+
+.plugin-config-form__advanced {
+  margin-top: 12px;
+}
+
+.plugin-config-form__advanced summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent);
+  user-select: none;
+}
+
+.plugin-config-form__advanced > .plugin-config-form {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }

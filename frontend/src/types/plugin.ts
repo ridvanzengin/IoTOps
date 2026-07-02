@@ -9,6 +9,7 @@ export interface JsonSchemaProperty {
   enum?: (string | number)[];
   default?: unknown;
   title?: string;
+  advanced?: boolean;
 }
 
 export interface JsonSchema {

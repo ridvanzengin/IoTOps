@@ -23,7 +23,6 @@ def _collector(**overrides: object) -> Collector:
                 plugin_type="timescaledb",
                 configuration={
                     "connection": "postgres://iotops:iotops@timescaledb:5432/iotops",
-                    "table": "telemetry",
                 },
             )
         ],
@@ -40,7 +39,9 @@ def test_generate_toml_includes_inputs_and_outputs() -> None:
     document = tomllib.loads(toml_str)
 
     assert document["inputs"]["mqtt_consumer"][0]["servers"] == ["tcp://mosquitto:1883"]
-    assert document["outputs"]["postgresql"][0]["table"] == "telemetry"
+    assert document["outputs"]["postgresql"][0]["connection"] == (
+        "postgres://iotops:iotops@timescaledb:5432/iotops"
+    )
 
 
 def test_generate_toml_skips_disabled_plugins() -> None:

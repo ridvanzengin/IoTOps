@@ -65,6 +65,44 @@ def test_validate_configuration_rejects_constraint_violation() -> None:
         registry.validate_configuration("mqtt", {"servers": []})
 
 
+def test_mqtt_schema_includes_common_opts_marked_advanced() -> None:
+    registry = build_default_registry()
+
+    mqtt = registry.get("mqtt")
+    properties = mqtt.configuration_schema["properties"]
+
+    assert properties["namepass"]["advanced"] is True
+    assert properties["servers"].get("advanced") is None
+
+
+def test_validate_configuration_excludes_unset_optional_fields() -> None:
+    registry = build_default_registry()
+
+    validated = registry.validate_configuration("mqtt", {})
+
+    assert "username" not in validated
+    assert "tls_ca" not in validated
+    assert "servers" in validated
+
+
+def test_timescaledb_schema_property_uses_telegraf_schema_alias() -> None:
+    registry = build_default_registry()
+
+    timescaledb = registry.get("timescaledb")
+
+    assert "schema" in timescaledb.configuration_schema["properties"]
+    assert "pgr_schema" not in timescaledb.configuration_schema["properties"]
+
+
+def test_validate_configuration_dumps_schema_field_by_alias() -> None:
+    registry = build_default_registry()
+
+    validated = registry.validate_configuration("timescaledb", {"schema": "analytics"})
+
+    assert validated["schema"] == "analytics"
+    assert "pgr_schema" not in validated
+
+
 def test_register_overrides_existing_plugin_of_same_name() -> None:
     class CustomConfig(BaseModel):
         value: str = "default"

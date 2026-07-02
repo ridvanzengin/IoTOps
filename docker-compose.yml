@@ -76,6 +76,18 @@ services:
     networks:
       - iotops
 
+  # Manual pipeline-verification tool (Milestone 2), not part of the app.
+  # Off by default: `docker compose --profile tools up mqtt-publisher`
+  mqtt-publisher:
+    build:
+      context: examples/mqtt-publisher
+    depends_on:
+      - mosquitto
+    networks:
+      - iotops
+    profiles:
+      - tools
+
 volumes:
   mongo_data:
   timescale_data:
