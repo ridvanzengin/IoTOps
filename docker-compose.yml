@@ -5,6 +5,8 @@ services:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
+    networks:
+      - iotops
 
   timescaledb:
     image: timescale/timescaledb:latest-pg16
@@ -16,6 +18,8 @@ services:
       - "5432:5432"
     volumes:
       - timescale_data:/var/lib/postgresql/data
+    networks:
+      - iotops
 
   mosquitto:
     image: eclipse-mosquitto:2
@@ -24,11 +28,15 @@ services:
     volumes:
       - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto_data:/mosquitto/data
+    networks:
+      - iotops
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    networks:
+      - iotops
 
   backend:
     build:
@@ -38,11 +46,22 @@ services:
       - .env
     ports:
       - "8000:8000"
+    volumes:
+      # Docker-outside-of-Docker: lets the backend manage sibling Telegraf
+      # containers on the host's Docker daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Generated Telegraf configs. Backend writes here at /app/runtime;
+      # sibling containers it creates are bind-mounted via HOST_RUNTIME_DIR
+      # since bind-mount sources are resolved by the host daemon, not by
+      # this container's own filesystem view.
+      - ${HOST_RUNTIME_DIR:-./runtime}:/app/runtime
     depends_on:
       - mongo
       - timescaledb
       - mosquitto
       - redis
+    networks:
+      - iotops
 
   frontend:
     build:
@@ -54,8 +73,14 @@ services:
       - "5173:5173"
     depends_on:
       - backend
+    networks:
+      - iotops
 
 volumes:
   mongo_data:
   timescale_data:
   mosquitto_data:
+
+networks:
+  iotops:
+    name: iotops

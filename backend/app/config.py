@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     mqtt_port: int = 1883
     redis_uri: str = "redis://redis:6379/0"
     frontend_origin: str = "http://localhost:5173"
+    runtime_dir: str = "runtime"
+    host_runtime_dir: str = ""
+    docker_network: str = "iotops"
+    telegraf_image: str = "telegraf:1.32-alpine"
 
 
 settings = Settings()
