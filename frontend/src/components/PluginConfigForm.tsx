@@ -18,7 +18,29 @@ export function PluginConfigForm({ schema, configuration, onChange }: PluginConf
     <div className="plugin-config-form">
       {Object.entries(properties).map(([key, propertySchema]) => {
         const value = configuration[key];
-        const label = required.has(key) ? `${key} *` : key;
+        const label = required.has(key) ? `${propertySchema.title ?? key} *` : (propertySchema.title ?? key);
+
+        if (propertySchema.enum) {
+          return (
+            <label key={key} className="plugin-config-form__field">
+              <span>{label}</span>
+              <select
+                value={String(value ?? "")}
+                onChange={(event) => {
+                  const raw = event.target.value;
+                  const numeric = Number(raw);
+                  setField(key, propertySchema.type === "integer" && !Number.isNaN(numeric) ? numeric : raw);
+                }}
+              >
+                {propertySchema.enum.map((option) => (
+                  <option key={String(option)} value={String(option)}>
+                    {String(option)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          );
+        }
 
         if (propertySchema.type === "array") {
           const arrayValue = Array.isArray(value) ? value.join(", ") : "";

@@ -62,11 +62,24 @@ async def test_create_persists_and_returns_collector(service: CollectorService) 
 
 async def test_create_rejects_invalid_plugin_configuration(service: CollectorService) -> None:
     invalid_input = _valid_input(
-        inputs=[InputPlugin(plugin_type="mqtt", name="hive-mqtt", configuration={})]
+        inputs=[
+            InputPlugin(plugin_type="mqtt", name="hive-mqtt", configuration={"servers": []})
+        ]
     )
 
     with pytest.raises(PluginConfigurationError):
         await service.create(invalid_input)
+
+
+async def test_create_fills_in_plugin_defaults(service: CollectorService) -> None:
+    created = await service.create(
+        _valid_input(
+            inputs=[InputPlugin(plugin_type="mqtt", name="hive-mqtt", configuration={})]
+        )
+    )
+
+    assert created.inputs[0].configuration["servers"] == ["tcp://mosquitto:1883"]
+    assert created.inputs[0].configuration["qos"] == 0
 
 
 async def test_list_returns_all_collectors(service: CollectorService) -> None:

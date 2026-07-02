@@ -1,9 +1,7 @@
-from uuid import uuid4
-
 import pytest
+from pydantic import BaseModel
 
-from app.plugin.models import Plugin
-from app.plugin.registry import PluginRegistry, build_default_registry
+from app.plugin.registry import PluginDefinition, PluginRegistry, build_default_registry
 from app.shared.enums import PluginCategory
 from app.shared.exceptions import EntityNotFoundError, PluginConfigurationError
 
@@ -41,38 +39,50 @@ def test_list_without_category_returns_everything() -> None:
     assert len(registry.list()) == 2
 
 
-def test_validate_configuration_accepts_matching_schema() -> None:
+def test_plugin_schema_exposes_field_defaults_for_form_prefill() -> None:
     registry = build_default_registry()
 
-    registry.validate_configuration(
-        "mqtt", {"servers": ["tcp://mosquitto:1883"], "topics": ["hive/+"]}
-    )
+    mqtt = registry.get("mqtt")
+
+    assert mqtt.configuration_schema["properties"]["servers"]["default"] == ["tcp://mosquitto:1883"]
+    assert mqtt.configuration_schema["properties"]["qos"]["default"] == 0
 
 
-def test_validate_configuration_rejects_missing_required_field() -> None:
+def test_validate_configuration_fills_in_defaults() -> None:
+    registry = build_default_registry()
+
+    validated = registry.validate_configuration("mqtt", {"topics": ["hive/+"]})
+
+    assert validated["servers"] == ["tcp://mosquitto:1883"]
+    assert validated["topics"] == ["hive/+"]
+    assert validated["qos"] == 0
+
+
+def test_validate_configuration_rejects_constraint_violation() -> None:
     registry = build_default_registry()
 
     with pytest.raises(PluginConfigurationError):
-        registry.validate_configuration("mqtt", {"servers": ["tcp://mosquitto:1883"]})
+        registry.validate_configuration("mqtt", {"servers": []})
 
 
 def test_register_overrides_existing_plugin_of_same_name() -> None:
+    class CustomConfig(BaseModel):
+        value: str = "default"
+
     registry = PluginRegistry()
-    first = Plugin(
-        id=uuid4(),
+    first = PluginDefinition(
         name="custom",
         category=PluginCategory.PROCESSOR,
         telegraf_name="custom",
+        config_model=CustomConfig,
         version="1.0.0",
-        configuration_schema={"type": "object"},
     )
-    second = Plugin(
-        id=uuid4(),
+    second = PluginDefinition(
         name="custom",
         category=PluginCategory.PROCESSOR,
         telegraf_name="custom",
+        config_model=CustomConfig,
         version="2.0.0",
-        configuration_schema={"type": "object"},
     )
 
     registry.register(first)

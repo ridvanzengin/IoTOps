@@ -67,4 +67,6 @@ class CollectorService:
 
     def _validate_plugin_configurations(self, collector: Collector) -> None:
         for instance in (*collector.inputs, *collector.processors, *collector.outputs):
-            self._registry.validate_configuration(instance.plugin_type, instance.configuration)
+            instance.configuration = self._registry.validate_configuration(
+                instance.plugin_type, instance.configuration
+            )

@@ -62,6 +62,25 @@ def test_generate_toml_skips_disabled_plugins() -> None:
     assert "inputs" not in document
 
 
+def test_generate_toml_fills_in_defaults_for_omitted_fields() -> None:
+    registry = build_default_registry()
+    collector = _collector(
+        inputs=[
+            InputPlugin(
+                plugin_type="mqtt",
+                name="hive-mqtt",
+                configuration={"topics": ["hive/+"]},
+            )
+        ]
+    )
+
+    toml_str = generate_toml(collector, registry)
+    document = tomllib.loads(toml_str)
+
+    assert document["inputs"]["mqtt_consumer"][0]["servers"] == ["tcp://mosquitto:1883"]
+    assert document["inputs"]["mqtt_consumer"][0]["qos"] == 0
+
+
 def test_generate_toml_rejects_invalid_configuration() -> None:
     registry = build_default_registry()
     collector = _collector(
@@ -69,7 +88,7 @@ def test_generate_toml_rejects_invalid_configuration() -> None:
             InputPlugin(
                 plugin_type="mqtt",
                 name="hive-mqtt",
-                configuration={"servers": ["tcp://mosquitto:1883"]},
+                configuration={"servers": []},
             )
         ]
     )

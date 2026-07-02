@@ -43,8 +43,8 @@ export function CollectorList() {
     <main className="collector-page">
       <div className="collector-page__header">
         <h1>Collectors</h1>
-        <Link className="button" to="/collectors/new">
-          New Collector
+        <Link className="button button--primary" to="/collectors/new">
+          + New Collector
         </Link>
       </div>
 
@@ -53,54 +53,61 @@ export function CollectorList() {
       {loading ? (
         <p>Loading...</p>
       ) : collectors.length === 0 ? (
-        <p>No collectors yet. Create one to start ingesting telemetry.</p>
+        <div className="collector-page__empty">
+          <p>No collectors yet. Create one to start ingesting telemetry.</p>
+        </div>
       ) : (
-        <table className="collector-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Status</th>
-              <th>Inputs</th>
-              <th>Outputs</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {collectors.map((collector) => (
-              <tr key={collector.id}>
-                <td>{collector.name}</td>
-                <td>
-                  <StatusBadge status={collector.status} />
-                </td>
-                <td>{collector.inputs.map((input) => input.plugin_type).join(", ")}</td>
-                <td>{collector.outputs.map((output) => output.plugin_type).join(", ")}</td>
-                <td className="collector-table__actions">
-                  {collector.status === "running" ? (
-                    <button
-                      disabled={pendingId === collector.id}
-                      onClick={() => withPending(collector.id, () => stopCollectorDeployment(collector.id))}
-                    >
-                      Stop
-                    </button>
-                  ) : (
-                    <button
-                      disabled={pendingId === collector.id}
-                      onClick={() => withPending(collector.id, () => deployCollector(collector.id))}
-                    >
-                      Deploy
-                    </button>
-                  )}
-                  <button
-                    disabled={pendingId === collector.id}
-                    onClick={() => withPending(collector.id, () => deleteCollector(collector.id))}
-                  >
-                    Delete
-                  </button>
-                </td>
+        <div className="collector-card">
+          <table className="collector-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Inputs</th>
+                <th>Outputs</th>
+                <th>Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {collectors.map((collector) => (
+                <tr key={collector.id}>
+                  <td>{collector.name}</td>
+                  <td>
+                    <StatusBadge status={collector.status} />
+                  </td>
+                  <td>{collector.inputs.map((input) => input.plugin_type).join(", ")}</td>
+                  <td>{collector.outputs.map((output) => output.plugin_type).join(", ")}</td>
+                  <td className="collector-table__actions">
+                    {collector.status === "running" ? (
+                      <button
+                        className="button"
+                        disabled={pendingId === collector.id}
+                        onClick={() => withPending(collector.id, () => stopCollectorDeployment(collector.id))}
+                      >
+                        Stop
+                      </button>
+                    ) : (
+                      <button
+                        className="button"
+                        disabled={pendingId === collector.id}
+                        onClick={() => withPending(collector.id, () => deployCollector(collector.id))}
+                      >
+                        Deploy
+                      </button>
+                    )}
+                    <button
+                      className="button button--danger"
+                      disabled={pendingId === collector.id}
+                      onClick={() => withPending(collector.id, () => deleteCollector(collector.id))}
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </main>
   );

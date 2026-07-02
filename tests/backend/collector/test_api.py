@@ -63,11 +63,26 @@ def test_create_collector_returns_201(client: TestClient) -> None:
 
 
 def test_create_collector_with_invalid_plugin_config_returns_422(client: TestClient) -> None:
-    payload = {**VALID_PAYLOAD, "inputs": [{"plugin_type": "mqtt", "name": "hive-mqtt"}]}
+    payload = {
+        **VALID_PAYLOAD,
+        "inputs": [{"plugin_type": "mqtt", "name": "hive-mqtt", "configuration": {"servers": []}}],
+    }
 
     response = client.post("/api/collector", json=payload)
 
     assert response.status_code == 422
+
+
+def test_create_collector_fills_in_plugin_defaults(client: TestClient) -> None:
+    payload = {
+        **VALID_PAYLOAD,
+        "inputs": [{"plugin_type": "mqtt", "name": "hive-mqtt", "configuration": {}}],
+    }
+
+    response = client.post("/api/collector", json=payload)
+
+    assert response.status_code == 201
+    assert response.json()["inputs"][0]["configuration"]["servers"] == ["tcp://mosquitto:1883"]
 
 
 def test_create_collector_without_inputs_returns_422(client: TestClient) -> None:

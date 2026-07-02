@@ -6,6 +6,9 @@ export interface JsonSchemaProperty {
   minimum?: number;
   maximum?: number;
   minItems?: number;
+  enum?: (string | number)[];
+  default?: unknown;
+  title?: string;
 }
 
 export interface JsonSchema {

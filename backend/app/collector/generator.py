@@ -28,8 +28,10 @@ def _merge_section(
     for instance in plugin_instances:
         if not instance.enabled:
             continue
-        registry.validate_configuration(instance.plugin_type, instance.configuration)
+        validated_configuration = registry.validate_configuration(
+            instance.plugin_type, instance.configuration
+        )
         plugin = registry.get(instance.plugin_type)
-        section.setdefault(plugin.telegraf_name, []).append(dict(instance.configuration))
+        section.setdefault(plugin.telegraf_name, []).append(validated_configuration)
     if section:
         document[section_name] = section
