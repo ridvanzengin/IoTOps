@@ -33,6 +33,7 @@ export interface DockerConfig {
 export interface Collector {
   schema_version: number;
   id: string;
+  project_id: string;
   name: string;
   description: string;
   enabled: boolean;
@@ -61,6 +62,7 @@ export interface ProcessorPluginPayload {
 export type OutputPluginPayload = ProcessorPluginPayload;
 
 export interface CollectorInputPayload {
+  project_id: string;
   name: string;
   description: string;
   enabled: boolean;

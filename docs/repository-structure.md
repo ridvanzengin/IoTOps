@@ -83,6 +83,8 @@ backend/
 
         plugin/
 
+        project/
+
         telemetry/
 
         shared/
@@ -90,9 +92,33 @@ backend/
 Each directory represents a domain. `docker.py` lives inside `collector/`
 (Docker lifecycle is a Collector concern), not at the app root.
 
-`automater/` and `dashboard/` are not implemented yet (Milestones 5 and 3).
-`telemetry/` was added ahead of a dedicated domain-model doc entry — see
-its own section below.
+`automater/` is not implemented yet (Milestone 5). `dashboard/`, `ai/`, and
+`project/` are implemented as of Milestone 3. `telemetry/` was added ahead
+of a dedicated domain-model doc entry — see its own section below.
+
+---
+
+# Project Module
+
+project/
+
+    api.py
+
+    models.py
+
+    service.py
+
+    repository.py
+
+Responsibilities
+
+- project CRUD
+
+Intentionally the simplest module in the backend — no runtime lifecycle,
+no plugins, no validation beyond required fields. Follows the same
+`api.py -> service.py -> repository.py` layering and Mongo `_id`-keyed
+document convention as every other domain module (see
+[domain-models.md](domain-models.md#project)).
 
 ---
 

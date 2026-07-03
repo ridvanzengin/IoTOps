@@ -22,6 +22,8 @@ The frontend UI is generated from models.
 
 The MVP contains the following root entities.
 
+Project
+
 Collector
 
 Automater
@@ -38,6 +40,32 @@ Datasource (future)
 
 ---
 
+# Project
+
+Represents a grouping of a Collector with its Automaters and Dashboards.
+
+Fields
+
+id
+
+name
+
+description
+
+created_at
+
+updated_at
+
+schema_version
+
+Project is intentionally lightweight — an organizational grouping only, not
+an access-control or tenancy construct. It does not scope or filter which
+telemetry tables a Dashboard's panels can query; the schema browser and
+query builder always see every TimescaleDB table globally, regardless of
+project. There is no collector-to-table-to-project lineage tracking.
+
+---
+
 # Collector
 
 Represents a telemetry collection service.
@@ -45,6 +73,8 @@ Represents a telemetry collection service.
 Fields
 
 id
+
+project_id
 
 name
 
@@ -333,6 +363,8 @@ Fields
 
 id
 
+project_id
+
 name
 
 description
@@ -346,6 +378,12 @@ layout
 created_at
 
 updated_at
+
+`layout` and `Panel.position` are not competing layout concepts:
+`Panel.position` (x/y/width/height) is the authoritative per-panel grid
+rect, what the frontend's grid system needs per panel. `layout` is a thin,
+loosely-typed container for grid-wide settings that aren't per-panel (e.g.
+column count, row height) — not a duplicate of per-panel positions.
 
 ---
 
@@ -618,6 +656,8 @@ still a Pydantic model; the row *contents* are the exception to
 
 # Persistent Objects
 
+Project
+
 Collector
 
 Automater
@@ -635,6 +675,18 @@ Variables
 ---
 
 # Relationships
+
+Collector
+
+references
+
+Project
+
+Dashboard
+
+references
+
+Project
 
 Collector
 
@@ -677,6 +729,11 @@ Conditions
 ---
 
 # Ownership
+
+Projects do not own Collectors or Dashboards — they only reference a
+Project by `project_id`. Deleting a Project does not cascade: Collectors
+and Dashboards that referenced it simply keep a `project_id` that no
+longer resolves to anything.
 
 Collectors own Inputs.
 

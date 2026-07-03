@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { createCollector } from "../api/collector";
 import { listPlugins } from "../api/plugin";
+import { listProjects } from "../api/project";
 import { PluginConfigForm } from "../components/PluginConfigForm";
 import { defaultsFromSchema } from "../utils/jsonSchema";
 import type {
@@ -13,6 +14,7 @@ import type {
   ProcessorPluginPayload,
 } from "../types/collector";
 import type { Plugin, PluginCategory } from "../types/plugin";
+import type { Project } from "../types/project";
 import "./Collector.css";
 
 const STEP_LABELS = ["Basic Info", "Input", "Output", "Review"];
@@ -133,8 +135,10 @@ export function CollectorEditor() {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
   const [plugins, setPlugins] = useState<Plugin[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [projectId, setProjectId] = useState("");
   const [inputs, setInputs] = useState<InputPluginPayload[]>([]);
   const [processors] = useState<ProcessorPluginPayload[]>([]);
   const [outputs, setOutputs] = useState<OutputPluginPayload[]>([]);
@@ -145,10 +149,13 @@ export function CollectorEditor() {
     listPlugins()
       .then(setPlugins)
       .catch(() => setError("Failed to load available plugins."));
+    listProjects()
+      .then(setProjects)
+      .catch(() => setError("Failed to load available projects."));
   }, []);
 
   function canAdvance(): boolean {
-    if (step === 1) return name.trim().length > 0;
+    if (step === 1) return name.trim().length > 0 && projectId.length > 0;
     if (step === 2) return inputs.length > 0;
     if (step === 3) return outputs.length > 0;
     return true;
@@ -200,7 +207,7 @@ export function CollectorEditor() {
   }
 
   function stepErrorMessage(currentStep: number): string {
-    if (currentStep === 1) return "Give the collector a name to continue.";
+    if (currentStep === 1) return "Give the collector a name and select a project to continue.";
     if (currentStep === 2) return "Add at least one input.";
     return "Add at least one output.";
   }
@@ -210,6 +217,7 @@ export function CollectorEditor() {
     setError(null);
 
     const payload: CollectorInputPayload = {
+      project_id: projectId,
       name,
       description,
       enabled: true,
@@ -253,6 +261,22 @@ export function CollectorEditor() {
               <span>Description</span>
               <input value={description} onChange={(event) => setDescription(event.target.value)} />
             </label>
+            <label className="field">
+              <span>Project</span>
+              <select value={projectId} onChange={(event) => setProjectId(event.target.value)} required>
+                <option value="">Select a project</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {projects.length === 0 && (
+              <p className="collector-page__error" style={{ marginTop: 12 }}>
+                No projects exist yet. Create one first.
+              </p>
+            )}
           </div>
         )}
 
@@ -312,6 +336,10 @@ export function CollectorEditor() {
                 <div className="wizard-review__label">Name</div>
                 <div>{name}</div>
                 {description && <div style={{ marginTop: 4 }}>{description}</div>}
+              </div>
+              <div className="wizard-review__section">
+                <div className="wizard-review__label">Project</div>
+                <div>{projects.find((project) => project.id === projectId)?.name ?? "—"}</div>
               </div>
               <div className="wizard-review__section">
                 <div className="wizard-review__label">Inputs</div>

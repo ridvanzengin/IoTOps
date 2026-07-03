@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 import pytest
 
 from app.collector.models import Collector, InputPlugin, OutputPlugin
@@ -13,7 +15,9 @@ def _output() -> OutputPlugin:
 
 
 def test_collector_defaults() -> None:
-    collector = Collector(name="Hive Collector", inputs=[_input()], outputs=[_output()])
+    collector = Collector(
+        project_id=uuid4(), name="Hive Collector", inputs=[_input()], outputs=[_output()]
+    )
 
     assert collector.status == CollectorStatus.CREATED
     assert collector.enabled is True
@@ -24,16 +28,18 @@ def test_collector_defaults() -> None:
 
 def test_collector_requires_at_least_one_input() -> None:
     with pytest.raises(ValueError, match="at least one input"):
-        Collector(name="No Input", inputs=[], outputs=[_output()])
+        Collector(project_id=uuid4(), name="No Input", inputs=[], outputs=[_output()])
 
 
 def test_collector_requires_at_least_one_output() -> None:
     with pytest.raises(ValueError, match="at least one output"):
-        Collector(name="No Output", inputs=[_input()], outputs=[])
+        Collector(project_id=uuid4(), name="No Output", inputs=[_input()], outputs=[])
 
 
 def test_collector_round_trips_through_json() -> None:
-    collector = Collector(name="Hive Collector", inputs=[_input()], outputs=[_output()])
+    collector = Collector(
+        project_id=uuid4(), name="Hive Collector", inputs=[_input()], outputs=[_output()]
+    )
 
     restored = Collector.model_validate_json(collector.model_dump_json())
 

@@ -2,15 +2,22 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { deleteCollector, deployCollector, listCollectors, stopCollectorDeployment } from "../api/collector";
+import { listProjects } from "../api/project";
 import { StatusBadge } from "../components/StatusBadge";
 import type { Collector } from "../types/collector";
+import type { Project } from "../types/project";
 import "./Collector.css";
 
 export function CollectorList() {
   const [collectors, setCollectors] = useState<Collector[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+
+  function projectName(projectId: string): string {
+    return projects.find((project) => project.id === projectId)?.name ?? "—";
+  }
 
   async function refresh() {
     try {
@@ -25,6 +32,9 @@ export function CollectorList() {
 
   useEffect(() => {
     refresh();
+    listProjects()
+      .then(setProjects)
+      .catch(() => undefined);
   }, []);
 
   async function withPending(id: string, action: () => Promise<unknown>) {
@@ -62,6 +72,7 @@ export function CollectorList() {
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Project</th>
                 <th>Status</th>
                 <th>Inputs</th>
                 <th>Outputs</th>
@@ -72,6 +83,7 @@ export function CollectorList() {
               {collectors.map((collector) => (
                 <tr key={collector.id}>
                   <td>{collector.name}</td>
+                  <td>{projectName(collector.project_id)}</td>
                   <td>
                     <StatusBadge status={collector.status} />
                   </td>

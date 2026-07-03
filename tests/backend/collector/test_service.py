@@ -31,6 +31,7 @@ def service(tmp_path: Path) -> CollectorService:
 
 def _valid_input(**overrides: object) -> CollectorInput:
     defaults: dict[str, object] = {
+        "project_id": uuid4(),
         "name": "Hive Collector",
         "inputs": [
             InputPlugin(

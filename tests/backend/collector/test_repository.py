@@ -16,6 +16,7 @@ def repository() -> CollectorRepository:
 
 def _collector(**overrides: object) -> Collector:
     defaults: dict[str, object] = {
+        "project_id": uuid4(),
         "name": "Hive Collector",
         "inputs": [InputPlugin(plugin_type="mqtt", name="hive-mqtt")],
         "outputs": [OutputPlugin(plugin_type="timescaledb")],

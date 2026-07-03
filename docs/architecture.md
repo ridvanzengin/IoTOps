@@ -125,9 +125,20 @@ available tables from `timescaledb_information.hypertables` rather than
 from any Mongo-stored model, since a table's existence is a side effect
 of Collector plugin configuration, not a first-class stored object.
 
-This sits ahead of any future Dashboard/Visualizer component in the data
-flow below — Dashboards will query telemetry through this API rather
-than talking to TimescaleDB directly.
+This sits ahead of the Dashboard/Visualizer component in the data
+flow below — Dashboards query telemetry through this API rather
+than talking to TimescaleDB directly, via two additional endpoints beyond
+the original recent-rows query:
+
+`GET /api/telemetry/schema` exposes table/column/type information (scoped
+to real hypertables only, not internal Postgres/Timescale catalog tables)
+for the Panel builder's read-only schema browser.
+
+`POST /api/telemetry/query` executes an arbitrary, guarded read-only SQL
+statement — this is what a Panel's stored `Query.sql` (see
+[domain-models.md](domain-models.md#query)) actually runs through. The
+service layer rejects anything that isn't a single SELECT statement before
+it reaches the database.
 
 ---
 
@@ -589,21 +600,33 @@ Only JSON datasets.
 
 The local LLM is an assistant.
 
-The backend exposes endpoints like
+The backend exposes
 
 POST
 
 /api/ai/sql
 
-POST
+`/api/ai/sql` is implemented — it calls a local Ollama model, grounding the
+prompt with the live telemetry schema, and enforces that the response is a
+single read-only SELECT statement before returning it to the caller.
 
-/api/ai/explain
+Not yet implemented (still future work, per the AI Assistant milestone)
 
-Future endpoints
+POST /api/ai/explain
 
 /api/ai/dashboard
 
+/api/ai/automation
+
 /api/ai/collector
+
+`/api/ai/dashboard` and `/api/ai/automation` ("suggest a dashboard" /
+"suggest an automation") ship together, after both the Dashboard and
+Automater modules exist — see
+[development-plan.md](development-plan.md#future--suggested-dashboards--automations).
+They will call whichever model the user selects in a model-selection
+setting (local Ollama by default, hosted models like Claude as an opt-in
+alternative) rather than being hardcoded to Ollama.
 
 AI never directly modifies stored objects.
 

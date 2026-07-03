@@ -1,0 +1,33 @@
+.panel-builder-page {
+  max-width: 1200px;
+}
+
+.panel-builder {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.panel-builder__column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.panel-builder__sql {
+  font-family: var(--mono);
+  font-size: 12px;
+  resize: vertical;
+}
+
+.panel-builder__results {
+  margin-top: 16px;
+  overflow-x: auto;
+}
+
+@media (max-width: 900px) {
+  .panel-builder {
+    grid-template-columns: 1fr;
+  }
+}

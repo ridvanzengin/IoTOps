@@ -155,20 +155,55 @@ Visualize telemetry.
 
 ### Tasks
 
-- Implement Dashboard models.
+- Implement a new Project root entity (grouping a Collector with its
+  Automaters and Dashboards) and retrofit Collector with a required
+  `project_id`.
+- Implement Dashboard models (including `project_id`).
 - Implement Panel models.
 - Implement chart models.
 - Create dashboard CRUD API.
 - Build dashboard editor UI.
 - Integrate Apache ECharts.
-- Add line chart.
-- Add bar chart.
-- Add gauge chart.
+- Add line, bar, scatter, pie, and gauge charts.
+- Extend the telemetry module with a schema-introspection endpoint and a
+  guarded arbitrary-SQL query endpoint, since Panels need more than
+  recent-rows-from-one-table.
+
+**Status: in progress.** A narrow slice of Milestone 6 (AI Assistant) was
+pulled forward alongside this milestone: `POST /api/ai/sql`, backed by a
+local Ollama model, is implemented now so the Panel builder can offer an
+AI-only natural-language query builder — by design, no manual/visual query
+builder was built at all; SQL is only ever produced by hand-editing the
+generated statement or asking the AI again. SQL explanation and the other
+AI endpoints remain deferred to the real Milestone 6.
+
+**Follow-up work within this milestone, not done in the initial pass:**
+
+- **Dual-axis / mixed-series-type panels** (e.g. temperature + humidity on
+  the same panel with two y-axes, or a scatter series of discrete events
+  overlaid on a temperature line chart). The current `Chart` discriminated
+  union (`dashboard/models.py`) supports exactly one chart type with one
+  series shape per panel — no multi-series-mixed-type or secondary-axis
+  support. This needs a real model change (a new `Chart` variant or a
+  restructured `series: list[SeriesConfig]` shape) before either manual or
+  AI-suggested panels can express it. Track alongside the "Suggested
+  Dashboards" work above, since a suggestion engine can't propose what the
+  model can't represent — but the model change itself is independent and
+  should land whenever Dashboard work resumes, not gated on the AI feature.
+- Full Variable UI (Grafana-style dropdown template variables with
+  predicate-based query substitution) — the `Variable` model already exists
+  in `dashboard/models.py`, but the canvas currently only shows a
+  placeholder "no variables" state, no create/edit UI or `$variable`
+  substitution into panel queries.
+- Dashboard-level time range picker actually filtering panel queries (the
+  canvas header currently has the slot but it's not wired to re-run queries
+  with a time bound).
 
 **Acceptance Criteria**
 
-- User can create a dashboard.
-- User can add panels.
+- User can create a Project.
+- User can create a dashboard scoped to a Project.
+- User can add panels, generating their SQL via the AI query builder.
 - Telemetry is rendered as charts.
 
 ---
@@ -267,6 +302,35 @@ Generate SQL from natural language.
 - User enters: "Show hive temperature for the last 24 hours."
 - SQL is generated.
 - Chart renders successfully.
+
+---
+
+# Future — Suggested Dashboards & Automations
+
+Ship **after both Milestone 3 (Dashboard) and Milestone 5 (Automater) are
+complete** — a "Suggest a dashboard" button pairs with a "Suggest an
+automation" button, and both need their respective target module to exist
+first.
+
+### Tasks
+
+- A model-selection dropdown in a new Settings/config nav area: lists the
+  local Ollama model (default) plus any configured hosted models (e.g.
+  Claude via the Anthropic API) as opt-in alternatives. Persists the user's
+  choice; every "Suggest..." action uses whichever model is selected there.
+- `POST /api/ai/dashboard`: given a project's telemetry schema, propose a
+  starter set of panels (chart type, query, layout) as a reviewable draft —
+  never auto-saved. See `docs/architecture.md`'s AI Integration section,
+  which already anticipates this endpoint.
+- `POST /api/ai/automation` (new, not yet documented anywhere): given a
+  project's telemetry schema, propose starter Automater rules/conditions as
+  a reviewable draft.
+- Both endpoints share a provider abstraction (local Ollama vs. a hosted
+  model like Claude) so the model-selection dropdown controls a real
+  pluggable backend, not just Ollama.
+- Self-correction loop: generated panel/rule queries and conditions should
+  be validated (e.g. run through `/api/telemetry/query`) before being shown
+  to the user, retrying once on failure rather than surfacing broken output.
 
 ---
 
