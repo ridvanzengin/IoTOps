@@ -6,8 +6,10 @@ from app.collector.docker import CollectorDockerManager
 from app.collector.repository import CollectorRepository
 from app.collector.service import CollectorService
 from app.config import settings
-from app.database import get_database
+from app.database import get_database, get_timescale_pool
 from app.plugin.registry import PluginRegistry, build_default_registry
+from app.telemetry.repository import TelemetryRepository
+from app.telemetry.service import TelemetryService
 
 _registry: PluginRegistry | None = None
 _docker_manager: CollectorDockerManager | None = None
@@ -39,3 +41,8 @@ def get_collector_service() -> CollectorService:
         registry=get_plugin_registry(),
         docker_manager=get_docker_manager(),
     )
+
+
+async def get_telemetry_service() -> TelemetryService:
+    pool = await get_timescale_pool()
+    return TelemetryService(repository=TelemetryRepository(pool))

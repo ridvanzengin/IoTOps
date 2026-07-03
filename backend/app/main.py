@@ -6,6 +6,7 @@ from app.collector.api import router as collector_router
 from app.config import settings
 from app.plugin.api import router as plugin_router
 from app.shared.exceptions import EntityNotFoundError, PluginConfigurationError
+from app.telemetry.api import router as telemetry_router
 
 app = FastAPI(title="IoTOps")
 
@@ -18,6 +19,7 @@ app.add_middleware(
 
 app.include_router(collector_router)
 app.include_router(plugin_router)
+app.include_router(telemetry_router)
 
 
 @app.exception_handler(EntityNotFoundError)
