@@ -77,6 +77,7 @@ Responsibilities
 - collector lifecycle
 - automater lifecycle
 - Docker orchestration
+- telemetry querying
 - AI endpoints
 
 FastAPI never collects telemetry itself.
@@ -112,6 +113,21 @@ Examples
 - vibration
 - pressure
 - bee hive weight
+
+---
+
+## Telemetry Service
+
+The `telemetry` FastAPI module reads TimescaleDB directly via an
+`asyncpg` connection pool — the only place in the backend that queries
+Timescale itself, as opposed to Telegraf writing to it. It discovers
+available tables from `timescaledb_information.hypertables` rather than
+from any Mongo-stored model, since a table's existence is a side effect
+of Collector plugin configuration, not a first-class stored object.
+
+This sits ahead of any future Dashboard/Visualizer component in the data
+flow below — Dashboards will query telemetry through this API rather
+than talking to TimescaleDB directly.
 
 ---
 
@@ -256,6 +272,10 @@ Collector
 ↓
 
 TimescaleDB
+
+↓
+
+Telemetry Query API
 
 ↓
 

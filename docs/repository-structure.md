@@ -73,8 +73,6 @@ backend/
 
         database.py
 
-        docker.py
-
         ai/
 
         collector/
@@ -85,9 +83,16 @@ backend/
 
         plugin/
 
+        telemetry/
+
         shared/
 
-Each directory represents a domain.
+Each directory represents a domain. `docker.py` lives inside `collector/`
+(Docker lifecycle is a Collector concern), not at the app root.
+
+`automater/` and `dashboard/` are not implemented yet (Milestones 5 and 3).
+`telemetry/` was added ahead of a dedicated domain-model doc entry — see
+its own section below.
 
 ---
 
@@ -175,7 +180,11 @@ plugin/
 
     registry.py
 
-    generator.py
+    common.py
+
+    inputs/
+
+    outputs/
 
 Responsibilities
 
@@ -185,7 +194,66 @@ Responsibilities
 
 - schema lookup
 
-- TOML generation
+TOML generation itself lives in `collector/generator.py` (it turns a
+Collector's resolved plugin configs into `telegraf.conf`); the plugin
+module's job stops at validating and exposing configuration.
+
+`common.py` holds `CommonOpts`, a mixin every plugin config model
+inherits, providing the options Telegraf accepts on every input/
+processor/output plugin (`name_override`, `namepass`/`namedrop`,
+`fieldpass`/`fielddrop`, `tagpass`/`tagdrop`, `taginclude`/`tagexclude`,
+`interval`, `measurement_prefix`). It also defines `advanced_field()`,
+used to mark rarely-touched fields with `json_schema_extra={"advanced":
+true}` so the frontend can collapse them behind a disclosure instead of
+showing everything inline.
+
+Per-plugin config models live under `inputs/` and `outputs/` (e.g.
+`inputs/mqtt.py` → `MqttConsumerConfig`, `outputs/timescaledb.py` →
+`TimescaleDBOutputConfig`), one file per plugin, each a typed Pydantic
+model — not a hand-written JSON Schema dict — that inherits `CommonOpts`.
+`PluginRegistry` pairs each config model with metadata (name, category,
+Telegraf plugin name) via a `PluginDefinition`, and derives the exposed
+JSON Schema straight from `config_model.model_json_schema()`, so schema,
+defaults, and validation all come from one source of truth. A `processors/`
+directory should follow the same convention once processor plugins exist.
+
+---
+
+# Telemetry Module
+
+telemetry/
+
+    api.py
+
+    models.py
+
+    service.py
+
+    repository.py
+
+Responsibilities
+
+- discover available telemetry tables (TimescaleDB hypertables)
+
+- query recent rows from a table, with `limit`/`since`
+
+Telemetry tables are not modeled in MongoDB — a table's existence and
+schema are a side effect of how a Collector's plugins are configured
+(the table name comes from `name_override` on an input, or from the
+mqtt_consumer's own measurement naming). So instead of a Mongo-backed
+CRUD module like the others, this module talks to TimescaleDB directly
+via an `asyncpg` connection pool (see `database.get_timescale_pool`),
+discovering tables from `timescaledb_information.hypertables` and
+validating any user-supplied table name against that list before it is
+ever interpolated into a query.
+
+`GET /api/telemetry/tables` and `GET /api/telemetry/{table}` are the
+current endpoints. The response envelope (`TelemetryQueryResult`: table,
+columns, rows) is a Pydantic model, but individual row contents are
+`dict[str, Any]` since the schema is dynamic by design — this is the one
+place in the codebase where "every object is a model" applies to the
+envelope rather than every field, because the field set genuinely isn't
+known until the plugin configuration that created the table is read.
 
 ---
 
@@ -366,6 +434,35 @@ rule_processor/
 celery_output/
 
 Each plugin should have its own README.
+
+---
+
+# Examples Directory
+
+examples/
+
+    mqtt-publisher/
+
+        publisher.py
+
+        Dockerfile
+
+        requirements.txt
+
+        README.md
+
+Manual verification tools and demos — not part of the application, and
+not started by a plain `docker compose up`. `mqtt-publisher` publishes
+synthetic telemetry to two topics with different payload shapes, used to
+exercise the Collector -> MQTT -> TimescaleDB pipeline end to end. It's
+wired into `docker-compose.yml` behind `profiles: [tools]`:
+
+    docker compose --profile tools up -d mqtt-publisher
+
+This `profiles` pattern is the general convention for anything that
+should be buildable/runnable via compose but shouldn't come up by
+default — reach for it before adding a new always-on service for
+something that's really a manual/dev-only tool.
 
 ---
 

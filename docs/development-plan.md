@@ -49,6 +49,8 @@ Create the project skeleton.
 - Configure environment variables.
 - Add health endpoints.
 
+**Status: done.**
+
 **Acceptance Criteria**
 
 - `docker compose up` starts all services.
@@ -75,6 +77,21 @@ Create and deploy collectors.
 - Implement Collector CRUD API.
 - Implement Collector UI.
 
+**Status: done.** As built:
+
+- Plugin registry pairs a `PluginDefinition` (metadata) with a typed
+  Pydantic config model per plugin, under `plugin/inputs/` and
+  `plugin/outputs/`; every config model inherits a shared `CommonOpts`
+  mixin. See [domain-models.md](domain-models.md#plugin-configuration-models)
+  and [repository-structure.md](repository-structure.md#plugin-module).
+- Collector UI is a 4-step wizard (Basic Info → Input → Output → Review)
+  with a schema-driven config form that preloads real defaults and
+  collapses advanced fields behind a disclosure — no per-plugin
+  hardcoded forms.
+- Docker lifecycle uses docker-outside-of-docker (backend gets the host
+  `docker.sock` plus a bind-mounted `runtime/` dir) to manage sibling
+  Telegraf containers; see `docker-compose.yml`.
+
 **Acceptance Criteria**
 
 - User can create a Collector.
@@ -96,6 +113,32 @@ Receive MQTT data and store it.
 - Add MQTT test publisher.
 - Verify ingestion.
 - Create telemetry query API.
+
+**Status: done.** As built:
+
+- No separate schema-migration step: the TimescaleDB output plugin's
+  `create_templates` default was changed to both `CREATE TABLE` and
+  `SELECT create_hypertable(...)`, so every table a Collector creates is
+  a proper hypertable automatically, with no manual DB setup.
+- Correct Telegraf output config had to be verified against a real
+  `telegraf:1.32-alpine` container, not just reasoned about — several
+  assumptions inherited from a reference config turned out to be wrong
+  for this Telegraf version (`inherit_tags`/`plugin_tags` aren't real
+  options; `outputs.postgresql` has no `table` setting, since table name
+  comes from the metric's measurement name / a `name_override` on the
+  input; an empty `create_templates` list disables auto-creation rather
+  than falling back to Telegraf's built-in template). Telegraf's JSON
+  parser also silently drops string-valued fields unless they're listed
+  in `json_string_fields` — a real data-loss footgun now modeled
+  explicitly rather than discovered by a user.
+- MQTT test publisher lives at `examples/mqtt-publisher/`, off by
+  default (`docker compose --profile tools up mqtt-publisher`) — see
+  [repository-structure.md](repository-structure.md#examples-directory).
+- Telemetry query API is a new `telemetry/` backend module (not a
+  Mongo-backed domain module like the others — see
+  [repository-structure.md](repository-structure.md#telemetry-module)):
+  `GET /api/telemetry/tables` and `GET /api/telemetry/{table}`, backed by
+  `asyncpg` directly against TimescaleDB.
 
 **Acceptance Criteria**
 
@@ -253,6 +296,14 @@ bespoke code, per the Extensibility principle in the vision doc.
 # Internal Pipeline Abstraction
 
 Although the UI exposes **Collector** and **Automater**, the backend should internally use a shared **Pipeline** model.
+
+**Not yet factored out.** `collector/models.py` currently has
+`CollectorPluginsBase` (inputs/processors/outputs + the "at least one
+input and one output" validation) playing this role directly on
+`Collector`, rather than a separate reusable `Pipeline` class. This was
+fine with only Collector implemented; when Automater (Milestone 5) is
+built, extract a real `Pipeline` base at that point rather than
+duplicating the inputs/processors/outputs plumbing.
 
 ## Internal Structure
 

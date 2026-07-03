@@ -123,22 +123,30 @@ rather than modifying existing code.
 
 # MVP Scope
 
-The first version focuses on providing a complete end-to-end telemetry pipeline.
+This section predates [development-plan.md](development-plan.md)'s
+phased v1/v1.1/v1.2 roadmap (that doc is the more current, authoritative
+breakdown — check it for what's actually next). Restated in its terms:
 
-Included:
+**v1** (ship target — Collector + Telemetry + Dashboard, no automation, no AI):
 
 - MQTT data collection
 - Collector management
 - Docker-based deployment
 - TimescaleDB storage
-- Rule-based event detection
-- Celery event publishing
 - Dashboard management
 - Interactive charts
+
+**v1.1 fast-follow** (Automation Engine, not a v1 blocker):
+
+- Rule-based event detection
+- Celery event publishing
+
+**v1.2 fast-follow** (AI Assistant, not a v1 blocker):
+
 - SQL query editor
 - AI-assisted SQL generation
 
-Not included:
+Not included (no phase yet):
 
 - Kubernetes
 - Multi-user support

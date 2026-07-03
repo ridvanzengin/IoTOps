@@ -178,6 +178,39 @@ File (future)
 
 ---
 
+# Plugin Configuration Models
+
+`configuration` on an Input/Processor/Output Plugin is not an arbitrary
+dict. It is validated against a typed Pydantic model chosen by
+`plugin_type` (e.g. `MqttConsumerConfig` for `"mqtt"`,
+`TimescaleDBOutputConfig` for `"timescaledb"`) — one file per plugin, not
+a hand-written JSON Schema. See
+[repository-structure.md](repository-structure.md) for where these live.
+
+Every such model inherits `CommonOpts`, the options Telegraf accepts on
+any input/processor/output plugin: `name_override`/`name_prefix`/
+`name_suffix`/`alias`, `namepass`/`namedrop`, `fieldpass`/`fielddrop`,
+`tagpass`/`tagdrop`, `taginclude`/`tagexclude`, `interval`,
+`measurement_prefix`.
+
+Fields are split into primary and advanced. Advanced fields (most of
+`CommonOpts`, plus rarely-touched plugin-specific fields like TLS/auth
+settings) are marked in the model via `json_schema_extra={"advanced":
+true}`; the frontend's schema-driven form renders primary fields inline
+and collapses advanced ones behind a disclosure. This grouping is
+metadata on the model, not something the frontend hardcodes per plugin —
+adding a new plugin only means writing its config model, the form
+appears automatically.
+
+Every field that has a real, meaningful default (as opposed to `None`)
+declares it with `Field(default=...)` rather than `default_factory`,
+because only static defaults are surfaced in `model_json_schema()` — this
+is how the UI's "preloaded with sensible defaults" behavior works, and
+why `default_factory` should be avoided for anything the form should
+prefill.
+
+---
+
 # Automater
 
 Represents an event detection service.
@@ -466,7 +499,8 @@ Users should rarely edit it.
 
 # Plugin
 
-Represents available plugin types.
+Represents available plugin types, as exposed over the API
+(`GET /api/plugin`, `GET /api/plugin/{plugin_type}`).
 
 Fields
 
@@ -476,13 +510,23 @@ name
 
 category
 
+telegraf_name
+
 version
 
 description
 
-schema
+configuration_schema
 
 supported_platforms
+
+`configuration_schema` is derived, not hand-written — it's
+`config_model.model_json_schema()` for the plugin's actual Pydantic
+config model (see Plugin Configuration Models above). `telegraf_name` is
+the real Telegraf plugin name (e.g. `mqtt_consumer`, `postgresql`), which
+may differ from IoTOps' own `name` (`mqtt`, `timescaledb`) — the
+generator uses `telegraf_name` to build the `[[inputs.X]]` / `[[outputs.X]]`
+TOML table names.
 
 ---
 
@@ -542,7 +586,33 @@ Health Status
 
 Runtime Logs
 
+Telemetry Query Result
+
 These belong to runtime services.
+
+---
+
+# Telemetry Query Result
+
+Represents the response from querying a telemetry table
+(`GET /api/telemetry/{table}`). Not a persistent object, and not backed
+by Mongo — telemetry tables live only in TimescaleDB and are discovered
+dynamically (see [repository-structure.md](repository-structure.md)'s
+Telemetry Module section).
+
+Fields
+
+table
+
+columns
+
+rows
+
+`rows` is `list[dict[str, Any]]` — the one place the field set is
+genuinely dynamic, since it mirrors whatever columns a Collector's
+plugin configuration happened to create. The envelope (this model) is
+still a Pydantic model; the row *contents* are the exception to
+"everything is a model," not the response as a whole.
 
 ---
 
