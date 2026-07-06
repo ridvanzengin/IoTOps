@@ -29,8 +29,19 @@ class TimescaleDBOutputConfig(CommonOpts):
         ],
         json_schema_extra={"advanced": True},
     )
+    # Telegraf's postgresql output template context exposes the missing
+    # columns as `.columns` (a list), not a singular `.column` -- rendering
+    # it bare would print Go's default slice format, not SQL, so multiple
+    # missing columns need the `join` filter to repeat the
+    # "ADD COLUMN IF NOT EXISTS" keyword between them. Verified against the
+    # actual telegraf:1.32-alpine plugin docs after this silently dropped
+    # every schema-evolution ALTER (new columns from later-arriving fields
+    # were "omitted", never added) with the previous `{{.column}}` template.
     add_column_templates: list[str] = Field(
-        default=["ALTER TABLE {{.table}} ADD COLUMN IF NOT EXISTS {{.column}}"],
+        default=[
+            "ALTER TABLE {{.table}} ADD COLUMN IF NOT EXISTS"
+            ' {{.columns|join ", ADD COLUMN IF NOT EXISTS "}}'
+        ],
         json_schema_extra={"advanced": True},
     )
     tag_table_create_templates: list[str] = Field(
@@ -38,7 +49,10 @@ class TimescaleDBOutputConfig(CommonOpts):
         json_schema_extra={"advanced": True},
     )
     tag_table_add_column_templates: list[str] = Field(
-        default=["ALTER TABLE {{.table}} ADD COLUMN IF NOT EXISTS {{.column}}"],
+        default=[
+            "ALTER TABLE {{.table}} ADD COLUMN IF NOT EXISTS"
+            ' {{.columns|join ", ADD COLUMN IF NOT EXISTS "}}'
+        ],
         json_schema_extra={"advanced": True},
     )
 
