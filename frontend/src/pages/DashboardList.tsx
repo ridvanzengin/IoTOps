@@ -36,7 +36,10 @@ export function DashboardList() {
       .catch(() => undefined);
   }, []);
 
-  async function handleDelete(id: string) {
+  async function handleDelete(id: string, name: string) {
+    if (!window.confirm(`Delete dashboard "${name}"? This cannot be undone.`)) {
+      return;
+    }
     setPendingId(id);
     try {
       await deleteDashboard(id);
@@ -79,17 +82,18 @@ export function DashboardList() {
             <tbody>
               {dashboards.map((dashboard) => (
                 <tr key={dashboard.id}>
-                  <td>{dashboard.name}</td>
+                  <td>
+                    <Link className="collector-table__link" to={`/dashboards/${dashboard.id}`}>
+                      {dashboard.name}
+                    </Link>
+                  </td>
                   <td>{projectName(dashboard.project_id)}</td>
                   <td>{dashboard.panels.length}</td>
                   <td className="collector-table__actions">
-                    <Link className="button" to={`/dashboards/${dashboard.id}`}>
-                      Open
-                    </Link>
                     <button
                       className="button button--danger"
                       disabled={pendingId === dashboard.id}
-                      onClick={() => handleDelete(dashboard.id)}
+                      onClick={() => handleDelete(dashboard.id, dashboard.name)}
                     >
                       Delete
                     </button>

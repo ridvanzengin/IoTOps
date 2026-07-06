@@ -459,9 +459,9 @@ title
 
 x_axis
 
-y_axis
+y_axis (first series, left axis)
 
-series
+series (list of SeriesConfig — additional series)
 
 legend
 
@@ -470,6 +470,28 @@ tooltip
 zoom
 
 theme
+
+Bar Chart and Scatter Chart share this same shape (minus `zoom` for Bar).
+
+---
+
+# Series Config
+
+Describes one additional series on a Line/Bar/Scatter chart, beyond the
+chart's own `y_axis`.
+
+Fields
+
+field
+
+label
+
+axis (`left` or `right`)
+
+type (`line` | `bar` | `scatter`, inherits the parent chart's type when unset)
+
+Enables mixed chart types and dual y-axes on one panel (e.g. temperature as
+a line on the left axis, humidity as bars on the right axis).
 
 ---
 
@@ -491,9 +513,17 @@ The frontend never edits database objects directly.
 
 Only Query objects.
 
+SQL may reference `$__timeFrom`/`$__timeTo` (the dashboard's selected time
+range) and `$variable_name` (dashboard Variables) — substituted server-side
+before execution.
+
 ---
 
 # Variable
+
+Fully schema-driven — no free-typed text/number/options, no hand-written or
+AI-written SQL. A Variable is defined by picking a value column (and,
+optionally, a predicate column in the same table) from the schema browser.
 
 Fields
 
@@ -501,13 +531,24 @@ name
 
 label
 
-default
+table
 
-type
+value_column
 
-options
+predicate_column (optional — must belong to `table`)
 
-Variables may be referenced inside SQL.
+predicate_variable (optional — name of an earlier Variable in the Dashboard's
+`variables` list; required together with `predicate_column`)
+
+The options list a Variable offers is always derived, never stored: the
+backend builds `SELECT DISTINCT value_column FROM table [WHERE
+predicate_column = $predicate_variable]` (see `build_variable_source_sql` in
+`dashboard/models.py`) and runs it through the same substitution pipeline as
+panel queries. Variables may be referenced inside panel SQL as `$name`. A
+Variable's `predicate_variable` may only reference a Variable defined earlier
+in the list (enforced by `validate_variables`), producing Grafana-style
+chained/cascading variables (e.g. Project narrows Device) without a
+dependency graph — list order is the dependency order.
 
 ---
 

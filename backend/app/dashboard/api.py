@@ -2,9 +2,19 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
-from app.dashboard.models import Dashboard, DashboardInput, DashboardLayoutInput, PanelInput
+from app.dashboard.models import (
+    Dashboard,
+    DashboardInput,
+    DashboardLayoutInput,
+    DashboardQueryPreview,
+    PanelInput,
+    PanelQueryOverrides,
+    VariableOptionsRequest,
+    VariableOptionsResult,
+)
 from app.dashboard.service import DashboardService
 from app.dependencies import get_dashboard_service
+from app.telemetry.models import TelemetrySqlQueryResult
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -84,3 +94,31 @@ async def save_layout(
     service: DashboardService = Depends(get_dashboard_service),
 ) -> Dashboard:
     return await service.save_layout(dashboard_id, payload)
+
+
+@router.post("/{dashboard_id}/panel/{panel_id}/query", response_model=TelemetrySqlQueryResult)
+async def run_panel_query(
+    dashboard_id: UUID,
+    panel_id: UUID,
+    payload: PanelQueryOverrides,
+    service: DashboardService = Depends(get_dashboard_service),
+) -> TelemetrySqlQueryResult:
+    return await service.run_panel_query_by_id(dashboard_id, panel_id, payload)
+
+
+@router.post("/{dashboard_id}/preview-query", response_model=TelemetrySqlQueryResult)
+async def preview_dashboard_query(
+    dashboard_id: UUID,
+    payload: DashboardQueryPreview,
+    service: DashboardService = Depends(get_dashboard_service),
+) -> TelemetrySqlQueryResult:
+    return await service.preview_query(dashboard_id, payload)
+
+
+@router.post("/{dashboard_id}/variables/options", response_model=VariableOptionsResult)
+async def resolve_variable_options(
+    dashboard_id: UUID,
+    payload: VariableOptionsRequest,
+    service: DashboardService = Depends(get_dashboard_service),
+) -> VariableOptionsResult:
+    return await service.resolve_variable_options(dashboard_id, payload)

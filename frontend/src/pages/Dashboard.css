@@ -1,5 +1,4 @@
 .dashboard-page.collector-page {
-  max-width: none;
   padding-top: 18px;
   padding-bottom: 18px;
 }
@@ -10,6 +9,12 @@
   justify-content: space-between;
   margin-bottom: 12px;
   gap: 16px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--bg-subtle);
+  padding: 12px 0;
+  margin-top: -12px;
 }
 
 .dashboard-toolbar__left {
@@ -27,9 +32,17 @@
   text-overflow: ellipsis;
 }
 
-.dashboard-toolbar__variables {
+.dashboard-toolbar__variable {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dashboard-toolbar__variable-label {
   color: var(--text);
   font-size: 13px;
+  white-space: nowrap;
 }
 
 .dashboard-toolbar__actions {
@@ -65,6 +78,19 @@
 .dashboard-toolbar__control--icon {
   width: 30px;
   padding: 0;
+}
+
+/* Matches the chart palette's second-series color (see CHART_COLORS in
+   charts/options.ts) — used for the "save" action. */
+.dashboard-toolbar__control--success {
+  background: #4dd4ac;
+  border-color: #4dd4ac;
+  color: white;
+}
+
+.dashboard-toolbar__control--success:hover:not(:disabled) {
+  background: #3fc29b;
+  border-color: #3fc29b;
 }
 
 .dashboard-toolbar__control--primary {

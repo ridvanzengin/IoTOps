@@ -12,5 +12,5 @@ async def generate_sql(
     payload: SqlGenerationRequest,
     service: AiService = Depends(get_ai_service),
 ) -> SqlGenerationResponse:
-    sql = await service.generate_sql(payload.prompt)
+    sql = await service.generate_sql(payload.prompt, payload.variables)
     return SqlGenerationResponse(sql=sql)

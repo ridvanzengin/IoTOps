@@ -169,35 +169,46 @@ Visualize telemetry.
   guarded arbitrary-SQL query endpoint, since Panels need more than
   recent-rows-from-one-table.
 
-**Status: in progress.** A narrow slice of Milestone 6 (AI Assistant) was
-pulled forward alongside this milestone: `POST /api/ai/sql`, backed by a
-local Ollama model, is implemented now so the Panel builder can offer an
-AI-only natural-language query builder — by design, no manual/visual query
-builder was built at all; SQL is only ever produced by hand-editing the
-generated statement or asking the AI again. SQL explanation and the other
-AI endpoints remain deferred to the real Milestone 6.
+**Status: done.** A narrow slice of Milestone 6 (AI Assistant) was pulled
+forward alongside this milestone: `POST /api/ai/sql`, backed by a local
+Ollama model, is implemented now so the Panel builder can offer an AI-only
+natural-language query builder — by design, no manual/visual query builder
+was built at all; SQL is only ever produced by hand-editing the generated
+statement or asking the AI again. SQL explanation and the other AI
+endpoints remain deferred to the real Milestone 6.
 
-**Follow-up work within this milestone, not done in the initial pass:**
+All three initial follow-ups are now closed, sharing one Grafana-style
+textual-macro substitution mechanism (`app/shared/sql_macros.py` +
+`app/shared/time_range.py`, applied in `DashboardService`):
 
-- **Dual-axis / mixed-series-type panels** (e.g. temperature + humidity on
-  the same panel with two y-axes, or a scatter series of discrete events
-  overlaid on a temperature line chart). The current `Chart` discriminated
-  union (`dashboard/models.py`) supports exactly one chart type with one
-  series shape per panel — no multi-series-mixed-type or secondary-axis
-  support. This needs a real model change (a new `Chart` variant or a
-  restructured `series: list[SeriesConfig]` shape) before either manual or
-  AI-suggested panels can express it. Track alongside the "Suggested
-  Dashboards" work above, since a suggestion engine can't propose what the
-  model can't represent — but the model change itself is independent and
-  should land whenever Dashboard work resumes, not gated on the AI feature.
-- Full Variable UI (Grafana-style dropdown template variables with
-  predicate-based query substitution) — the `Variable` model already exists
-  in `dashboard/models.py`, but the canvas currently only shows a
-  placeholder "no variables" state, no create/edit UI or `$variable`
-  substitution into panel queries.
-- Dashboard-level time range picker actually filtering panel queries (the
-  canvas header currently has the slot but it's not wired to re-run queries
-  with a time bound).
+- **Dashboard time range picker** now filters every panel query: SQL can
+  reference `$__timeFrom`/`$__timeTo`, resolved server-side per request via
+  `POST /api/dashboard/{id}/panel/{panel_id}/query` (saved panels) and
+  `POST /api/dashboard/{id}/preview-query` (ad hoc SQL in the Panel Builder).
+- **Variable Builder** (`frontend/src/pages/VariableBuilder.tsx`) replaces
+  the old placeholder — a dedicated page mirroring the Panel Builder's
+  layout (form + `SchemaBrowser`). Fully schema-driven, no free-typed
+  text/number/options and no hand-written or AI-written SQL: a variable is
+  created by clicking a value column in the schema browser, and optionally a
+  second, same-table predicate column filtered by an explicitly-picked
+  earlier variable. The backend derives
+  `SELECT DISTINCT value_column FROM table [WHERE predicate_column =
+  $predicate_variable]` (`build_variable_source_sql`, `dashboard/models.py`)
+  and resolves it via `POST /api/dashboard/{id}/variables/options` — this
+  gives Grafana-style chained/cascading variables (e.g. Project → Device)
+  without a dependency graph, since a variable's `predicate_variable` may
+  only reference a variable defined earlier in the list (enforced by
+  `validate_variables`). Panel Builder's SQL preview and the AI SQL builder
+  (`build_sql_prompt`) both now resolve/reference live dashboard variables
+  correctly — previously the preview silently dropped `$variable` values and
+  the AI prompt had no awareness variables existed.
+- **Dual-axis / multi-series panels**: `LineChart`/`BarChart`/`ScatterChart`
+  keep `y_axis` as the first series and add `series: list[SeriesConfig]`
+  for additional series, each with its own `field`, `axis` (`left`/`right`),
+  and optional `type` override (inherits the parent chart's type when
+  omitted) — additive, no data migration needed. `PanelEditor.tsx` has an
+  add/remove series-row UI; `charts/options.ts` emits a second `yAxis` when
+  any series uses the right axis.
 
 **Acceptance Criteria**
 

@@ -6,11 +6,15 @@ from mongomock_motor import AsyncMongoMockClient
 from app.dashboard.models import (
     DashboardInput,
     DashboardLayoutInput,
+    DashboardQueryPreview,
     LineChart,
     PanelInput,
     PanelLayoutUpdate,
     PanelPosition,
+    PanelQueryOverrides,
     Query,
+    Variable,
+    VariableOptionsRequest,
 )
 from app.dashboard.repository import DashboardRepository
 from app.dashboard.service import DashboardService
@@ -181,3 +185,127 @@ async def test_run_panel_query_substitutes_variables_and_executes() -> None:
     result = await service.run_panel_query(with_panel.panels[0])
 
     assert result.rows == [{"temperature": 21.5}]
+
+
+async def test_run_panel_query_substitutes_dashboard_variables() -> None:
+    service = _service(
+        query_results={"SELECT * FROM device_metrics WHERE hive = 'A'": [{"temperature": 21.5}]}
+    )
+    dashboard = await service.create(_valid_input())
+    with_panel = await service.add_panel(
+        dashboard.id,
+        _panel_input(query=Query(sql="SELECT * FROM device_metrics WHERE hive = $hive")),
+    )
+
+    result = await service.run_panel_query(
+        with_panel.panels[0],
+        dashboard_variables=[Variable(name="hive", label="Hive", table="device_metrics", value_column="hive")],
+        variable_values={"hive": "A"},
+    )
+
+    assert result.rows == [{"temperature": 21.5}]
+
+
+async def test_run_panel_query_by_id_resolves_panel_and_dashboard_variables() -> None:
+    service = _service(
+        query_results={"SELECT * FROM device_metrics WHERE hive = 'A'": [{"temperature": 21.5}]}
+    )
+    dashboard = await service.create(
+        _valid_input(
+            variables=[Variable(name="hive", label="Hive", table="device_metrics", value_column="hive")]
+        )
+    )
+    with_panel = await service.add_panel(
+        dashboard.id,
+        _panel_input(query=Query(sql="SELECT * FROM device_metrics WHERE hive = $hive")),
+    )
+    panel_id = with_panel.panels[0].id
+
+    result = await service.run_panel_query_by_id(
+        dashboard.id, panel_id, PanelQueryOverrides(variable_values={"hive": "A"})
+    )
+
+    assert result.rows == [{"temperature": 21.5}]
+
+
+async def test_run_panel_query_by_id_missing_panel_raises() -> None:
+    service = _service()
+    dashboard = await service.create(_valid_input())
+
+    with pytest.raises(EntityNotFoundError):
+        await service.run_panel_query_by_id(dashboard.id, uuid4(), PanelQueryOverrides())
+
+
+async def test_preview_query_runs_ad_hoc_sql_with_dashboard_variables() -> None:
+    service = _service(
+        query_results={"SELECT * FROM device_metrics WHERE hive = 'A'": [{"temperature": 21.5}]}
+    )
+    dashboard = await service.create(
+        _valid_input(
+            variables=[Variable(name="hive", label="Hive", table="device_metrics", value_column="hive")]
+        )
+    )
+
+    result = await service.preview_query(
+        dashboard.id,
+        DashboardQueryPreview(
+            sql="SELECT * FROM device_metrics WHERE hive = $hive",
+            variable_values={"hive": "A"},
+        ),
+    )
+
+    assert result.rows == [{"temperature": 21.5}]
+
+
+async def test_resolve_variable_options_returns_first_column_values() -> None:
+    service = _service(
+        query_results={
+            'SELECT DISTINCT "hive" FROM "device_metrics"': [{"hive": "A"}, {"hive": "B"}]
+        }
+    )
+    dashboard = await service.create(_valid_input())
+
+    result = await service.resolve_variable_options(
+        dashboard.id,
+        VariableOptionsRequest(table="device_metrics", value_column="hive"),
+    )
+
+    assert result.options == ["A", "B"]
+
+
+async def test_resolve_variable_options_substitutes_chained_variable() -> None:
+    service = _service(
+        query_results={
+            'SELECT DISTINCT "hive" FROM "device_metrics" WHERE "project" = \'X\'': [{"hive": "A"}]
+        }
+    )
+    dashboard = await service.create(
+        _valid_input(
+            variables=[Variable(name="project", label="Project", table="projects", value_column="project")]
+        )
+    )
+
+    result = await service.resolve_variable_options(
+        dashboard.id,
+        VariableOptionsRequest(
+            table="device_metrics",
+            value_column="hive",
+            predicate_column="project",
+            predicate_variable="project",
+            variable_values={"project": "X"},
+        ),
+    )
+
+    assert result.options == ["A"]
+
+
+async def test_resolve_variable_options_empty_result() -> None:
+    service = _service()
+    dashboard = await service.create(_valid_input())
+
+    result = await service.resolve_variable_options(
+        dashboard.id,
+        VariableOptionsRequest(table="device_metrics", value_column="hive"),
+    )
+
+    assert result.options == []

@@ -14,7 +14,11 @@ function badgeClassForType(dataType: string): string {
   return "schema-browser__type-badge--other";
 }
 
-export function SchemaBrowser() {
+interface SchemaBrowserProps {
+  onSelect?: (token: string) => void;
+}
+
+export function SchemaBrowser({ onSelect }: SchemaBrowserProps = {}) {
   const [schema, setSchema] = useState<TelemetryTableSchema[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,7 +45,19 @@ export function SchemaBrowser() {
             <tbody>
               {table.columns.map((column) => (
                 <tr key={column.name}>
-                  <td>{column.name}</td>
+                  <td>
+                    {onSelect ? (
+                      <button
+                        type="button"
+                        className="schema-browser__column-button"
+                        onClick={() => onSelect(`${table.table}.${column.name}`)}
+                      >
+                        {column.name}
+                      </button>
+                    ) : (
+                      column.name
+                    )}
+                  </td>
                   <td>
                     <span className={`schema-browser__type-badge ${badgeClassForType(column.data_type)}`}>
                       {column.data_type}

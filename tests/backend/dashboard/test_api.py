@@ -147,3 +147,67 @@ def test_delete_dashboard_removes_it(client: TestClient) -> None:
 
     assert response.status_code == 204
     assert client.get(f"/api/dashboard/{created['id']}").status_code == 404
+
+
+def test_run_panel_query_returns_rows(client: TestClient) -> None:
+    created = client.post("/api/dashboard", json=VALID_PAYLOAD).json()
+    with_panel = client.post(f"/api/dashboard/{created['id']}/panel", json=PANEL_PAYLOAD).json()
+    panel_id = with_panel["panels"][0]["id"]
+
+    response = client.post(
+        f"/api/dashboard/{created['id']}/panel/{panel_id}/query",
+        json={"time_range": "1h", "variable_values": {}},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"columns": [], "rows": []}
+
+
+def test_run_panel_query_missing_panel_returns_404(client: TestClient) -> None:
+    created = client.post("/api/dashboard", json=VALID_PAYLOAD).json()
+
+    response = client.post(
+        f"/api/dashboard/{created['id']}/panel/{uuid4()}/query",
+        json={"time_range": "1h", "variable_values": {}},
+    )
+
+    assert response.status_code == 404
+
+
+def test_preview_query_returns_rows(client: TestClient) -> None:
+    created = client.post("/api/dashboard", json=VALID_PAYLOAD).json()
+
+    response = client.post(
+        f"/api/dashboard/{created['id']}/preview-query",
+        json={"sql": "SELECT * FROM device_metrics", "limit": 100},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"columns": [], "rows": []}
+
+
+def test_resolve_variable_options_returns_empty_list_by_default(client: TestClient) -> None:
+    created = client.post("/api/dashboard", json=VALID_PAYLOAD).json()
+
+    response = client.post(
+        f"/api/dashboard/{created['id']}/variables/options",
+        json={"table": "device_metrics", "value_column": "hive"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"options": []}
+
+
+def test_create_dashboard_rejects_duplicate_variable_names(client: TestClient) -> None:
+    response = client.post(
+        "/api/dashboard",
+        json={
+            **VALID_PAYLOAD,
+            "variables": [
+                {"name": "hive", "label": "Hive A", "table": "hives", "value_column": "id"},
+                {"name": "hive", "label": "Hive B", "table": "hives", "value_column": "id"},
+            ],
+        },
+    )
+
+    assert response.status_code == 422

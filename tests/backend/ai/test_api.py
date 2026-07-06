@@ -61,3 +61,20 @@ def test_generate_sql_returns_502_on_ollama_failure() -> None:
     response = client.post("/api/ai/sql", json={"prompt": "anything"})
 
     assert response.status_code == 502
+
+
+def test_generate_sql_accepts_variable_hints() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"response": "SELECT * FROM device_metrics"})
+
+    client = _client_with_handler(handler)
+
+    response = client.post(
+        "/api/ai/sql",
+        json={
+            "prompt": "temperature for the selected hive",
+            "variables": [{"name": "hive_id", "label": "Hive"}],
+        },
+    )
+
+    assert response.status_code == 200

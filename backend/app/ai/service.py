@@ -2,6 +2,7 @@ import re
 
 import httpx
 
+from app.ai.models import AiVariableHint
 from app.ai.prompts import build_sql_prompt
 from app.shared.exceptions import AiGenerationError
 from app.shared.validators import validate_select_only_sql
@@ -27,9 +28,11 @@ class AiService:
         self._base_url = base_url
         self._model = model
 
-    async def generate_sql(self, nl_query: str) -> str:
+    async def generate_sql(
+        self, nl_query: str, variables: list[AiVariableHint] | None = None
+    ) -> str:
         schema = await self._telemetry_service.get_schema()
-        prompt = build_sql_prompt(nl_query, schema)
+        prompt = build_sql_prompt(nl_query, schema, variables)
 
         try:
             response = await self._http_client.post(

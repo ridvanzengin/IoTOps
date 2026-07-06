@@ -3,8 +3,13 @@ import type {
   Dashboard,
   DashboardInputPayload,
   DashboardLayoutInputPayload,
+  DashboardQueryPreview,
   PanelInputPayload,
+  PanelQueryOverrides,
+  VariableOptionsRequest,
+  VariableOptionsResult,
 } from "../types/dashboard";
+import type { TelemetrySqlQueryResult } from "../types/telemetry";
 
 export function listDashboards(): Promise<Dashboard[]> {
   return apiRequest<Dashboard[]>("/api/dashboard");
@@ -62,6 +67,37 @@ export function saveLayout(
 ): Promise<Dashboard> {
   return apiRequest<Dashboard>(`/api/dashboard/${dashboardId}/layout`, {
     method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function runPanelQuery(
+  dashboardId: string,
+  panelId: string,
+  overrides: PanelQueryOverrides,
+): Promise<TelemetrySqlQueryResult> {
+  return apiRequest<TelemetrySqlQueryResult>(`/api/dashboard/${dashboardId}/panel/${panelId}/query`, {
+    method: "POST",
+    body: JSON.stringify(overrides),
+  });
+}
+
+export function previewDashboardQuery(
+  dashboardId: string,
+  payload: DashboardQueryPreview,
+): Promise<TelemetrySqlQueryResult> {
+  return apiRequest<TelemetrySqlQueryResult>(`/api/dashboard/${dashboardId}/preview-query`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function resolveVariableOptions(
+  dashboardId: string,
+  payload: VariableOptionsRequest,
+): Promise<VariableOptionsResult> {
+  return apiRequest<VariableOptionsResult>(`/api/dashboard/${dashboardId}/variables/options`, {
+    method: "POST",
     body: JSON.stringify(payload),
   });
 }

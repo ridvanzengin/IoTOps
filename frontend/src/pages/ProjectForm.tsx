@@ -44,7 +44,7 @@ export function ProjectForm() {
   }
 
   return (
-    <main className="collector-page">
+    <main className="collector-page collector-page--form">
       <h1>{isEdit ? "Edit Project" : "New Project"}</h1>
       <p style={{ margin: "8px 0 24px", color: "var(--text)" }}>
         Projects group a Collector with its Automaters and Dashboards.

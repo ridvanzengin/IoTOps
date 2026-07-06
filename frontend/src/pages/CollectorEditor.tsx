@@ -238,7 +238,7 @@ export function CollectorEditor() {
   }
 
   return (
-    <main className="collector-page">
+    <main className="collector-page collector-page--form">
       <h1>New Collector</h1>
       <p style={{ margin: "8px 0 24px", color: "var(--text)" }}>
         Configure telemetry inputs and outputs, then deploy.

@@ -1,17 +1,32 @@
+from __future__ import annotations
+
 from uuid import UUID
 
 from app.dashboard.models import (
     Dashboard,
     DashboardInput,
     DashboardLayoutInput,
+    DashboardQueryPreview,
     Panel,
     PanelInput,
+    PanelQueryOverrides,
+    Variable,
+    VariableOptionsRequest,
+    VariableOptionsResult,
+    build_variable_source_sql,
     validate_panel_positions,
+    validate_variables,
 )
 from app.dashboard.repository import DashboardRepository
 from app.shared.exceptions import EntityNotFoundError
+from app.shared.sql_macros import substitute_macros
+from app.shared.time_range import resolve_time_range
 from app.telemetry.models import TelemetrySqlQuery, TelemetrySqlQueryResult
 from app.telemetry.service import TelemetryService
+
+
+def _format_variable_value(raw: str) -> str:
+    return "'" + raw.replace("'", "''") + "'"
 
 
 class DashboardService:
@@ -44,6 +59,7 @@ class DashboardService:
             }
         )
         validate_panel_positions(updated.panels)
+        validate_variables(updated.variables)
         return await self._repository.update(updated)
 
     async def delete(self, dashboard_id: UUID) -> None:
@@ -98,10 +114,98 @@ class DashboardService:
         )
         return await self._repository.update(updated)
 
-    async def run_panel_query(self, panel: Panel) -> TelemetrySqlQueryResult:
-        sql = panel.query.sql
-        for name, value in panel.query.variables.items():
-            sql = sql.replace(f"${name}", value)
+    async def _substitute_and_run(
+        self,
+        sql: str,
+        limit: int,
+        *,
+        static_variables: dict[str, str],
+        dashboard_variables: list[Variable],
+        variable_values: dict[str, str],
+        time_range: str,
+    ) -> TelemetrySqlQueryResult:
+        substitutions = dict(static_variables)
+        for variable in dashboard_variables:
+            raw = variable_values.get(variable.name)
+            if raw is None:
+                continue
+            substitutions[variable.name] = _format_variable_value(raw)
+
+        time_from, time_to = resolve_time_range(time_range)
+        substitutions["__timeFrom"] = f"'{time_from.isoformat()}'"
+        substitutions["__timeTo"] = f"'{time_to.isoformat()}'"
+
+        resolved_sql = substitute_macros(sql, substitutions)
         return await self._telemetry_service.run_query(
-            TelemetrySqlQuery(sql=sql, limit=panel.query.limit)
+            TelemetrySqlQuery(sql=resolved_sql, limit=limit)
+        )
+
+    async def run_panel_query(
+        self,
+        panel: Panel,
+        *,
+        dashboard_variables: list[Variable] | None = None,
+        time_range: str | None = None,
+        variable_values: dict[str, str] | None = None,
+    ) -> TelemetrySqlQueryResult:
+        return await self._substitute_and_run(
+            panel.query.sql,
+            panel.query.limit,
+            static_variables=panel.query.variables,
+            dashboard_variables=dashboard_variables or [],
+            variable_values=variable_values or {},
+            time_range=time_range or panel.time_range,
+        )
+
+    async def run_panel_query_by_id(
+        self, dashboard_id: UUID, panel_id: UUID, overrides: PanelQueryOverrides
+    ) -> TelemetrySqlQueryResult:
+        dashboard = await self._repository.get(dashboard_id)
+        panel = next((p for p in dashboard.panels if p.id == panel_id), None)
+        if panel is None:
+            raise EntityNotFoundError("Panel", panel_id)
+
+        return await self.run_panel_query(
+            panel,
+            dashboard_variables=dashboard.variables,
+            time_range=overrides.time_range,
+            variable_values=overrides.variable_values,
+        )
+
+    async def preview_query(
+        self, dashboard_id: UUID, request: DashboardQueryPreview
+    ) -> TelemetrySqlQueryResult:
+        dashboard = await self._repository.get(dashboard_id)
+        return await self._substitute_and_run(
+            request.sql,
+            request.limit,
+            static_variables={},
+            dashboard_variables=dashboard.variables,
+            variable_values=request.variable_values,
+            time_range=request.time_range,
+        )
+
+    async def resolve_variable_options(
+        self, dashboard_id: UUID, request: VariableOptionsRequest
+    ) -> VariableOptionsResult:
+        dashboard = await self._repository.get(dashboard_id)
+        sql = build_variable_source_sql(
+            request.table,
+            request.value_column,
+            request.predicate_column,
+            request.predicate_variable,
+        )
+        result = await self._substitute_and_run(
+            sql,
+            1000,
+            static_variables={},
+            dashboard_variables=dashboard.variables,
+            variable_values=request.variable_values,
+            time_range="1h",
+        )
+        if not result.rows or not result.columns:
+            return VariableOptionsResult(options=[])
+        first_column = result.columns[0]
+        return VariableOptionsResult(
+            options=[str(row[first_column]) for row in result.rows]
         )

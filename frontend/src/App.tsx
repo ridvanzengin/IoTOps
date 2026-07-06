@@ -8,6 +8,8 @@ import { DashboardList } from "./pages/DashboardList";
 import { DashboardForm } from "./pages/DashboardForm";
 import { DashboardEditor } from "./pages/DashboardEditor";
 import { PanelBuilder } from "./pages/PanelBuilder";
+import { VariableBuilder } from "./pages/VariableBuilder";
+import { VariableList } from "./pages/VariableList";
 import { Sidebar } from "./components/Sidebar";
 import "./App.css";
 
@@ -29,6 +31,12 @@ function App() {
             <Route path="/dashboards/:id" element={<DashboardEditor />} />
             <Route path="/dashboards/:dashboardId/panels/new" element={<PanelBuilder />} />
             <Route path="/dashboards/:dashboardId/panels/:panelId/edit" element={<PanelBuilder />} />
+            <Route path="/dashboards/:dashboardId/variables" element={<VariableList />} />
+            <Route path="/dashboards/:dashboardId/variables/new" element={<VariableBuilder />} />
+            <Route
+              path="/dashboards/:dashboardId/variables/:variableName/edit"
+              element={<VariableBuilder />}
+            />
           </Routes>
         </div>
       </div>

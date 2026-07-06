@@ -1,12 +1,29 @@
+import re
 from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class SeriesConfig(BaseModel):
+    field: str
+    label: str | None = None
+    axis: Literal["left", "right"] = "left"
+    type: Literal["line", "bar", "scatter"] | None = None
+
+
+def _validate_series_fields(y_axis: str, series: list[SeriesConfig]) -> None:
+    fields = [y_axis, *[s.field for s in series]]
+    seen: set[str] = set()
+    for field in fields:
+        if field in seen:
+            raise ValueError(f"Duplicate series field '{field}'")
+        seen.add(field)
 
 
 class LineChart(BaseModel):
@@ -14,11 +31,16 @@ class LineChart(BaseModel):
     title: str
     x_axis: str
     y_axis: str
-    series: list[str] = Field(default_factory=list)
+    series: list[SeriesConfig] = Field(default_factory=list)
     legend: bool = True
     tooltip: bool = True
     zoom: bool = False
     theme: str = "default"
+
+    @model_validator(mode="after")
+    def _validate_series(self) -> "LineChart":
+        _validate_series_fields(self.y_axis, self.series)
+        return self
 
 
 class BarChart(BaseModel):
@@ -26,10 +48,15 @@ class BarChart(BaseModel):
     title: str
     x_axis: str
     y_axis: str
-    series: list[str] = Field(default_factory=list)
+    series: list[SeriesConfig] = Field(default_factory=list)
     legend: bool = True
     tooltip: bool = True
     theme: str = "default"
+
+    @model_validator(mode="after")
+    def _validate_series(self) -> "BarChart":
+        _validate_series_fields(self.y_axis, self.series)
+        return self
 
 
 class ScatterChart(BaseModel):
@@ -37,10 +64,15 @@ class ScatterChart(BaseModel):
     title: str
     x_axis: str
     y_axis: str
-    series: list[str] = Field(default_factory=list)
+    series: list[SeriesConfig] = Field(default_factory=list)
     legend: bool = True
     tooltip: bool = True
     theme: str = "default"
+
+    @model_validator(mode="after")
+    def _validate_series(self) -> "ScatterChart":
+        _validate_series_fields(self.y_axis, self.series)
+        return self
 
 
 class PieChart(BaseModel):
@@ -75,12 +107,64 @@ class Query(BaseModel):
     timezone: str = "UTC"
 
 
+_RESERVED_VARIABLE_NAMES = {"__timeFrom", "__timeTo"}
+_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
 class Variable(BaseModel):
     name: str
     label: str
-    default: str | None = None
-    type: str = "text"
-    options: list[str] = Field(default_factory=list)
+    table: str
+    value_column: str
+    predicate_column: str | None = None
+    predicate_variable: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _valid_token(cls, value: str) -> str:
+        if not _IDENTIFIER_RE.fullmatch(value):
+            raise ValueError("Variable name must be a valid identifier")
+        if value in _RESERVED_VARIABLE_NAMES:
+            raise ValueError("Variable name is reserved")
+        return value
+
+    @field_validator("table", "value_column", "predicate_column")
+    @classmethod
+    def _valid_identifier(cls, value: str | None) -> str | None:
+        if value is not None and not _IDENTIFIER_RE.fullmatch(value):
+            raise ValueError("Must be a valid identifier")
+        return value
+
+    @model_validator(mode="after")
+    def _predicate_requires_pair(self) -> "Variable":
+        if (self.predicate_column is None) != (self.predicate_variable is None):
+            raise ValueError("predicate_column and predicate_variable must be set together")
+        return self
+
+
+def build_variable_source_sql(
+    table: str,
+    value_column: str,
+    predicate_column: str | None,
+    predicate_variable: str | None,
+) -> str:
+    sql = f'SELECT DISTINCT "{value_column}" FROM "{table}"'
+    if predicate_column and predicate_variable:
+        sql += f' WHERE "{predicate_column}" = ${predicate_variable}'
+    return sql
+
+
+def validate_variables(variables: list[Variable]) -> None:
+    seen: set[str] = set()
+    for variable in variables:
+        if variable.name in seen:
+            raise ValueError(f"Duplicate variable name '{variable.name}'")
+        if variable.predicate_variable and variable.predicate_variable not in seen:
+            raise ValueError(
+                f"Variable '{variable.name}' references undefined or later-defined "
+                f"variable '{variable.predicate_variable}'"
+            )
+        seen.add(variable.name)
 
 
 class PanelPosition(BaseModel):
@@ -132,6 +216,7 @@ class DashboardInput(BaseModel):
     @model_validator(mode="after")
     def _validate_panels(self) -> "DashboardInput":
         validate_panel_positions(self.panels)
+        validate_variables(self.variables)
         return self
 
 
@@ -150,3 +235,27 @@ class PanelLayoutUpdate(BaseModel):
 class DashboardLayoutInput(BaseModel):
     panels: list[PanelLayoutUpdate] = Field(default_factory=list)
     layout: dict[str, Any] = Field(default_factory=dict)
+
+
+class PanelQueryOverrides(BaseModel):
+    time_range: str | None = None
+    variable_values: dict[str, str] = Field(default_factory=dict)
+
+
+class DashboardQueryPreview(BaseModel):
+    sql: str
+    limit: int = 100
+    time_range: str = "1h"
+    variable_values: dict[str, str] = Field(default_factory=dict)
+
+
+class VariableOptionsRequest(BaseModel):
+    table: str
+    value_column: str
+    predicate_column: str | None = None
+    predicate_variable: str | None = None
+    variable_values: dict[str, str] = Field(default_factory=dict)
+
+
+class VariableOptionsResult(BaseModel):
+    options: list[str]

@@ -1,9 +1,16 @@
+export interface SeriesConfig {
+  field: string;
+  label?: string | null;
+  axis: "left" | "right";
+  type?: "line" | "bar" | "scatter" | null;
+}
+
 export interface LineChart {
   type: "line";
   title: string;
   x_axis: string;
   y_axis: string;
-  series: string[];
+  series: SeriesConfig[];
   legend: boolean;
   tooltip: boolean;
   zoom: boolean;
@@ -15,7 +22,7 @@ export interface BarChart {
   title: string;
   x_axis: string;
   y_axis: string;
-  series: string[];
+  series: SeriesConfig[];
   legend: boolean;
   tooltip: boolean;
   theme: string;
@@ -26,7 +33,7 @@ export interface ScatterChart {
   title: string;
   x_axis: string;
   y_axis: string;
-  series: string[];
+  series: SeriesConfig[];
   legend: boolean;
   tooltip: boolean;
   theme: string;
@@ -64,9 +71,10 @@ export interface Query {
 export interface Variable {
   name: string;
   label: string;
-  default: string | null;
-  type: string;
-  options: string[];
+  table: string;
+  value_column: string;
+  predicate_column: string | null;
+  predicate_variable: string | null;
 }
 
 export interface PanelPosition {
@@ -113,4 +121,28 @@ export interface PanelLayoutUpdate {
 export interface DashboardLayoutInputPayload {
   panels: PanelLayoutUpdate[];
   layout: Record<string, unknown>;
+}
+
+export interface PanelQueryOverrides {
+  time_range?: string;
+  variable_values?: Record<string, string>;
+}
+
+export interface DashboardQueryPreview {
+  sql: string;
+  limit?: number;
+  time_range?: string;
+  variable_values?: Record<string, string>;
+}
+
+export interface VariableOptionsRequest {
+  table: string;
+  value_column: string;
+  predicate_column?: string | null;
+  predicate_variable?: string | null;
+  variable_values?: Record<string, string>;
+}
+
+export interface VariableOptionsResult {
+  options: string[];
 }
