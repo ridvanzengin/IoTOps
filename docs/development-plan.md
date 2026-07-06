@@ -131,6 +131,32 @@ Receive MQTT data and store it.
   parser also silently drops string-valued fields unless they're listed
   in `json_string_fields` — a real data-loss footgun now modeled
   explicitly rather than discovered by a user.
+- A second, more serious template bug was found the same way while
+  end-to-end testing Milestone 3's Variable feature against a real
+  Collector: `TimescaleDBOutputConfig.add_column_templates` /
+  `tag_table_add_column_templates` used `{{.column}}`, a template
+  variable that doesn't exist in this plugin's context (the real one is
+  `.columns`, a list needing a `join` filter) — this silently broke
+  schema evolution for every Collector, permanently dropping any field
+  that arrived after a table's initial `CREATE TABLE` instead of adding
+  its column. Fixed at the model-default level (so it's not just a
+  per-Collector data fix) — see the comment on
+  `TimescaleDBOutputConfig.add_column_templates` in
+  `backend/app/plugin/outputs/timescaledb.py`.
+- Two more real-world gotchas surfaced setting up a Collector with two
+  MQTT inputs (one per topic, per `examples/mqtt-publisher/README.md`'s
+  documented pattern): (1) `name_override` — not `topics` or having two
+  separate input blocks — is what actually splits inputs into separate
+  tables; Telegraf's `mqtt_consumer` plugin defaults every instance's
+  measurement name to its own plugin name regardless of topic, so two
+  inputs with no `name_override` silently merge into one table. (2) A
+  JSON string field doesn't strictly need `json_string_fields` — listing
+  it in `tag_keys` instead (promoting it to an InfluxDB-style tag) works
+  too and is arguably the more correct modeling choice for an
+  identifying/filtering field like `device_id` (tags are Telegraf's
+  built-in "this is metadata, not a measurement" concept), since tag
+  extraction doesn't do the numeric-vs-string type inference that drops
+  unlisted JSON string fields in the first place.
 - MQTT test publisher lives at `examples/mqtt-publisher/`, off by
   default (`docker compose --profile tools up mqtt-publisher`) — see
   [repository-structure.md](repository-structure.md#examples-directory).
@@ -209,6 +235,27 @@ textual-macro substitution mechanism (`app/shared/sql_macros.py` +
   omitted) — additive, no data migration needed. `PanelEditor.tsx` has an
   add/remove series-row UI; `charts/options.ts` emits a second `yAxis` when
   any series uses the right axis.
+
+**Follow-up queued for next session — long-format ("melted"/tidy) chart
+data.** Found while testing the AI query builder against a real
+device-metrics/device-status join: a request like "humidity and
+uptime_seconds per device" naturally produces long-format rows
+(`time, variable, value`, e.g. `(t1, "humidity", 39.2)`, `(t2,
+"uptime_seconds", 48129)`) rather than one column per series. The current
+`Chart` model is wide-format only — `y_axis` plus the `series:
+list[SeriesConfig]` added this milestone both assume one series per
+*column name*, never one series per *distinct value of a column*. Grafana
+handles this by auto-pivoting: given a non-numeric "metric" column, it
+groups rows by that column's distinct values and treats each group as its
+own series. Needs: a new chart field (e.g. `series_name_column: str |
+None`) to opt into this grouping, a `buildXyOption` rewrite in
+`charts/options.ts` to group-by-and-sort rather than read one column per
+series, a `PanelEditor.tsx` control to pick the name column (wide vs. long,
+same toggle Grafana and other tools expose), and a design decision on how
+it interacts with the dual-axis `series: list[SeriesConfig]` list just
+shipped (per-series axis assignment doesn't obviously generalize to
+per-distinct-value axis assignment). Plan this properly before starting —
+same treatment as the Variable rework earlier this milestone.
 
 **Acceptance Criteria**
 
