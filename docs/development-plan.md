@@ -257,6 +257,20 @@ shipped (per-series axis assignment doesn't obviously generalize to
 per-distinct-value axis assignment). Plan this properly before starting —
 same treatment as the Variable rework earlier this milestone.
 
+**Follow-up queued for next session — dashboard auto-refresh interval.**
+A Grafana-style "Refresh" dropdown (Off / 10s / 30s / 1m / 5m, ...) next to
+the time range picker in the dashboard toolbar, that re-runs
+`refreshPanelData` on an interval instead of only on load/variable/
+time-range change. Mechanically small (a `{code, label}[]` table mirroring
+`constants/timeRanges.ts`, a `setInterval`/`useEffect` in
+`DashboardEditor.tsx` cleared on interval change or unmount) but note:
+`Panel.refresh_interval: int = 0` already exists on the `PanelInput`/`Panel`
+model (`backend/app/dashboard/models.py`) and has been dormant/unused since
+Milestone 3 started — decide during planning whether this new feature is
+purely dashboard-level (simplest, matches Grafana's own top-bar behavior)
+or should finally wire up that per-panel field for individual overrides,
+rather than adding a second, disconnected refresh concept.
+
 **Acceptance Criteria**
 
 - User can create a Project.

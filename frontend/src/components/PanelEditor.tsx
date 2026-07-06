@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { TIME_RANGES } from "../constants/timeRanges";
 import type { Chart, ChartType, SeriesConfig, Variable } from "../types/dashboard";
 
@@ -78,6 +79,8 @@ export function PanelEditor({
   variables,
   onSelectVariableFilter,
 }: PanelEditorProps) {
+  const [selectedVariableFilter, setSelectedVariableFilter] = useState("");
+
   function handleTypeChange(type: ChartType) {
     const base = defaultChartForType(type, title);
     // Switching between line/bar/scatter keeps the axis + series config the
@@ -167,9 +170,10 @@ export function PanelEditor({
       <label className="field">
         <span>Add Variable Filter</span>
         <select
-          value=""
+          value={selectedVariableFilter}
           disabled={variables.length === 0}
           onChange={(event) => {
+            setSelectedVariableFilter(event.target.value);
             const variable = variables.find((v) => v.name === event.target.value);
             if (variable) onSelectVariableFilter(variable);
           }}
