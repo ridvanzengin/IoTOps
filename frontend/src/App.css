@@ -1,11 +1,14 @@
 .app-shell {
   display: flex;
-  min-height: 100svh;
+  height: 100svh;
+  overflow: hidden;
 }
 
 .app-content {
   flex: 1;
   min-width: 0;
+  height: 100%;
+  overflow-y: auto;
 }
 
 .page {
@@ -50,6 +53,20 @@
 .button--primary:hover:not(:disabled) {
   background: var(--accent-h);
   border-color: var(--accent-h);
+}
+
+/* Matches the chart palette's second-series color (see CHART_COLORS in
+   charts/options.ts) — used for "save" actions, consistent with the
+   dashboard header's Save button. */
+.button--success {
+  background: #4dd4ac;
+  border-color: #4dd4ac;
+  color: white;
+}
+
+.button--success:hover:not(:disabled) {
+  background: #3fc29b;
+  border-color: #3fc29b;
 }
 
 .button--danger {

@@ -14,6 +14,7 @@ from app.plugin.registry import build_default_registry
 from tests.backend.collector.test_docker import FakeDockerClient
 
 VALID_PAYLOAD = {
+    "project_id": str(uuid4()),
     "name": "Hive Collector",
     "inputs": [
         {

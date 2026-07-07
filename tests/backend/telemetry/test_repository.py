@@ -54,3 +54,43 @@ async def test_query_recent_quotes_identifier_safely() -> None:
     rows = await repository.query_recent('weird"table', limit=10)
 
     assert len(rows) == 1
+
+
+async def test_get_schema_returns_columns_per_table() -> None:
+    pool = FakePool(
+        tables=["device_metrics"],
+        schema={
+            "device_metrics": [
+                {"column_name": "time", "data_type": "timestamp with time zone", "is_nullable": "NO"},
+                {"column_name": "temperature", "data_type": "double precision", "is_nullable": "YES"},
+            ]
+        },
+    )
+    repository = TelemetryRepository(pool)
+
+    schemas = await repository.get_schema()
+
+    assert len(schemas) == 1
+    assert schemas[0].table == "device_metrics"
+    assert schemas[0].columns[0].name == "time"
+    assert schemas[0].columns[0].is_nullable is False
+    assert schemas[0].columns[1].is_nullable is True
+
+
+async def test_get_schema_returns_empty_list_for_no_tables() -> None:
+    pool = FakePool(tables=[])
+    repository = TelemetryRepository(pool)
+
+    assert await repository.get_schema() == []
+
+
+async def test_execute_readonly_returns_query_results() -> None:
+    pool = FakePool(
+        tables=["device_metrics"],
+        query_results={"SELECT avg(temperature) FROM device_metrics": [{"avg": 21.5}]},
+    )
+    repository = TelemetryRepository(pool)
+
+    rows = await repository.execute_readonly("SELECT avg(temperature) FROM device_metrics", limit=10)
+
+    assert rows == [{"avg": 21.5}]

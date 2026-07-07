@@ -3,7 +3,12 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Query
 
 from app.dependencies import get_telemetry_service
-from app.telemetry.models import TelemetryQueryResult
+from app.telemetry.models import (
+    TelemetryQueryResult,
+    TelemetrySqlQuery,
+    TelemetrySqlQueryResult,
+    TelemetryTableSchema,
+)
 from app.telemetry.service import TelemetryService
 
 router = APIRouter(prefix="/api/telemetry", tags=["telemetry"])
@@ -14,6 +19,22 @@ async def list_telemetry_tables(
     service: TelemetryService = Depends(get_telemetry_service),
 ) -> list[str]:
     return await service.list_tables()
+
+
+# Declared before GET /{table} so "schema" isn't swallowed by the {table} path param.
+@router.get("/schema", response_model=list[TelemetryTableSchema])
+async def get_telemetry_schema(
+    service: TelemetryService = Depends(get_telemetry_service),
+) -> list[TelemetryTableSchema]:
+    return await service.get_schema()
+
+
+@router.post("/query", response_model=TelemetrySqlQueryResult)
+async def query_telemetry_sql(
+    payload: TelemetrySqlQuery,
+    service: TelemetryService = Depends(get_telemetry_service),
+) -> TelemetrySqlQueryResult:
+    return await service.run_query(payload)
 
 
 @router.get("/{table}", response_model=TelemetryQueryResult)

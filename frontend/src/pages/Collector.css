@@ -1,10 +1,17 @@
+/* Full width by default — every page fills the content area next to the
+   sidebar. Pages that are a single simple entity form (a handful of stacked
+   fields) opt into a narrower, centered reading width via
+   .collector-page--form instead of each new page needing its own override. */
 .collector-page {
   width: 100%;
-  max-width: 960px;
-  margin: 0 auto;
   padding: 32px 24px;
   text-align: left;
   box-sizing: border-box;
+}
+
+.collector-page--form {
+  max-width: 960px;
+  margin: 0 auto;
 }
 
 .collector-page__header {
@@ -71,6 +78,16 @@
 .collector-table__actions {
   display: flex;
   gap: 8px;
+}
+
+.collector-table__link {
+  color: var(--accent);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.collector-table__link:hover {
+  text-decoration: underline;
 }
 
 .collector-table__actions .button {

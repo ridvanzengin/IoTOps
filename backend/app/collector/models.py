@@ -43,6 +43,7 @@ class DockerConfig(BaseModel):
 
 
 class CollectorPluginsBase(BaseModel):
+    project_id: UUID
     name: str
     description: str = ""
     enabled: bool = True

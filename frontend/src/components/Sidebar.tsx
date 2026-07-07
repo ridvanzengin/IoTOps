@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { AutomaterIcon, CollectorIcon, HomeIcon, VisualizerIcon } from "./icons";
+import { AutomaterIcon, CollectorIcon, HomeIcon, ProjectIcon, VisualizerIcon } from "./icons";
 import type { ComponentType } from "react";
 import type { SVGProps } from "react";
 import "./Sidebar.css";
@@ -14,9 +14,10 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { label: "Overview", to: "/", icon: HomeIcon, end: true },
+  { label: "Projects", to: "/projects", icon: ProjectIcon },
   { label: "Collectors", to: "/collectors", icon: CollectorIcon },
   { label: "Automater", icon: AutomaterIcon, disabled: true },
-  { label: "Visualizer", icon: VisualizerIcon, disabled: true },
+  { label: "Dashboards", to: "/dashboards", icon: VisualizerIcon },
 ];
 
 export function Sidebar() {

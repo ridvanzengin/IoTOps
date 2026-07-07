@@ -1,4 +1,5 @@
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from docker.errors import NotFound
@@ -56,6 +57,7 @@ class FakeDockerClient:
 
 def _collector() -> Collector:
     return Collector(
+        project_id=uuid4(),
         name="Hive Collector",
         inputs=[InputPlugin(plugin_type="mqtt", name="hive-mqtt")],
         outputs=[OutputPlugin(plugin_type="timescaledb")],

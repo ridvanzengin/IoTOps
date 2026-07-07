@@ -131,6 +131,32 @@ Receive MQTT data and store it.
   parser also silently drops string-valued fields unless they're listed
   in `json_string_fields` — a real data-loss footgun now modeled
   explicitly rather than discovered by a user.
+- A second, more serious template bug was found the same way while
+  end-to-end testing Milestone 3's Variable feature against a real
+  Collector: `TimescaleDBOutputConfig.add_column_templates` /
+  `tag_table_add_column_templates` used `{{.column}}`, a template
+  variable that doesn't exist in this plugin's context (the real one is
+  `.columns`, a list needing a `join` filter) — this silently broke
+  schema evolution for every Collector, permanently dropping any field
+  that arrived after a table's initial `CREATE TABLE` instead of adding
+  its column. Fixed at the model-default level (so it's not just a
+  per-Collector data fix) — see the comment on
+  `TimescaleDBOutputConfig.add_column_templates` in
+  `backend/app/plugin/outputs/timescaledb.py`.
+- Two more real-world gotchas surfaced setting up a Collector with two
+  MQTT inputs (one per topic, per `examples/mqtt-publisher/README.md`'s
+  documented pattern): (1) `name_override` — not `topics` or having two
+  separate input blocks — is what actually splits inputs into separate
+  tables; Telegraf's `mqtt_consumer` plugin defaults every instance's
+  measurement name to its own plugin name regardless of topic, so two
+  inputs with no `name_override` silently merge into one table. (2) A
+  JSON string field doesn't strictly need `json_string_fields` — listing
+  it in `tag_keys` instead (promoting it to an InfluxDB-style tag) works
+  too and is arguably the more correct modeling choice for an
+  identifying/filtering field like `device_id` (tags are Telegraf's
+  built-in "this is metadata, not a measurement" concept), since tag
+  extraction doesn't do the numeric-vs-string type inference that drops
+  unlisted JSON string fields in the first place.
 - MQTT test publisher lives at `examples/mqtt-publisher/`, off by
   default (`docker compose --profile tools up mqtt-publisher`) — see
   [repository-structure.md](repository-structure.md#examples-directory).
@@ -155,20 +181,112 @@ Visualize telemetry.
 
 ### Tasks
 
-- Implement Dashboard models.
+- Implement a new Project root entity (grouping a Collector with its
+  Automaters and Dashboards) and retrofit Collector with a required
+  `project_id`.
+- Implement Dashboard models (including `project_id`).
 - Implement Panel models.
 - Implement chart models.
 - Create dashboard CRUD API.
 - Build dashboard editor UI.
 - Integrate Apache ECharts.
-- Add line chart.
-- Add bar chart.
-- Add gauge chart.
+- Add line, bar, scatter, pie, and gauge charts.
+- Extend the telemetry module with a schema-introspection endpoint and a
+  guarded arbitrary-SQL query endpoint, since Panels need more than
+  recent-rows-from-one-table.
+
+**Status: done.** A narrow slice of Milestone 6 (AI Assistant) was pulled
+forward alongside this milestone: `POST /api/ai/sql`, backed by a local
+Ollama model, is implemented now so the Panel builder can offer an AI-only
+natural-language query builder — by design, no manual/visual query builder
+was built at all; SQL is only ever produced by hand-editing the generated
+statement or asking the AI again. SQL explanation and the other AI
+endpoints remain deferred to the real Milestone 6.
+
+All three initial follow-ups are now closed, sharing one Grafana-style
+textual-macro substitution mechanism (`app/shared/sql_macros.py` +
+`app/shared/time_range.py`, applied in `DashboardService`):
+
+- **Dashboard time range picker** now filters every panel query: SQL can
+  reference `$__timeFrom`/`$__timeTo`, resolved server-side per request via
+  `POST /api/dashboard/{id}/panel/{panel_id}/query` (saved panels) and
+  `POST /api/dashboard/{id}/preview-query` (ad hoc SQL in the Panel Builder).
+- **Variable Builder** (`frontend/src/pages/VariableBuilder.tsx`) replaces
+  the old placeholder — a dedicated page mirroring the Panel Builder's
+  layout (form + `SchemaBrowser`). Fully schema-driven, no free-typed
+  text/number/options and no hand-written or AI-written SQL: a variable is
+  created by clicking a value column in the schema browser, and optionally a
+  second, same-table predicate column filtered by an explicitly-picked
+  earlier variable. The backend derives
+  `SELECT DISTINCT value_column FROM table [WHERE predicate_column =
+  $predicate_variable]` (`build_variable_source_sql`, `dashboard/models.py`)
+  and resolves it via `POST /api/dashboard/{id}/variables/options` — this
+  gives Grafana-style chained/cascading variables (e.g. Project → Device)
+  without a dependency graph, since a variable's `predicate_variable` may
+  only reference a variable defined earlier in the list (enforced by
+  `validate_variables`). Panel Builder's SQL preview and the AI SQL builder
+  (`build_sql_prompt`) both now resolve/reference live dashboard variables
+  correctly — previously the preview silently dropped `$variable` values and
+  the AI prompt had no awareness variables existed.
+- **Dual-axis / multi-series panels**: `LineChart`/`BarChart`/`ScatterChart`
+  keep `y_axis` as the first series and add `series: list[SeriesConfig]`
+  for additional series, each with its own `field`, `axis` (`left`/`right`),
+  and optional `type` override (inherits the parent chart's type when
+  omitted) — additive, no data migration needed. `PanelEditor.tsx` has an
+  add/remove series-row UI; `charts/options.ts` emits a second `yAxis` when
+  any series uses the right axis.
+
+A fourth follow-up, long-format ("melted"/tidy) chart data, is also now
+closed — found while testing the AI query builder against a real
+device-metrics/device-status join: a request like "humidity and
+uptime_seconds per device" naturally produces long-format rows (`time,
+variable, value`) rather than one column per series, which the wide-format-only
+`Chart` model (`y_axis` + `series: list[SeriesConfig]`) had no way to
+render. Unlike the three follow-ups above, this one is purely a client-side
+rendering/config change, not part of the SQL-macro mechanism:
+
+- **Long-format charts**: `LineChart`/`BarChart`/`ScatterChart` gained an
+  optional `series_by: str | None` field (mutually exclusive with `series`,
+  enforced by a validator — reusing `y_axis` as "the value column" rather
+  than adding a redundant field). When set, `buildXyOption`
+  (`frontend/src/charts/options.ts`) groups rows by each distinct
+  `series_by` value into its own independent `[x, value]` point list,
+  plotted on a real `xAxis: {type: "time"}` rather than a shared category
+  axis. That distinction mattered in practice: a first version aligned all
+  series to one shared, deduped x-value list and padded gaps with `null`,
+  which only works when series share exact timestamps (e.g. two metrics
+  unioned from the same underlying rows) — it silently broke for the actual
+  motivating case, splitting by `device_id`, where each device reports at
+  its own independent timestamp, leaving every series as isolated dots with
+  nothing to connect. `PanelEditor.tsx` adds a "Split Series By" column
+  picker that hides the (mutually exclusive) dual-axis series UI when
+  active. v1 renders all long-format series on a single left axis only,
+  since distinct series names are discovered at query time rather than
+  known statically the way dual-axis's per-field axis assignment requires.
+
+The fifth and final follow-up, dashboard auto-refresh interval, is now
+closed, and with it Milestone 3 has no more open follow-ups.
+
+- **Dashboard auto-refresh**: a "Refresh" dropdown (`constants/refreshIntervals.ts`
+  — Off/10s/30s/1m/5m, default 10s) sits next to the time range picker in
+  `DashboardEditor.tsx`'s toolbar. A `setInterval`/`useEffect` re-runs the
+  same `refreshPanelData` already used for load/variable/time-range changes,
+  cleared on interval change or unmount. Dashboard-level only, matching the
+  existing time-range picker's precedent: `DashboardEditor` already applies
+  one dashboard-wide time range to every panel unconditionally, ignoring
+  each panel's own persisted `time_range` default, so treating refresh the
+  same way is consistent rather than introducing a second, differently-scoped
+  override concept. `Panel.refresh_interval: int = 0`
+  (`backend/app/dashboard/models.py`) remains dormant/unused, same as
+  before — wiring it up would need new per-panel override plumbing with no
+  existing precedent, whereas the dashboard-level toggle needed zero backend
+  changes.
 
 **Acceptance Criteria**
 
-- User can create a dashboard.
-- User can add panels.
+- User can create a Project.
+- User can create a dashboard scoped to a Project.
+- User can add panels, generating their SQL via the AI query builder.
 - Telemetry is rendered as charts.
 
 ---
@@ -267,6 +385,35 @@ Generate SQL from natural language.
 - User enters: "Show hive temperature for the last 24 hours."
 - SQL is generated.
 - Chart renders successfully.
+
+---
+
+# Future — Suggested Dashboards & Automations
+
+Ship **after both Milestone 3 (Dashboard) and Milestone 5 (Automater) are
+complete** — a "Suggest a dashboard" button pairs with a "Suggest an
+automation" button, and both need their respective target module to exist
+first.
+
+### Tasks
+
+- A model-selection dropdown in a new Settings/config nav area: lists the
+  local Ollama model (default) plus any configured hosted models (e.g.
+  Claude via the Anthropic API) as opt-in alternatives. Persists the user's
+  choice; every "Suggest..." action uses whichever model is selected there.
+- `POST /api/ai/dashboard`: given a project's telemetry schema, propose a
+  starter set of panels (chart type, query, layout) as a reviewable draft —
+  never auto-saved. See `docs/architecture.md`'s AI Integration section,
+  which already anticipates this endpoint.
+- `POST /api/ai/automation` (new, not yet documented anywhere): given a
+  project's telemetry schema, propose starter Automater rules/conditions as
+  a reviewable draft.
+- Both endpoints share a provider abstraction (local Ollama vs. a hosted
+  model like Claude) so the model-selection dropdown controls a real
+  pluggable backend, not just Ollama.
+- Self-correction loop: generated panel/rule queries and conditions should
+  be validated (e.g. run through `/api/telemetry/query`) before being shown
+  to the user, retrying once on failure rather than surfacing broken output.
 
 ---
 

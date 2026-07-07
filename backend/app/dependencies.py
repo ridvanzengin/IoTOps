@@ -1,18 +1,25 @@
 from pathlib import Path
 
 import docker
+import httpx
 
+from app.ai.service import AiService
 from app.collector.docker import CollectorDockerManager
 from app.collector.repository import CollectorRepository
 from app.collector.service import CollectorService
 from app.config import settings
+from app.dashboard.repository import DashboardRepository
+from app.dashboard.service import DashboardService
 from app.database import get_database, get_timescale_pool
 from app.plugin.registry import PluginRegistry, build_default_registry
+from app.project.repository import ProjectRepository
+from app.project.service import ProjectService
 from app.telemetry.repository import TelemetryRepository
 from app.telemetry.service import TelemetryService
 
 _registry: PluginRegistry | None = None
 _docker_manager: CollectorDockerManager | None = None
+_http_client: httpx.AsyncClient | None = None
 
 
 def get_plugin_registry() -> PluginRegistry:
@@ -46,3 +53,30 @@ def get_collector_service() -> CollectorService:
 async def get_telemetry_service() -> TelemetryService:
     pool = await get_timescale_pool()
     return TelemetryService(repository=TelemetryRepository(pool))
+
+
+def get_project_service() -> ProjectService:
+    return ProjectService(repository=ProjectRepository(get_database()))
+
+
+async def get_dashboard_service() -> DashboardService:
+    return DashboardService(
+        repository=DashboardRepository(get_database()),
+        telemetry_service=await get_telemetry_service(),
+    )
+
+
+def get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(timeout=60.0)
+    return _http_client
+
+
+async def get_ai_service() -> AiService:
+    return AiService(
+        telemetry_service=await get_telemetry_service(),
+        http_client=get_http_client(),
+        base_url=settings.ollama_base_url,
+        model=settings.ollama_model,
+    )

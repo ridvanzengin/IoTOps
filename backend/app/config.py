@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     host_runtime_dir: str = ""
     docker_network: str = "iotops"
     telegraf_image: str = "telegraf:1.32-alpine"
+    # host.docker.internal, not localhost: the backend runs inside a
+    # container (see docker-compose.yml), so "localhost" would mean the
+    # container itself, not the host machine running Ollama.
+    ollama_base_url: str = "http://host.docker.internal:11434"
+    ollama_model: str = "gemma4:latest"
 
 
 settings = Settings()

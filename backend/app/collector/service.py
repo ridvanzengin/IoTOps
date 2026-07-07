@@ -33,6 +33,7 @@ class CollectorService:
         existing = await self._repository.get(collector_id)
         updated = existing.model_copy(
             update={
+                "project_id": payload.project_id,
                 "name": payload.name,
                 "description": payload.description,
                 "enabled": payload.enabled,

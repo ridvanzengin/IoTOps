@@ -1,0 +1,222 @@
+.dashboard-page.collector-page {
+  padding-top: 18px;
+  padding-bottom: 18px;
+}
+
+.dashboard-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  gap: 16px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--bg-subtle);
+  padding: 12px 0;
+  margin-top: -12px;
+}
+
+.dashboard-toolbar__left {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.dashboard-toolbar__title {
+  font-size: 20px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dashboard-toolbar__variable {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dashboard-toolbar__variable-label {
+  color: var(--text);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.dashboard-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Every toolbar control (select, icon button, save button) shares one
+   height/shape so the row reads as a single consistent unit. */
+.dashboard-toolbar__control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text-h);
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.dashboard-toolbar__control:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dashboard-toolbar__control--icon {
+  width: 30px;
+  padding: 0;
+}
+
+/* Matches the chart palette's second-series color (see CHART_COLORS in
+   charts/options.ts) — used for the "save" action. */
+.dashboard-toolbar__control--success {
+  background: #4dd4ac;
+  border-color: #4dd4ac;
+  color: white;
+}
+
+.dashboard-toolbar__control--success:hover:not(:disabled) {
+  background: #3fc29b;
+  border-color: #3fc29b;
+}
+
+.dashboard-toolbar__control--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.dashboard-toolbar__control--primary:hover:not(:disabled) {
+  background: var(--accent-h);
+  border-color: var(--accent-h);
+}
+
+.dashboard-panel {
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-h);
+  cursor: move;
+  min-height: 26px;
+}
+
+.dashboard-panel__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-panel__menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.dashboard-panel__menu-trigger:hover {
+  background: var(--bg-subtle);
+  color: var(--text-h);
+}
+
+.dashboard-panel__body {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Generic small dropdown menu, used by the toolbar "+" and per-panel "…" actions */
+
+.dashboard-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.dashboard-menu__list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 140px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+
+.dashboard-menu__item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--text-h);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.dashboard-menu__item:hover {
+  background: var(--bg-subtle);
+}
+
+.dashboard-menu__item--danger {
+  color: var(--danger);
+}
+
+.dashboard-menu__item--disabled {
+  color: var(--text);
+  cursor: default;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dashboard-menu__item--disabled em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text);
+  background: var(--bg-subtle);
+  border-radius: 999px;
+  padding: 1px 6px;
+}

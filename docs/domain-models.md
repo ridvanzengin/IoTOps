@@ -22,6 +22,8 @@ The frontend UI is generated from models.
 
 The MVP contains the following root entities.
 
+Project
+
 Collector
 
 Automater
@@ -38,6 +40,32 @@ Datasource (future)
 
 ---
 
+# Project
+
+Represents a grouping of a Collector with its Automaters and Dashboards.
+
+Fields
+
+id
+
+name
+
+description
+
+created_at
+
+updated_at
+
+schema_version
+
+Project is intentionally lightweight — an organizational grouping only, not
+an access-control or tenancy construct. It does not scope or filter which
+telemetry tables a Dashboard's panels can query; the schema browser and
+query builder always see every TimescaleDB table globally, regardless of
+project. There is no collector-to-table-to-project lineage tracking.
+
+---
+
 # Collector
 
 Represents a telemetry collection service.
@@ -45,6 +73,8 @@ Represents a telemetry collection service.
 Fields
 
 id
+
+project_id
 
 name
 
@@ -333,6 +363,8 @@ Fields
 
 id
 
+project_id
+
 name
 
 description
@@ -346,6 +378,12 @@ layout
 created_at
 
 updated_at
+
+`layout` and `Panel.position` are not competing layout concepts:
+`Panel.position` (x/y/width/height) is the authoritative per-panel grid
+rect, what the frontend's grid system needs per panel. `layout` is a thin,
+loosely-typed container for grid-wide settings that aren't per-panel (e.g.
+column count, row height) — not a duplicate of per-panel positions.
 
 ---
 
@@ -421,9 +459,9 @@ title
 
 x_axis
 
-y_axis
+y_axis (first series, left axis)
 
-series
+series (list of SeriesConfig — additional series)
 
 legend
 
@@ -432,6 +470,28 @@ tooltip
 zoom
 
 theme
+
+Bar Chart and Scatter Chart share this same shape (minus `zoom` for Bar).
+
+---
+
+# Series Config
+
+Describes one additional series on a Line/Bar/Scatter chart, beyond the
+chart's own `y_axis`.
+
+Fields
+
+field
+
+label
+
+axis (`left` or `right`)
+
+type (`line` | `bar` | `scatter`, inherits the parent chart's type when unset)
+
+Enables mixed chart types and dual y-axes on one panel (e.g. temperature as
+a line on the left axis, humidity as bars on the right axis).
 
 ---
 
@@ -453,9 +513,17 @@ The frontend never edits database objects directly.
 
 Only Query objects.
 
+SQL may reference `$__timeFrom`/`$__timeTo` (the dashboard's selected time
+range) and `$variable_name` (dashboard Variables) — substituted server-side
+before execution.
+
 ---
 
 # Variable
+
+Fully schema-driven — no free-typed text/number/options, no hand-written or
+AI-written SQL. A Variable is defined by picking a value column (and,
+optionally, a predicate column in the same table) from the schema browser.
 
 Fields
 
@@ -463,13 +531,24 @@ name
 
 label
 
-default
+table
 
-type
+value_column
 
-options
+predicate_column (optional — must belong to `table`)
 
-Variables may be referenced inside SQL.
+predicate_variable (optional — name of an earlier Variable in the Dashboard's
+`variables` list; required together with `predicate_column`)
+
+The options list a Variable offers is always derived, never stored: the
+backend builds `SELECT DISTINCT value_column FROM table [WHERE
+predicate_column = $predicate_variable]` (see `build_variable_source_sql` in
+`dashboard/models.py`) and runs it through the same substitution pipeline as
+panel queries. Variables may be referenced inside panel SQL as `$name`. A
+Variable's `predicate_variable` may only reference a Variable defined earlier
+in the list (enforced by `validate_variables`), producing Grafana-style
+chained/cascading variables (e.g. Project narrows Device) without a
+dependency graph — list order is the dependency order.
 
 ---
 
@@ -618,6 +697,8 @@ still a Pydantic model; the row *contents* are the exception to
 
 # Persistent Objects
 
+Project
+
 Collector
 
 Automater
@@ -635,6 +716,18 @@ Variables
 ---
 
 # Relationships
+
+Collector
+
+references
+
+Project
+
+Dashboard
+
+references
+
+Project
 
 Collector
 
@@ -677,6 +770,11 @@ Conditions
 ---
 
 # Ownership
+
+Projects do not own Collectors or Dashboards — they only reference a
+Project by `project_id`. Deleting a Project does not cascade: Collectors
+and Dashboards that referenced it simply keep a `project_id` that no
+longer resolves to anything.
 
 Collectors own Inputs.
 

@@ -1,4 +1,5 @@
 import tomllib
+from uuid import uuid4
 
 import pytest
 
@@ -10,6 +11,7 @@ from app.shared.exceptions import PluginConfigurationError
 
 def _collector(**overrides: object) -> Collector:
     defaults: dict[str, object] = {
+        "project_id": uuid4(),
         "name": "Hive Collector",
         "inputs": [
             InputPlugin(
