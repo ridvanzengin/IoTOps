@@ -236,29 +236,36 @@ textual-macro substitution mechanism (`app/shared/sql_macros.py` +
   add/remove series-row UI; `charts/options.ts` emits a second `yAxis` when
   any series uses the right axis.
 
-**Follow-up queued for next session — long-format ("melted"/tidy) chart
-data.** Found while testing the AI query builder against a real
+A fourth follow-up, long-format ("melted"/tidy) chart data, is also now
+closed — found while testing the AI query builder against a real
 device-metrics/device-status join: a request like "humidity and
-uptime_seconds per device" naturally produces long-format rows
-(`time, variable, value`, e.g. `(t1, "humidity", 39.2)`, `(t2,
-"uptime_seconds", 48129)`) rather than one column per series. The current
-`Chart` model is wide-format only — `y_axis` plus the `series:
-list[SeriesConfig]` added this milestone both assume one series per
-*column name*, never one series per *distinct value of a column*. Grafana
-handles this by auto-pivoting: given a non-numeric "metric" column, it
-groups rows by that column's distinct values and treats each group as its
-own series. Needs: a new chart field (e.g. `series_name_column: str |
-None`) to opt into this grouping, a `buildXyOption` rewrite in
-`charts/options.ts` to group-by-and-sort rather than read one column per
-series, a `PanelEditor.tsx` control to pick the name column (wide vs. long,
-same toggle Grafana and other tools expose), and a design decision on how
-it interacts with the dual-axis `series: list[SeriesConfig]` list just
-shipped (per-series axis assignment doesn't obviously generalize to
-per-distinct-value axis assignment). Plan this properly before starting —
-same treatment as the Variable rework earlier this milestone.
+uptime_seconds per device" naturally produces long-format rows (`time,
+variable, value`) rather than one column per series, which the wide-format-only
+`Chart` model (`y_axis` + `series: list[SeriesConfig]`) had no way to
+render. Unlike the three follow-ups above, this one is purely a client-side
+rendering/config change, not part of the SQL-macro mechanism:
 
-**Follow-up queued for next session — dashboard auto-refresh interval.**
-A Grafana-style "Refresh" dropdown (Off / 10s / 30s / 1m / 5m, ...) next to
+- **Long-format charts**: `LineChart`/`BarChart`/`ScatterChart` gained an
+  optional `series_by: str | None` field (mutually exclusive with `series`,
+  enforced by a validator — reusing `y_axis` as "the value column" rather
+  than adding a redundant field). When set, `buildXyOption`
+  (`frontend/src/charts/options.ts`) groups rows by each distinct
+  `series_by` value into its own independent `[x, value]` point list,
+  plotted on a real `xAxis: {type: "time"}` rather than a shared category
+  axis. That distinction mattered in practice: a first version aligned all
+  series to one shared, deduped x-value list and padded gaps with `null`,
+  which only works when series share exact timestamps (e.g. two metrics
+  unioned from the same underlying rows) — it silently broke for the actual
+  motivating case, splitting by `device_id`, where each device reports at
+  its own independent timestamp, leaving every series as isolated dots with
+  nothing to connect. `PanelEditor.tsx` adds a "Split Series By" column
+  picker that hides the (mutually exclusive) dual-axis series UI when
+  active. v1 renders all long-format series on a single left axis only,
+  since distinct series names are discovered at query time rather than
+  known statically the way dual-axis's per-field axis assignment requires.
+
+**One follow-up remains queued for next session — dashboard auto-refresh
+interval.** A Grafana-style "Refresh" dropdown (Off / 10s / 30s / 1m / 5m, ...) next to
 the time range picker in the dashboard toolbar, that re-runs
 `refreshPanelData` on an interval instead of only on load/variable/
 time-range change. Mechanically small (a `{code, label}[]` table mirroring

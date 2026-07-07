@@ -201,3 +201,21 @@ def test_chart_rejects_duplicate_series_fields() -> None:
             y_axis="temperature",
             series=[SeriesConfig(field="humidity"), SeriesConfig(field="humidity")],
         )
+
+
+def test_chart_rejects_series_by_combined_with_series() -> None:
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        LineChart(
+            title="Metrics",
+            x_axis="time",
+            y_axis="value",
+            series_by="device_id",
+            series=[SeriesConfig(field="humidity")],
+        )
+
+
+def test_chart_accepts_series_by_alone() -> None:
+    chart = LineChart(title="Metrics", x_axis="time", y_axis="value", series_by="device_id")
+
+    assert chart.series_by == "device_id"
+    assert chart.series == []

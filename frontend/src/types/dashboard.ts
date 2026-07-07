@@ -11,6 +11,7 @@ export interface LineChart {
   x_axis: string;
   y_axis: string;
   series: SeriesConfig[];
+  series_by?: string | null;
   legend: boolean;
   tooltip: boolean;
   zoom: boolean;
@@ -23,6 +24,7 @@ export interface BarChart {
   x_axis: string;
   y_axis: string;
   series: SeriesConfig[];
+  series_by?: string | null;
   legend: boolean;
   tooltip: boolean;
   theme: string;
@@ -34,6 +36,7 @@ export interface ScatterChart {
   x_axis: string;
   y_axis: string;
   series: SeriesConfig[];
+  series_by?: string | null;
   legend: boolean;
   tooltip: boolean;
   theme: string;

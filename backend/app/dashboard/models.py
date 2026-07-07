@@ -26,12 +26,18 @@ def _validate_series_fields(y_axis: str, series: list[SeriesConfig]) -> None:
         seen.add(field)
 
 
+def _validate_series_by(series_by: str | None, series: list[SeriesConfig]) -> None:
+    if series_by and series:
+        raise ValueError("series_by and series are mutually exclusive")
+
+
 class LineChart(BaseModel):
     type: Literal["line"] = "line"
     title: str
     x_axis: str
     y_axis: str
     series: list[SeriesConfig] = Field(default_factory=list)
+    series_by: str | None = None
     legend: bool = True
     tooltip: bool = True
     zoom: bool = False
@@ -39,6 +45,7 @@ class LineChart(BaseModel):
 
     @model_validator(mode="after")
     def _validate_series(self) -> "LineChart":
+        _validate_series_by(self.series_by, self.series)
         _validate_series_fields(self.y_axis, self.series)
         return self
 
@@ -49,12 +56,14 @@ class BarChart(BaseModel):
     x_axis: str
     y_axis: str
     series: list[SeriesConfig] = Field(default_factory=list)
+    series_by: str | None = None
     legend: bool = True
     tooltip: bool = True
     theme: str = "default"
 
     @model_validator(mode="after")
     def _validate_series(self) -> "BarChart":
+        _validate_series_by(self.series_by, self.series)
         _validate_series_fields(self.y_axis, self.series)
         return self
 
@@ -65,12 +74,14 @@ class ScatterChart(BaseModel):
     x_axis: str
     y_axis: str
     series: list[SeriesConfig] = Field(default_factory=list)
+    series_by: str | None = None
     legend: bool = True
     tooltip: bool = True
     theme: str = "default"
 
     @model_validator(mode="after")
     def _validate_series(self) -> "ScatterChart":
+        _validate_series_by(self.series_by, self.series)
         _validate_series_fields(self.y_axis, self.series)
         return self
 

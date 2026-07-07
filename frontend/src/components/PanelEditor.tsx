@@ -14,6 +14,7 @@ export function defaultChartForType(type: ChartType, title: string): Chart {
         x_axis: "",
         y_axis: "",
         series: [],
+        series_by: null,
         legend: true,
         tooltip: true,
         zoom: false,
@@ -26,6 +27,7 @@ export function defaultChartForType(type: ChartType, title: string): Chart {
         x_axis: "",
         y_axis: "",
         series: [],
+        series_by: null,
         legend: true,
         tooltip: true,
         theme: "default",
@@ -37,6 +39,7 @@ export function defaultChartForType(type: ChartType, title: string): Chart {
         x_axis: "",
         y_axis: "",
         series: [],
+        series_by: null,
         legend: true,
         tooltip: true,
         theme: "default",
@@ -90,7 +93,13 @@ export function PanelEditor({
       (chart.type === "line" || chart.type === "bar" || chart.type === "scatter") &&
       (base.type === "line" || base.type === "bar" || base.type === "scatter")
     ) {
-      onChartChange({ ...base, x_axis: chart.x_axis, y_axis: chart.y_axis, series: chart.series });
+      onChartChange({
+        ...base,
+        x_axis: chart.x_axis,
+        y_axis: chart.y_axis,
+        series: chart.series,
+        series_by: chart.series_by,
+      });
       return;
     }
     onChartChange(base);
@@ -100,8 +109,14 @@ export function PanelEditor({
     if (chart.type !== "line" && chart.type !== "bar" && chart.type !== "scatter") return;
     onChartChange({
       ...chart,
+      series_by: null,
       series: [...chart.series, { field: "", axis: "left", label: null, type: null }],
     });
+  }
+
+  function updateSeriesBy(value: string) {
+    if (chart.type !== "line" && chart.type !== "bar" && chart.type !== "scatter") return;
+    onChartChange({ ...chart, series_by: value || null, series: value ? [] : chart.series });
   }
 
   function removeSeries(index: number) {
@@ -192,6 +207,23 @@ export function PanelEditor({
           {fieldSelect("X Axis", chart.x_axis, (value) => onChartChange({ ...chart, x_axis: value }))}
           {fieldSelect("Y Axis", chart.y_axis, (value) => onChartChange({ ...chart, y_axis: value }))}
 
+          <label className="field">
+            <span>Split Series By (optional)</span>
+            <select value={chart.series_by ?? ""} onChange={(event) => updateSeriesBy(event.target.value)}>
+              <option value="">None (wide format)</option>
+              {columns.map((column) => (
+                <option key={column} value={column}>
+                  {column}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {chart.series_by ? (
+            <p className="wizard-panel__hint">
+              Each distinct value in "{chart.series_by}" becomes its own series on the left axis.
+            </p>
+          ) : (
           <div className="field" style={{ maxWidth: "none" }}>
             <span>Additional Series</span>
             {chart.series.map((series, index) => (
@@ -246,6 +278,7 @@ export function PanelEditor({
               + Add Series
             </button>
           </div>
+          )}
         </>
       )}
 

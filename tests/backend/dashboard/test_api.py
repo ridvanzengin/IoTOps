@@ -97,6 +97,25 @@ def test_add_panel_returns_dashboard_with_panel(client: TestClient) -> None:
     assert len(response.json()["panels"]) == 1
 
 
+def test_add_panel_rejects_series_by_combined_with_series(client: TestClient) -> None:
+    created = client.post("/api/dashboard", json=VALID_PAYLOAD).json()
+    payload = {
+        **PANEL_PAYLOAD,
+        "chart": {
+            "type": "line",
+            "title": "Temperature",
+            "x_axis": "time",
+            "y_axis": "value",
+            "series_by": "device_id",
+            "series": [{"field": "humidity"}],
+        },
+    }
+
+    response = client.post(f"/api/dashboard/{created['id']}/panel", json=payload)
+
+    assert response.status_code == 422
+
+
 def test_update_panel_edits_it(client: TestClient) -> None:
     created = client.post("/api/dashboard", json=VALID_PAYLOAD).json()
     with_panel = client.post(f"/api/dashboard/{created['id']}/panel", json=PANEL_PAYLOAD).json()
