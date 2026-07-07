@@ -8,6 +8,7 @@ import { ApiError } from "../api/client";
 import { getDashboard, removePanel, runPanelQuery, saveLayout } from "../api/dashboard";
 import { ChartPreview } from "../components/ChartPreview";
 import { MoreIcon, PlusIcon } from "../components/icons";
+import { DEFAULT_REFRESH_INTERVAL, REFRESH_INTERVALS } from "../constants/refreshIntervals";
 import { DEFAULT_TIME_RANGE, TIME_RANGES } from "../constants/timeRanges";
 import { resolveVariablesFrom } from "../utils/variables";
 import type { Dashboard, Panel } from "../types/dashboard";
@@ -26,6 +27,7 @@ export function DashboardEditor() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [timeRange, setTimeRange] = useState(DEFAULT_TIME_RANGE);
+  const [refreshInterval, setRefreshInterval] = useState(DEFAULT_REFRESH_INTERVAL);
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
   const [variableOptions, setVariableOptions] = useState<Record<string, string[]>>({});
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -106,6 +108,15 @@ export function DashboardEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashboard, timeRange, variableValues]);
 
+  useEffect(() => {
+    if (!dashboard) return;
+    const ms = REFRESH_INTERVALS.find((option) => option.code === refreshInterval)?.ms;
+    if (!ms) return;
+    const intervalId = setInterval(() => refreshPanelData(dashboard.panels, timeRange, variableValues), ms);
+    return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboard, timeRange, variableValues, refreshInterval]);
+
   async function handleRemovePanel(panelId: string) {
     if (!id) return;
     setOpenMenu(null);
@@ -175,6 +186,19 @@ export function DashboardEditor() {
             {TIME_RANGES.map((range) => (
               <option key={range.code} value={range.code}>
                 {range.label}
+              </option>
+            ))}
+          </select>
+
+          <select
+            className="dashboard-toolbar__control"
+            aria-label="Refresh interval"
+            value={refreshInterval}
+            onChange={(event) => setRefreshInterval(event.target.value)}
+          >
+            {REFRESH_INTERVALS.map((option) => (
+              <option key={option.code} value={option.code}>
+                {option.label}
               </option>
             ))}
           </select>

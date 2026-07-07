@@ -264,19 +264,23 @@ rendering/config change, not part of the SQL-macro mechanism:
   since distinct series names are discovered at query time rather than
   known statically the way dual-axis's per-field axis assignment requires.
 
-**One follow-up remains queued for next session — dashboard auto-refresh
-interval.** A Grafana-style "Refresh" dropdown (Off / 10s / 30s / 1m / 5m, ...) next to
-the time range picker in the dashboard toolbar, that re-runs
-`refreshPanelData` on an interval instead of only on load/variable/
-time-range change. Mechanically small (a `{code, label}[]` table mirroring
-`constants/timeRanges.ts`, a `setInterval`/`useEffect` in
-`DashboardEditor.tsx` cleared on interval change or unmount) but note:
-`Panel.refresh_interval: int = 0` already exists on the `PanelInput`/`Panel`
-model (`backend/app/dashboard/models.py`) and has been dormant/unused since
-Milestone 3 started — decide during planning whether this new feature is
-purely dashboard-level (simplest, matches Grafana's own top-bar behavior)
-or should finally wire up that per-panel field for individual overrides,
-rather than adding a second, disconnected refresh concept.
+The fifth and final follow-up, dashboard auto-refresh interval, is now
+closed, and with it Milestone 3 has no more open follow-ups.
+
+- **Dashboard auto-refresh**: a "Refresh" dropdown (`constants/refreshIntervals.ts`
+  — Off/10s/30s/1m/5m, default 10s) sits next to the time range picker in
+  `DashboardEditor.tsx`'s toolbar. A `setInterval`/`useEffect` re-runs the
+  same `refreshPanelData` already used for load/variable/time-range changes,
+  cleared on interval change or unmount. Dashboard-level only, matching the
+  existing time-range picker's precedent: `DashboardEditor` already applies
+  one dashboard-wide time range to every panel unconditionally, ignoring
+  each panel's own persisted `time_range` default, so treating refresh the
+  same way is consistent rather than introducing a second, differently-scoped
+  override concept. `Panel.refresh_interval: int = 0`
+  (`backend/app/dashboard/models.py`) remains dormant/unused, same as
+  before — wiring it up would need new per-panel override plumbing with no
+  existing precedent, whereas the dashboard-level toggle needed zero backend
+  changes.
 
 **Acceptance Criteria**
 
