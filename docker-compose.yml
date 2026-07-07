@@ -88,6 +88,24 @@ services:
     profiles:
       - tools
 
+  # Beekeeping showcase (Milestone 4) -- first end-to-end platform demo.
+  # One-command demo from a cold stop, since Compose always includes
+  # services with no `profiles:` key regardless of which profile is passed:
+  # `docker compose --profile beekeeping up -d`
+  beekeeping-simulator:
+    build:
+      context: examples/beekeeping-simulator
+    environment:
+      BACKEND_BASE_URL: http://backend:8000
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - mosquitto
+    networks:
+      - iotops
+    profiles:
+      - beekeeping
+
 volumes:
   mongo_data:
   timescale_data:

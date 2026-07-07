@@ -310,6 +310,46 @@ is the first of several planned domain showcases — see
 The swarm-alert rule is intentionally excluded from v1 — it depends on the
 Automation Engine and ships in v1.1 instead.
 
+**Status: done.** `examples/beekeeping-simulator/` (sibling to
+`examples/mqtt-publisher/`) simulates 2 apiaries × 3 hives (6 hives total)
+publishing temperature/humidity/weight to `beekeeping/hive` over MQTT, using
+a small bounded random walk per hive (reverting toward a healthy-brood-nest
+midpoint for temperature/humidity, slow net-upward drift for weight) so
+charts read as plausible sensor data rather than pure noise.
+
+Unlike `mqtt-publisher`, this showcase also provisions its own Collector and
+Dashboard on startup — a new pattern for this repo (`seed.py`, using
+`requests` against the backend's own REST API, looked up by name and reused
+rather than duplicated on every restart, since nothing in this compose setup
+gates container start on the backend/Mongo/Timescale actually being ready to
+serve — the seed step retries with backoff itself). One container
+(`main.py`) runs the idempotent seed step once, then hands off to the
+long-running hive-telemetry publish loop.
+
+The Dashboard doubles as a live demonstration of two Milestone 3 features
+built the same week: chained/predicate variables (`apiary` → `hive`, mirroring
+the Project → Device example already documented for the Variable Builder)
+and long-format charts (`series_by`), used in two different scopes to make
+the distinction concrete rather than accidentally conflating them — "Apiary
+Hives Temperature" filters by the selected `$apiary` only and splits that
+apiary's 3 hives into one line each, while "All Hives Weight" carries no
+variable filter at all and always splits all 6 hives, across both apiaries,
+into one line each. Both read from one query each — never one line per
+hardcoded column.
+
+`docker-compose.yml` gates the whole thing behind its own `beekeeping`
+profile (not `tools`, since this is the flagship v1 demo, not a manual
+verification tool) with `restart: unless-stopped` — the one deliberate
+deviation from `mqtt-publisher`'s pattern, since a transient MQTT/DB blip
+silently killing the flagship demo's data flow is a worse failure mode here
+than for a dev-only tool. Confirmed via `docker compose --profile beekeeping
+config --services` that Compose always includes every service with no
+`profiles:` key regardless of which profile is requested — so `docker
+compose --profile beekeeping up -d` alone is the literal one command that
+takes a fully cold stop to a live, populated dashboard, satisfying both this
+milestone's acceptance criteria and the [v1 Definition of
+Done](#v1-definition-of-done) bullet below verbatim.
+
 **Acceptance Criteria**
 
 - Demo runs with one command.
