@@ -5,7 +5,8 @@ import pytest
 from docker.errors import NotFound
 
 from app.collector.docker import CollectorDockerManager
-from app.collector.models import Collector, InputPlugin, OutputPlugin
+from app.collector.models import Collector
+from app.shared.models import InputPlugin, OutputPlugin
 from app.shared.enums import CollectorStatus
 
 

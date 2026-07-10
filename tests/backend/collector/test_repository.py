@@ -3,7 +3,8 @@ from uuid import uuid4
 import pytest
 from mongomock_motor import AsyncMongoMockClient
 
-from app.collector.models import Collector, InputPlugin, OutputPlugin
+from app.collector.models import Collector
+from app.shared.models import InputPlugin, OutputPlugin
 from app.collector.repository import CollectorRepository
 from app.shared.exceptions import EntityNotFoundError
 

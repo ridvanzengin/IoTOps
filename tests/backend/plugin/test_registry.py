@@ -28,15 +28,19 @@ def test_list_filters_by_category() -> None:
 
     inputs = registry.list(category=PluginCategory.INPUT)
     outputs = registry.list(category=PluginCategory.OUTPUT)
+    processors = registry.list(category=PluginCategory.PROCESSOR)
 
     assert [plugin.name for plugin in inputs] == ["mqtt"]
-    assert [plugin.name for plugin in outputs] == ["timescaledb"]
+    assert [plugin.name for plugin in outputs] == ["timescaledb", "celery"]
+    assert [plugin.name for plugin in processors] == ["rule"]
 
 
 def test_list_without_category_returns_everything() -> None:
     registry = build_default_registry()
 
-    assert len(registry.list()) == 2
+    # mqtt (input), timescaledb + celery (outputs), rule (processor) --
+    # see app/plugin/registry.py's build_default_registry().
+    assert len(registry.list()) == 4
 
 
 def test_plugin_schema_exposes_field_defaults_for_form_prefill() -> None:
