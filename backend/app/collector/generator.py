@@ -2,19 +2,24 @@ from typing import Any
 
 import tomli_w
 
-from app.collector.models import Collector, InputPlugin, OutputPlugin, ProcessorPlugin
 from app.plugin.registry import PluginRegistry
+from app.shared.models import InputPlugin, OutputPlugin, ProcessorPlugin
 
 PluginInstance = InputPlugin | ProcessorPlugin | OutputPlugin
 
 
-def generate_toml(collector: Collector, registry: PluginRegistry) -> str:
+def generate_toml(
+    inputs: list[InputPlugin],
+    processors: list[ProcessorPlugin],
+    outputs: list[OutputPlugin],
+    registry: PluginRegistry,
+) -> str:
     document: dict[str, Any] = {
         "agent": {"interval": "10s", "flush_interval": "10s"},
     }
-    _merge_section(document, "inputs", collector.inputs, registry)
-    _merge_section(document, "processors", collector.processors, registry)
-    _merge_section(document, "outputs", collector.outputs, registry)
+    _merge_section(document, "inputs", inputs, registry)
+    _merge_section(document, "processors", processors, registry)
+    _merge_section(document, "outputs", outputs, registry)
     return tomli_w.dumps(document)
 
 

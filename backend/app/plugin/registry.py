@@ -5,7 +5,9 @@ from pydantic import BaseModel, ValidationError
 
 from app.plugin.inputs.mqtt import MqttConsumerConfig
 from app.plugin.models import Plugin, plugin_id
+from app.plugin.outputs.celery import CeleryOutputConfig
 from app.plugin.outputs.timescaledb import TimescaleDBOutputConfig
+from app.plugin.processors.rule import RuleProcessorConfig
 from app.shared.enums import PluginCategory
 from app.shared.exceptions import EntityNotFoundError, PluginConfigurationError
 
@@ -85,6 +87,28 @@ def build_default_registry() -> PluginRegistry:
             telegraf_name="postgresql",
             config_model=TimescaleDBOutputConfig,
             description="Writes telemetry measurements into a TimescaleDB hypertable.",
+            supported_platforms=["linux/amd64", "linux/arm64"],
+        )
+    )
+    registry.register(
+        PluginDefinition(
+            name="rule",
+            category=PluginCategory.PROCESSOR,
+            telegraf_name="rule",
+            config_model=RuleProcessorConfig,
+            description="Evaluates structured rules against incoming metrics, "
+            "deduplicating repeat matches via Redis.",
+            supported_platforms=["linux/amd64", "linux/arm64"],
+        )
+    )
+    registry.register(
+        PluginDefinition(
+            name="celery",
+            category=PluginCategory.OUTPUT,
+            telegraf_name="celery",
+            config_model=CeleryOutputConfig,
+            description="Enqueues matched-rule metrics as Celery tasks onto a "
+            "Redis-backed broker/queue.",
             supported_platforms=["linux/amd64", "linux/arm64"],
         )
     )

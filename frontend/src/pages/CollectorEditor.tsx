@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { createCollector } from "../api/collector";
 import { listPlugins } from "../api/plugin";
 import { listProjects } from "../api/project";
-import { PluginConfigForm } from "../components/PluginConfigForm";
+import { PluginRows } from "../components/PluginRows";
 import { defaultsFromSchema } from "../utils/jsonSchema";
 import type {
   CollectorInputPayload,
@@ -13,15 +13,21 @@ import type {
   OutputPluginPayload,
   ProcessorPluginPayload,
 } from "../types/collector";
-import type { Plugin, PluginCategory } from "../types/plugin";
+import type { Plugin } from "../types/plugin";
 import type { Project } from "../types/project";
 import "./Collector.css";
 
 const STEP_LABELS = ["Basic Info", "Input", "Output", "Review"];
 
-function pluginByType(plugins: Plugin[], pluginType: string): Plugin | undefined {
-  return plugins.find((plugin) => plugin.name === pluginType);
-}
+// A Collector only ever writes to TimescaleDB -- "celery" is also
+// registered under PluginCategory.OUTPUT (for Automater), but the celery
+// output plugin enqueues every metric it receives unconditionally (see
+// custom-telegraf/plugins/outputs/celery); it's only safe to use behind a
+// rule processor that already filtered down to matched events. A Collector
+// pipeline has no rule processor, so offering "celery" here would let a
+// user flood the Celery queue with every raw telemetry point. See
+// AutomaterEditor.tsx for the mirror image.
+const COLLECTOR_OUTPUT_PLUGIN_NAMES = ["timescaledb"];
 
 function StepIndicator({ currentStep }: { currentStep: number }) {
   return (
@@ -39,94 +45,6 @@ function StepIndicator({ currentStep }: { currentStep: number }) {
           </Fragment>
         );
       })}
-    </div>
-  );
-}
-
-interface PluginRowsProps<
-  T extends { plugin_type: string; enabled: boolean; configuration: Record<string, unknown> },
-> {
-  category: PluginCategory;
-  availablePlugins: Plugin[];
-  rows: T[];
-  onChange: (rows: T[]) => void;
-  makeRow: (plugin: Plugin) => T;
-  renderExtraFields?: (row: T, update: (changes: Partial<T>) => void) => ReactNode;
-}
-
-function PluginRows<
-  T extends { plugin_type: string; enabled: boolean; configuration: Record<string, unknown> },
->({ category, availablePlugins, rows, onChange, makeRow, renderExtraFields }: PluginRowsProps<T>) {
-  const options = availablePlugins.filter((plugin) => plugin.category === category);
-
-  function addRow() {
-    if (options.length === 0) return;
-    onChange([...rows, makeRow(options[0])]);
-  }
-
-  function removeRow(index: number) {
-    onChange(rows.filter((_, i) => i !== index));
-  }
-
-  function updateRow(index: number, changes: Partial<T>) {
-    onChange(rows.map((row, i) => (i === index ? { ...row, ...changes } : row)));
-  }
-
-  return (
-    <div>
-      {rows.map((row, index) => {
-        const plugin = pluginByType(options, row.plugin_type);
-        return (
-          <div key={index} className="plugin-row">
-            <div className="plugin-row__header">
-              <select
-                value={row.plugin_type}
-                onChange={(event) => {
-                  const nextPlugin = pluginByType(options, event.target.value);
-                  updateRow(index, {
-                    plugin_type: event.target.value,
-                    configuration: nextPlugin ? defaultsFromSchema(nextPlugin.configuration_schema) : {},
-                  } as Partial<T>);
-                }}
-              >
-                {options.map((option) => (
-                  <option key={option.name} value={option.name}>
-                    {option.name}
-                  </option>
-                ))}
-              </select>
-              {renderExtraFields?.(row, (changes) => updateRow(index, changes))}
-              <div className="plugin-row__spacer" />
-              <label className="plugin-row__enabled">
-                <input
-                  type="checkbox"
-                  checked={row.enabled}
-                  onChange={(event) => updateRow(index, { enabled: event.target.checked } as Partial<T>)}
-                />
-                Enabled
-              </label>
-              <button type="button" className="button button--danger" onClick={() => removeRow(index)}>
-                Remove
-              </button>
-            </div>
-            {plugin && (
-              <PluginConfigForm
-                schema={plugin.configuration_schema}
-                configuration={row.configuration}
-                onChange={(configuration) => updateRow(index, { configuration } as Partial<T>)}
-              />
-            )}
-          </div>
-        );
-      })}
-      <button type="button" className="button" onClick={addRow} disabled={options.length === 0}>
-        + Add {category}
-      </button>
-      {options.length === 0 && (
-        <p className="collector-page__error" style={{ marginTop: 12 }}>
-          No {category} plugins are registered yet.
-        </p>
-      )}
     </div>
   );
 }
@@ -186,7 +104,9 @@ export function CollectorEditor() {
       }
     }
     if (nextStep === 3 && outputs.length === 0) {
-      const firstOutput = plugins.find((plugin) => plugin.category === "output");
+      const firstOutput = plugins.find(
+        (plugin) => plugin.category === "output" && COLLECTOR_OUTPUT_PLUGIN_NAMES.includes(plugin.name),
+      );
       if (firstOutput) {
         setOutputs([
           {
@@ -315,7 +235,7 @@ export function CollectorEditor() {
             <p className="wizard-panel__hint">Where telemetry is written to.</p>
             <PluginRows
               category="output"
-              availablePlugins={plugins}
+              availablePlugins={plugins.filter((plugin) => COLLECTOR_OUTPUT_PLUGIN_NAMES.includes(plugin.name))}
               rows={outputs}
               onChange={setOutputs}
               makeRow={(plugin) => ({

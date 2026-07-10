@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.ai.api import router as ai_router
+from app.automater.api import router as automater_router
 from app.collector.api import router as collector_router
 from app.config import settings
 from app.dashboard.api import router as dashboard_router
@@ -28,6 +29,7 @@ app.add_middleware(
 )
 
 app.include_router(ai_router)
+app.include_router(automater_router)
 app.include_router(collector_router)
 app.include_router(dashboard_router)
 app.include_router(plugin_router)

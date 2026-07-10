@@ -1,0 +1,22 @@
+.automater-editor__grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(420px, 1.6fr);
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .automater-editor__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.automater-editor__warning {
+  color: var(--accent-h);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 4px 0 16px;
+  font-size: 13px;
+}

@@ -63,6 +63,22 @@ services:
     networks:
       - iotops
 
+  # Consumes the Celery tasks custom-telegraf's outputs/celery plugin
+  # enqueues on a matched rule -- see app/automater/tasks.py. Reuses the
+  # backend image (same Python env/dependencies) with the command
+  # overridden to run a Celery worker instead of the API server.
+  celery-worker:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    env_file:
+      - .env
+    command: ["celery", "-A", "app.automater.tasks", "worker", "--loglevel=info"]
+    depends_on:
+      - redis
+    networks:
+      - iotops
+
   frontend:
     build:
       context: .

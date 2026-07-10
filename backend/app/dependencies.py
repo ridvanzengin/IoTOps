@@ -4,6 +4,9 @@ import docker
 import httpx
 
 from app.ai.service import AiService
+from app.automater.docker import AutomaterDockerManager
+from app.automater.repository import AutomaterRepository
+from app.automater.service import AutomaterService
 from app.collector.docker import CollectorDockerManager
 from app.collector.repository import CollectorRepository
 from app.collector.service import CollectorService
@@ -19,6 +22,7 @@ from app.telemetry.service import TelemetryService
 
 _registry: PluginRegistry | None = None
 _docker_manager: CollectorDockerManager | None = None
+_automater_docker_manager: AutomaterDockerManager | None = None
 _http_client: httpx.AsyncClient | None = None
 
 
@@ -47,6 +51,27 @@ def get_collector_service() -> CollectorService:
         repository=CollectorRepository(get_database()),
         registry=get_plugin_registry(),
         docker_manager=get_docker_manager(),
+    )
+
+
+def get_automater_docker_manager() -> AutomaterDockerManager:
+    global _automater_docker_manager
+    if _automater_docker_manager is None:
+        _automater_docker_manager = AutomaterDockerManager(
+            client=docker.from_env(),
+            runtime_dir=Path(settings.runtime_dir),
+            host_runtime_dir=Path(settings.host_runtime_dir or settings.runtime_dir),
+            network=settings.docker_network,
+            telegraf_image=settings.automater_telegraf_image,
+        )
+    return _automater_docker_manager
+
+
+def get_automater_service() -> AutomaterService:
+    return AutomaterService(
+        repository=AutomaterRepository(get_database()),
+        registry=get_plugin_registry(),
+        docker_manager=get_automater_docker_manager(),
     )
 
 
