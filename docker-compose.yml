@@ -104,6 +104,20 @@ services:
     profiles:
       - tools
 
+  # Manual rule-condition verification tool (Milestone 5), not part of the
+  # app. Companion to the "Rule Testing Sandbox" project's Collector (2
+  # mqtt inputs covering tags/numeric/string-field conditions).
+  # Off by default: `docker compose --profile tools up rule-testing-publisher`
+  rule-testing-publisher:
+    build:
+      context: examples/rule-testing-publisher
+    depends_on:
+      - mosquitto
+    networks:
+      - iotops
+    profiles:
+      - tools
+
   # Beekeeping showcase (Milestone 4) -- first end-to-end platform demo.
   # One-command demo from a cold stop, since Compose always includes
   # services with no `profiles:` key regardless of which profile is passed:

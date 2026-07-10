@@ -13,6 +13,7 @@
   margin-top: 10px;
   border-collapse: collapse;
   font-size: 13px;
+  text-align: left;
 }
 
 .schema-condition__table th {
@@ -25,8 +26,13 @@
 }
 
 .schema-condition__table td {
+  text-align: left;
   padding: 4px 8px 4px 0;
   color: var(--text-h);
+}
+
+.schema-condition__table-col {
+  width: 32%;
 }
 
 .schema-condition__column {
@@ -38,7 +44,7 @@
 }
 
 .schema-condition__table select,
-.schema-condition__table input {
+.schema-condition__table input:not([type="checkbox"]) {
   padding: 4px 6px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -48,6 +54,10 @@
   color: var(--text-h);
   width: 100%;
   box-sizing: border-box;
+}
+
+.schema-condition__column input[type="checkbox"] {
+  flex: none;
 }
 
 .schema-condition__table select:disabled,

@@ -402,6 +402,50 @@ Processor and Celery Output plugins are custom Telegraf (Go) plugins, a
 different toolchain from the rest of the stack. Keeping it out of v1 keeps
 that risk off the critical path for the initial release.
 
+**Status: core engine done (2026-07-10); beekeeping swarm-alert wiring not
+started.** First two acceptance criteria are met and verified live against
+the real stack (not just unit-level): a real MQTT message crossing a rule's
+threshold gets tagged/deduped by `custom-telegraf`'s `processors.rule` and
+enqueued by its `outputs.celery`, consumed by a real Python `celery` worker
+(`app/automater/tasks.py`, new `celery-worker` compose service) within
+milliseconds. The third — wiring an actual swarm-alert rule into the
+beekeeping showcase itself — is **not** done; verification instead used a
+dedicated `examples/rule-testing-publisher` fixture (a "Rule Testing
+Sandbox" project with its own Collector, deliberately covering tags,
+numeric fields, and string fields across two tables) built specifically so
+rule-condition scenarios could be exercised without touching the showcase.
+Full detail — day-by-day, including several bugs found and fixed along the
+way — lives in `iotops-workspace/ROADMAP.md`, not duplicated here; short
+version:
+
+- Real Rule/Condition models, `RuleProcessorConfig`/`CeleryOutputConfig`
+  registered like any other plugin, `generate_toml` generalized to a shared
+  `Pipeline` base Collector and Automater both extend.
+- `processors.rule` (Go): real match/clear firing-state semantics via
+  Redis (`SETNX`-with-TTL / `DEL`, not just one-shot dedup), every enabled
+  rule on a matching table evaluated independently (not first-match-wins),
+  firing keys scoped by Rule `id` (not `name` — names are deliberately not
+  required unique), per-condition `AND`/`OR` chains folded strictly
+  left-to-right (`Rule.operator` removed in favor of `Condition.join`, so
+  `a==1 AND b>3 OR c<5` is expressible), condition lookups check both tags
+  and fields.
+- `outputs.celery` (Go): real Celery protocol v2 envelope, `LPUSH`ed onto
+  Redis, consumed by an unmodified Python `celery` worker with no
+  compatibility shim.
+- Automater and Rule are independently addressable: a project can have any
+  number of Automaters (never restricted to one, mirrors Collector); Rule
+  has its own lifecycle (activate/deactivate/delete) distinct from its
+  Automater's (deploy/stop/delete); an Automater can watch more than one
+  table (gains a new mqtt input, derived from a chosen Collector, the first
+  time a rule needs a table it doesn't already cover).
+- Frontend: rule-creation flow (Project → Automater picker, existing or
+  new → Collector picker when one's needed → rule metadata + DB-schema-
+  driven condition builder, filtered to the selected project/Collector's
+  own tables), automater-cards-with-nested-rule-tables list view with
+  confirm-gated Stop/Deactivate/Delete actions.
+- Zero automated tests either repo — explicitly deferred, next up now that
+  the engine itself has substantially settled.
+
 ---
 
 # v1.2 — AI Assistant

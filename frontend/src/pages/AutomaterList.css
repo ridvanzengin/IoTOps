@@ -1,0 +1,54 @@
+.automater-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.automater-list__card {
+  padding: 16px 20px;
+}
+
+.automater-list__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.automater-list__header > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.automater-list__project {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.automater-list__conditions {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.automater-list__rule-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.automater-list__rule-status--active {
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.automater-list__rule-status--inactive {
+  color: var(--text);
+  background: var(--bg-subtle);
+}

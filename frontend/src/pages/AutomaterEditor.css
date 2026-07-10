@@ -11,6 +11,22 @@
   }
 }
 
+.automater-editor__field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
+}
+
+.automater-editor__field-grid .field {
+  max-width: none;
+}
+
+@media (max-width: 500px) {
+  .automater-editor__field-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .automater-editor__warning {
   color: var(--accent-h);
   background: var(--accent-bg);

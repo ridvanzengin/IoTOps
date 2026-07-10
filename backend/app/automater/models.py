@@ -38,6 +38,16 @@ class Condition(BaseModel):
     operator: ConditionOperator
     value: float | str | bool
 
+    # How this condition combines with the running result of every
+    # condition before it in the Rule's list -- evaluated strictly
+    # left-to-right, no precedence, no parentheses ("a AND b OR c" is
+    # always (a AND b) OR c). Ignored for a Rule's first condition, since
+    # there's no prior result yet to combine with. Lives on Condition, not
+    # Rule, so mixed chains like "a==1 AND b>3 OR c<5" are expressible --
+    # a single per-Rule operator (the original flat design) could only ever
+    # be all-AND or all-OR. See ROADMAP.md's per-condition join note.
+    join: RuleOperator = RuleOperator.AND
+
 
 class Rule(BaseModel):
     id: UUID = Field(default_factory=uuid4)
@@ -58,7 +68,6 @@ class Rule(BaseModel):
     # Rule rather than being repeated on every Condition.
     table: str
 
-    operator: RuleOperator = RuleOperator.AND
     conditions: list[Condition]
 
     # Dedup parameters, per rule (see iotops-workspace/ROADMAP.md's Redis
@@ -87,6 +96,25 @@ class AutomaterPluginsBase(Pipeline):
 
 class AutomaterInput(AutomaterPluginsBase):
     pass
+
+
+class CreateRuleRequest(BaseModel):
+    project_id: UUID
+    rule: Rule
+
+    # Either automater_id (attach to an existing Automater in this
+    # project) or automater_name (+ collector_id, to derive the new
+    # Automater's input) must be given -- enforced in
+    # AutomaterService.create_rule, not here, since it's a cross-field
+    # business rule rather than a shape constraint.
+    automater_id: UUID | None = None
+    automater_name: str | None = None
+    automater_description: str = ""
+    collector_id: UUID | None = None
+
+
+class SetRuleEnabledRequest(BaseModel):
+    enabled: bool
 
 
 class Automater(AutomaterPluginsBase):

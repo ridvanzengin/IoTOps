@@ -168,7 +168,9 @@ The Collector never performs automation.
 
 ## Automater Service
 
-Another Docker container running Telegraf.
+Another Docker container running Telegraf. One Automater can subscribe to
+more than one MQTT input if its rules target more than one table — it's
+one deployed container per Automater, not one per table.
 
 Responsibilities
 

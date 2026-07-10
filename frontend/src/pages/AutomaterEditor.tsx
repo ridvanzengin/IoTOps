@@ -2,21 +2,19 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
-import { createAutomater } from "../api/automater";
+import { createRule, listAutomaters } from "../api/automater";
 import { listCollectors } from "../api/collector";
-import { listPlugins } from "../api/plugin";
 import { listProjects } from "../api/project";
 import { getTelemetrySchema } from "../api/telemetry";
 import { isNumericType, SchemaConditionBuilder } from "../components/SchemaConditionBuilder";
-import { defaultsFromSchema } from "../utils/jsonSchema";
 import type {
-  AutomaterInputPayload,
+  Automater,
   ConditionPayload,
-  RuleOperator,
+  CreateRuleRequest,
+  RulePayload,
   RuleSeverity,
 } from "../types/automater";
 import type { Collector, InputPluginPayload } from "../types/collector";
-import type { Plugin } from "../types/plugin";
 import type { Project } from "../types/project";
 import type { TelemetryTableSchema } from "../types/telemetry";
 import "./Collector.css";
@@ -25,10 +23,13 @@ import "../components/SchemaConditionBuilder.css";
 
 const RULE_SEVERITIES: RuleSeverity[] = ["low", "medium", "high", "critical"];
 
-// Only one Celery action ships in v1.1 (structured logging) -- see
-// iotops-workspace/ROADMAP.md's "already decided" list -- so the task name
-// is fixed rather than asked of the user.
-const CELERY_TASK_NAME = "automater.tasks.log_rule_match";
+// A dropdown option value, not a real Automater id -- selects the "create a
+// new Automater alongside this rule" path instead of attaching to an
+// existing one. See ROADMAP.md's Automater/Rule redesign note: a project
+// can have more than one Automater (mirrors Collector, which was never
+// restricted to one per project either), so the user picks which one a new
+// rule joins rather than it being implicit.
+const NEW_AUTOMATER = "__new__";
 
 function extractPlaceholders(message: string): string[] {
   const matches = message.match(/\{([a-zA-Z0-9_]+)\}/g) ?? [];
@@ -37,22 +38,23 @@ function extractPlaceholders(message: string): string[] {
 
 export function AutomaterEditor() {
   const navigate = useNavigate();
-  const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [collectors, setCollectors] = useState<Collector[]>([]);
+  const [automaters, setAutomaters] = useState<Automater[]>([]);
   const [schema, setSchema] = useState<TelemetryTableSchema[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [projectId, setProjectId] = useState("");
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
+  const [automaterId, setAutomaterId] = useState("");
+  const [automaterName, setAutomaterName] = useState("");
+  const [automaterDescription, setAutomaterDescription] = useState("");
+  const [collectorId, setCollectorId] = useState("");
 
   const [ruleName, setRuleName] = useState("");
   const [category, setCategory] = useState("");
   const [eventType, setEventType] = useState("");
   const [severity, setSeverity] = useState<RuleSeverity>("low");
   const [message, setMessage] = useState("");
-  const [ruleOperator, setRuleOperator] = useState<RuleOperator>("AND");
   const [identifiers, setIdentifiers] = useState<string[]>([]);
   const [ttl, setTtl] = useState("5m");
 
@@ -63,27 +65,134 @@ export function AutomaterEditor() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    listPlugins()
-      .then(setPlugins)
-      .catch(() => setLoadError("Failed to load available plugins."));
     listProjects()
       .then(setProjects)
       .catch(() => setLoadError("Failed to load available projects."));
     listCollectors()
       .then(setCollectors)
       .catch(() => setLoadError("Failed to load collectors."));
+    listAutomaters()
+      .then(setAutomaters)
+      .catch(() => setLoadError("Failed to load automaters."));
     getTelemetrySchema()
       .then(setSchema)
       .catch(() => setLoadError("Failed to load table schema."));
   }, []);
 
-  // No Input step: an Automater reuses whatever MQTT input the project's
-  // own Collector already has configured, so it observes the same
-  // telemetry stream the Collector writes to TimescaleDB. See
-  // iotops-workspace/ROADMAP.md's Phase C redesign note.
+  const projectAutomaters = useMemo(
+    () => automaters.filter((a) => a.project_id === projectId),
+    [automaters, projectId],
+  );
+  const projectCollectors = useMemo(
+    () => collectors.filter((c) => c.project_id === projectId),
+    [collectors, projectId],
+  );
+
+  function mqttTableNames(inputs: { plugin_type: string; configuration: Record<string, unknown> }[]): Set<string> {
+    const names = new Set<string>();
+    for (const input of inputs) {
+      if (input.plugin_type !== "mqtt") continue;
+      const override = input.configuration?.name_override;
+      // Telegraf measurement-names an input after its own plugin name
+      // ("mqtt_consumer") when name_override isn't set -- match that
+      // default rather than treating "no override" as "no table", or the
+      // input just silently vanishes from this filtered list.
+      names.add(typeof override === "string" && override ? override : "mqtt_consumer");
+    }
+    return names;
+  }
+
+  // Every table any of the project's Collectors actually write to --
+  // narrows the DB Schema panel down from "every table in TimescaleDB,
+  // from every project" (confusing once more than one project/showcase
+  // exists) to just the ones relevant here. Further narrowed to a single
+  // Collector's own tables below once one is picked.
+  const projectTables = useMemo(
+    () => mqttTableNames(projectCollectors.flatMap((c) => c.inputs)),
+    [projectCollectors],
+  );
+  const collectorTables = useMemo(() => {
+    const collector = collectors.find((c) => c.id === collectorId);
+    return collector ? mqttTableNames(collector.inputs) : null;
+  }, [collectors, collectorId]);
+
+  const visibleSchema = useMemo(() => {
+    if (!projectId) return schema;
+    const allowed = collectorTables ?? projectTables;
+    return schema.filter((t) => allowed.has(t.table));
+  }, [schema, projectId, projectTables, collectorTables]);
+
+  function handleProjectChange(nextProjectId: string) {
+    setProjectId(nextProjectId);
+    setAutomaterId("");
+    setAutomaterName("");
+    setAutomaterDescription("");
+    setCollectorId("");
+    // The previously chosen table/conditions may not belong to the new
+    // project at all -- clear them rather than leave a selection that's
+    // now hidden by the filter above but still technically submitted.
+    setTable("");
+    setConditions([]);
+  }
+
+  const isNewAutomater = automaterId === NEW_AUTOMATER;
+
+  // An Automater can watch more than one table (mirrors how a Collector can
+  // already have more than one mqtt input) -- so an *existing* Automater
+  // doesn't necessarily already have an input for whatever table this new
+  // rule ends up targeting. This is the set of tables it already covers,
+  // so we can tell "reuse an existing input" apart from "needs a new one".
+  const existingAutomaterTables = useMemo(() => {
+    if (isNewAutomater || !automaterId) return new Set<string>();
+    const automater = automaters.find((a) => a.id === automaterId);
+    return new Set(
+      (automater?.inputs ?? [])
+        .filter((i) => i.plugin_type === "mqtt")
+        .map((i) => i.configuration?.name_override as string | undefined)
+        .filter((name): name is string => Boolean(name)),
+    );
+  }, [isNewAutomater, automaterId, automaters]);
+
+  // True once a table's been chosen and the selected existing Automater
+  // doesn't already have an input for it -- at that point we need a
+  // Collector picker (same as the new-Automater path) to derive one from,
+  // same as create_rule requires server-side.
+  const needsNewInputForTable = !isNewAutomater && automaterId.length > 0 && table.length > 0 && !existingAutomaterTables.has(table);
+
+  // No Input step for an existing Automater whose input already covers this
+  // rule's table -- it's just reused. Otherwise (a brand new Automater, or
+  // an existing one that doesn't cover this table yet) the input is derived
+  // from whichever Collector the user picks below -- not re-asked field by
+  // field, since it must observe the same telemetry stream that Collector
+  // already writes to TimescaleDB anyway. See ROADMAP.md's Phase C /
+  // Automater-Rule notes.
   const derivedInput = useMemo((): InputPluginPayload | null => {
-    const collector = collectors.find((c) => c.project_id === projectId);
-    const mqttInput = collector?.inputs.find((input) => input.plugin_type === "mqtt");
+    if (!isNewAutomater && automaterId && !needsNewInputForTable) {
+      const mqttInput = automaters
+        .find((a) => a.id === automaterId)
+        ?.inputs.find((i) => i.plugin_type === "mqtt" && i.configuration?.name_override === table);
+      if (!mqttInput) return null;
+      return {
+        plugin_type: mqttInput.plugin_type,
+        name: mqttInput.name,
+        enabled: true,
+        configuration: mqttInput.configuration,
+      };
+    }
+
+    // A Collector can have more than one mqtt input (one per table/topic --
+    // e.g. device_metrics and device_status), so a multi-input Collector's
+    // input must be matched to the rule's target table via name_override.
+    // But `table` isn't chosen until the user interacts with the DB Schema
+    // panel -- for the common case of a single-mqtt-input Collector there's
+    // no ambiguity to resolve in the first place, so don't make that one
+    // wait on `table` too (it used to resolve immediately on Collector
+    // selection; only gate on `table` when there's actually more than one
+    // candidate to disambiguate).
+    const candidates =
+      collectors.find((c) => c.id === collectorId)?.inputs.filter((i) => i.plugin_type === "mqtt") ?? [];
+    const mqttInput =
+      candidates.length === 1 ? candidates[0] : candidates.find((i) => i.configuration?.name_override === table);
     if (!mqttInput) return null;
     return {
       plugin_type: mqttInput.plugin_type,
@@ -91,7 +200,15 @@ export function AutomaterEditor() {
       enabled: true,
       configuration: mqttInput.configuration,
     };
-  }, [collectors, projectId]);
+  }, [isNewAutomater, automaterId, needsNewInputForTable, automaters, collectors, collectorId, table]);
+
+  // Distinguishes "this Collector genuinely has no mqtt input" from "it has
+  // more than one and we can't tell which until a table is picked" -- these
+  // need different error messages (see the Collector-picker JSX below).
+  const collectorMqttInputCount = useMemo(
+    () => collectors.find((c) => c.id === collectorId)?.inputs.filter((i) => i.plugin_type === "mqtt").length ?? 0,
+    [collectors, collectorId],
+  );
 
   const inputTagKeys = useMemo(
     () =>
@@ -100,6 +217,17 @@ export function AutomaterEditor() {
         : [],
     [derivedInput],
   );
+
+  // Tag keys are the natural default for "which fields identify one
+  // occurrence" -- pre-fill Dedup Identifiers with them whenever the
+  // resolved input changes (a different Automater or Collector picked).
+  // Re-fires only when inputTagKeys itself changes, so it won't clobber a
+  // manual edit made after settling on an input.
+  useEffect(() => {
+    if (inputTagKeys.length > 0) {
+      setIdentifiers(inputTagKeys);
+    }
+  }, [inputTagKeys]);
 
   const missingTagKeys = useMemo(() => {
     const referenced = new Set([...identifiers, ...extractPlaceholders(message)]);
@@ -115,17 +243,16 @@ export function AutomaterEditor() {
     });
   }, [identifiers, message, inputTagKeys, schema, table]);
 
-  const celeryPlugin = plugins.find((plugin) => plugin.name === "celery");
-
   function canSubmit(): boolean {
+    const automaterPartValid = isNewAutomater
+      ? automaterName.trim().length > 0 && collectorId.length > 0
+      : automaterId.length > 0 && (!needsNewInputForTable || collectorId.length > 0);
     return (
-      name.trim().length > 0 &&
       projectId.length > 0 &&
-      derivedInput !== null &&
+      automaterPartValid &&
       ruleName.trim().length > 0 &&
       table.length > 0 &&
-      conditions.length > 0 &&
-      celeryPlugin !== undefined
+      conditions.length > 0
     );
   }
 
@@ -133,65 +260,52 @@ export function AutomaterEditor() {
     event.preventDefault();
     setSubmitError(null);
 
-    if (!derivedInput || !celeryPlugin) {
-      setSubmitError("Missing required input or output plugin configuration.");
-      return;
-    }
-
-    const payload: AutomaterInputPayload = {
-      project_id: projectId,
-      name,
-      description,
+    const rule: RulePayload = {
+      name: ruleName,
+      description: "",
+      category,
+      event_type: eventType,
+      severity,
+      message,
       enabled: true,
-      inputs: [derivedInput],
-      rules: [
-        {
-          name: ruleName,
-          description: "",
-          category,
-          event_type: eventType,
-          severity,
-          message,
-          enabled: true,
-          priority: 0,
-          table,
-          operator: ruleOperator,
-          conditions,
-          identifiers,
-          ttl,
-        },
-      ],
-      outputs: [
-        {
-          plugin_type: "celery",
-          enabled: true,
-          configuration: { ...defaultsFromSchema(celeryPlugin.configuration_schema), task_name: CELERY_TASK_NAME },
-        },
-      ],
+      priority: 0,
+      table,
+      conditions,
+      identifiers,
+      ttl,
+    };
+
+    const payload: CreateRuleRequest = {
+      project_id: projectId,
+      rule,
+      automater_id: isNewAutomater ? null : automaterId,
+      automater_name: isNewAutomater ? automaterName : null,
+      automater_description: isNewAutomater ? automaterDescription : "",
+      // Needed both for a brand new Automater and for an existing one that
+      // doesn't have an input for this rule's table yet -- unneeded (and
+      // omitted) when reusing an existing Automater's already-covered table.
+      collector_id: isNewAutomater || needsNewInputForTable ? collectorId : null,
     };
 
     setSubmitting(true);
     try {
-      await createAutomater(payload);
+      await createRule(payload);
       navigate("/automaters");
     } catch (err) {
-      setSubmitError(err instanceof ApiError ? err.message : "Failed to create automater.");
+      setSubmitError(err instanceof ApiError ? err.message : "Failed to create rule.");
     } finally {
       setSubmitting(false);
     }
   }
 
-  const selectedProject = projects.find((project) => project.id === projectId);
-  const derivedCollector = collectors.find((c) => c.project_id === projectId);
-
   return (
     <main className="collector-page">
       <div className="collector-page__header">
-        <h1>New Automater</h1>
+        <h1>New Rule</h1>
       </div>
       <p style={{ margin: "-16px 0 24px", color: "var(--text)" }}>
         Pick the rule's metadata on the left, then build its condition(s) from the schema on the right.
-        Input is reused from this project's Collector; output is always Celery.
+        Attach it to an existing Automater or create a new one.
       </p>
 
       {loadError && <p className="collector-page__error">{loadError}</p>}
@@ -200,10 +314,14 @@ export function AutomaterEditor() {
       <form onSubmit={handleSubmit}>
         <div className="automater-editor__grid">
           <div className="wizard-panel">
-            <h2 className="wizard-panel__title">Basic Info</h2>
+            <h2 className="wizard-panel__title">Where this rule lives</h2>
             <label className="field">
               <span>Project</span>
-              <select value={projectId} onChange={(event) => setProjectId(event.target.value)} required>
+              <select
+                value={projectId}
+                onChange={(event) => handleProjectChange(event.target.value)}
+                required
+              >
                 <option value="">Select a project</option>
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>
@@ -213,73 +331,141 @@ export function AutomaterEditor() {
               </select>
             </label>
 
-            {projectId && !derivedInput && (
-              <p className="collector-page__error">
-                No Collector with an MQTT input was found for {selectedProject?.name ?? "this project"}.
-                Create one first — an Automater reuses the Collector's own input.
-              </p>
+            <label className="field">
+              <span>Automater</span>
+              <select
+                value={automaterId}
+                onChange={(event) => setAutomaterId(event.target.value)}
+                required
+                disabled={!projectId}
+              >
+                <option value="">Select an automater</option>
+                {projectAutomaters.map((automater) => (
+                  <option key={automater.id} value={automater.id}>
+                    {automater.name}
+                  </option>
+                ))}
+                <option value={NEW_AUTOMATER}>+ New Automater</option>
+              </select>
+            </label>
+
+            {isNewAutomater && (
+              <>
+                <label className="field">
+                  <span>New Automater Name</span>
+                  <input
+                    value={automaterName}
+                    onChange={(event) => setAutomaterName(event.target.value)}
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>New Automater Description</span>
+                  <input
+                    value={automaterDescription}
+                    onChange={(event) => setAutomaterDescription(event.target.value)}
+                  />
+                </label>
+              </>
             )}
-            {derivedInput && derivedCollector && (
+
+            {!isNewAutomater && automaterId && existingAutomaterTables.size > 0 && (
               <p className="automater-editor__warning" style={{ marginTop: -8 }}>
-                Reusing input from Collector <strong>{derivedCollector.name}</strong>: topics{" "}
-                {String((derivedInput.configuration.topics as string[] | undefined)?.join(", ") ?? "—")}, tag
-                keys {inputTagKeys.length > 0 ? inputTagKeys.join(", ") : "none"}.
+                This Automater already watches: {[...existingAutomaterTables].join(", ")}. Picking a
+                different table on the right will add a new input to it.
               </p>
             )}
 
-            <label className="field">
-              <span>Automater Name</span>
-              <input value={name} onChange={(event) => setName(event.target.value)} required />
-            </label>
-            <label className="field">
-              <span>Automater Description</span>
-              <input value={description} onChange={(event) => setDescription(event.target.value)} />
-            </label>
+            {(isNewAutomater || needsNewInputForTable) && (
+              <>
+                <label className="field">
+                  <span>Collector{needsNewInputForTable ? ` for ${table}` : ""}</span>
+                  <select
+                    value={collectorId}
+                    onChange={(event) => setCollectorId(event.target.value)}
+                    required
+                  >
+                    <option value="">Select a collector</option>
+                    {projectCollectors.map((collector) => (
+                      <option key={collector.id} value={collector.id}>
+                        {collector.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {projectId && projectCollectors.length === 0 && (
+                  <p className="collector-page__error">
+                    No Collector exists for this project yet — create one first, an Automater reuses a
+                    Collector's own MQTT input.
+                  </p>
+                )}
+                {collectorId && !derivedInput && collectorMqttInputCount === 0 && (
+                  <p className="collector-page__error">
+                    The selected Collector has no MQTT input configured.
+                  </p>
+                )}
+                {collectorId && !derivedInput && collectorMqttInputCount > 1 && (
+                  <p className="automater-editor__warning" style={{ marginTop: -8 }}>
+                    This Collector has {collectorMqttInputCount} MQTT inputs — pick a column from a table in
+                    the DB Schema panel first, so we know which one this rule's table is.
+                  </p>
+                )}
+              </>
+            )}
+            {derivedInput && (
+              <p className="automater-editor__warning" style={{ marginTop: -8 }}>
+                Input topics {String((derivedInput.configuration.topics as string[] | undefined)?.join(", ") ?? "—")},
+                tag keys {inputTagKeys.length > 0 ? inputTagKeys.join(", ") : "none"}.
+              </p>
+            )}
 
             <h2 className="wizard-panel__title" style={{ marginTop: 24 }}>
               Rule
             </h2>
-            <label className="field">
-              <span>Rule Name</span>
-              <input value={ruleName} onChange={(event) => setRuleName(event.target.value)} required />
-            </label>
-            <label className="field">
-              <span>Category</span>
-              <input value={category} onChange={(event) => setCategory(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>Event Type</span>
-              <input value={eventType} onChange={(event) => setEventType(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>Severity</span>
-              <select value={severity} onChange={(event) => setSeverity(event.target.value as RuleSeverity)}>
-                {RULE_SEVERITIES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Dedup Identifiers</span>
-              <input
-                value={identifiers.join(", ")}
-                placeholder="device_id, node"
-                onChange={(event) =>
-                  setIdentifiers(
-                    event.target.value
-                      .split(",")
-                      .map((item) => item.trim())
-                      .filter((item) => item.length > 0),
-                  )
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Dedup TTL</span>
-              <input value={ttl} placeholder="5m" onChange={(event) => setTtl(event.target.value)} />
-            </label>
+            <div className="automater-editor__field-grid">
+              <label className="field">
+                <span>Rule Name</span>
+                <input value={ruleName} onChange={(event) => setRuleName(event.target.value)} required />
+              </label>
+              <label className="field">
+                <span>Severity</span>
+                <select value={severity} onChange={(event) => setSeverity(event.target.value as RuleSeverity)}>
+                  {RULE_SEVERITIES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Category</span>
+                <input value={category} onChange={(event) => setCategory(event.target.value)} />
+              </label>
+              <label className="field">
+                <span>Event Type</span>
+                <input value={eventType} onChange={(event) => setEventType(event.target.value)} />
+              </label>
+              <label className="field">
+                <span>Dedup Identifiers</span>
+                <input
+                  key={identifiers.join(",")}
+                  defaultValue={identifiers.join(", ")}
+                  placeholder="device_id, node"
+                  onBlur={(event) =>
+                    setIdentifiers(
+                      event.target.value
+                        .split(",")
+                        .map((item) => item.trim())
+                        .filter((item) => item.length > 0),
+                    )
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Dedup TTL</span>
+                <input value={ttl} placeholder="5m" onChange={(event) => setTtl(event.target.value)} />
+              </label>
+            </div>
             <label className="field">
               <span>Message</span>
               <textarea rows={3} value={message} onChange={(event) => setMessage(event.target.value)} />
@@ -296,19 +482,8 @@ export function AutomaterEditor() {
 
           <div className="wizard-panel">
             <h2 className="wizard-panel__title">DB Schema</h2>
-            <p className="wizard-panel__hint">
-              Check the column(s) this rule evaluates. Every checked column comes from the same table —
-              checking a column on a different table replaces the current selection.
-            </p>
-            <label className="field" style={{ maxWidth: 160 }}>
-              <span>Combine with</span>
-              <select value={ruleOperator} onChange={(event) => setRuleOperator(event.target.value as RuleOperator)}>
-                <option value="AND">AND</option>
-                <option value="OR">OR</option>
-              </select>
-            </label>
             <SchemaConditionBuilder
-              schema={schema}
+              schema={visibleSchema}
               table={table}
               conditions={conditions}
               onChange={(nextTable, nextConditions) => {
@@ -324,7 +499,7 @@ export function AutomaterEditor() {
             Cancel
           </button>
           <button type="submit" className="button button--primary" disabled={!canSubmit() || submitting}>
-            {submitting ? "Creating..." : "Create Automater"}
+            {submitting ? "Creating..." : "Create Rule"}
           </button>
         </div>
       </form>

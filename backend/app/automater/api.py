@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
-from app.automater.models import Automater, AutomaterInput
+from app.automater.models import Automater, AutomaterInput, CreateRuleRequest, SetRuleEnabledRequest
 from app.automater.service import AutomaterService
 from app.dependencies import get_automater_service
 
@@ -15,6 +15,40 @@ async def create_automater(
     service: AutomaterService = Depends(get_automater_service),
 ) -> Automater:
     return await service.create(payload)
+
+
+@router.post("/rules", response_model=Automater, status_code=201)
+async def create_rule(
+    payload: CreateRuleRequest,
+    service: AutomaterService = Depends(get_automater_service),
+) -> Automater:
+    return await service.create_rule(
+        project_id=payload.project_id,
+        rule=payload.rule,
+        automater_id=payload.automater_id,
+        automater_name=payload.automater_name,
+        automater_description=payload.automater_description,
+        collector_id=payload.collector_id,
+    )
+
+
+@router.put("/{automater_id}/rules/{rule_id}/enabled", response_model=Automater)
+async def set_rule_enabled(
+    automater_id: UUID,
+    rule_id: UUID,
+    payload: SetRuleEnabledRequest,
+    service: AutomaterService = Depends(get_automater_service),
+) -> Automater:
+    return await service.set_rule_enabled(automater_id, rule_id, payload.enabled)
+
+
+@router.delete("/{automater_id}/rules/{rule_id}", response_model=Automater)
+async def delete_rule(
+    automater_id: UUID,
+    rule_id: UUID,
+    service: AutomaterService = Depends(get_automater_service),
+) -> Automater:
+    return await service.delete_rule(automater_id, rule_id)
 
 
 @router.get("", response_model=list[Automater])
