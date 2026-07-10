@@ -1,5 +1,7 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Home } from "./pages/Home";
+import { AutomaterList } from "./pages/AutomaterList";
+import { AutomaterEditor } from "./pages/AutomaterEditor";
 import { CollectorList } from "./pages/CollectorList";
 import { CollectorEditor } from "./pages/CollectorEditor";
 import { ProjectList } from "./pages/ProjectList";
@@ -26,6 +28,8 @@ function App() {
             <Route path="/projects/:id/edit" element={<ProjectForm />} />
             <Route path="/collectors" element={<CollectorList />} />
             <Route path="/collectors/new" element={<CollectorEditor />} />
+            <Route path="/automaters" element={<AutomaterList />} />
+            <Route path="/automaters/new" element={<AutomaterEditor />} />
             <Route path="/dashboards" element={<DashboardList />} />
             <Route path="/dashboards/new" element={<DashboardForm />} />
             <Route path="/dashboards/:id" element={<DashboardEditor />} />

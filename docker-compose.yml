@@ -63,6 +63,22 @@ services:
     networks:
       - iotops
 
+  # Consumes the Celery tasks custom-telegraf's outputs/celery plugin
+  # enqueues on a matched rule -- see app/automater/tasks.py. Reuses the
+  # backend image (same Python env/dependencies) with the command
+  # overridden to run a Celery worker instead of the API server.
+  celery-worker:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    env_file:
+      - .env
+    command: ["celery", "-A", "app.automater.tasks", "worker", "--loglevel=info"]
+    depends_on:
+      - redis
+    networks:
+      - iotops
+
   frontend:
     build:
       context: .
@@ -81,6 +97,20 @@ services:
   mqtt-publisher:
     build:
       context: examples/mqtt-publisher
+    depends_on:
+      - mosquitto
+    networks:
+      - iotops
+    profiles:
+      - tools
+
+  # Manual rule-condition verification tool (Milestone 5), not part of the
+  # app. Companion to the "Rule Testing Sandbox" project's Collector (2
+  # mqtt inputs covering tags/numeric/string-field conditions).
+  # Off by default: `docker compose --profile tools up rule-testing-publisher`
+  rule-testing-publisher:
+    build:
+      context: examples/rule-testing-publisher
     depends_on:
       - mosquitto
     networks:

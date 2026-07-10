@@ -1,0 +1,66 @@
+.schema-condition__count {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent-h);
+  background: var(--accent-bg);
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+
+.schema-condition__table {
+  width: 100%;
+  margin-top: 10px;
+  border-collapse: collapse;
+  font-size: 13px;
+  text-align: left;
+}
+
+.schema-condition__table th {
+  text-align: left;
+  padding: 4px 8px 6px 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+
+.schema-condition__table td {
+  text-align: left;
+  padding: 4px 8px 4px 0;
+  color: var(--text-h);
+}
+
+.schema-condition__table-col {
+  width: 32%;
+}
+
+.schema-condition__column {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  cursor: pointer;
+}
+
+.schema-condition__table select,
+.schema-condition__table input:not([type="checkbox"]) {
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  background: var(--bg);
+  color: var(--text-h);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.schema-condition__column input[type="checkbox"] {
+  flex: none;
+}
+
+.schema-condition__table select:disabled,
+.schema-condition__table input:disabled {
+  opacity: 0.5;
+}

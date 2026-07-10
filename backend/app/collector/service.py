@@ -52,7 +52,9 @@ class CollectorService:
 
     async def deploy(self, collector_id: UUID) -> Collector:
         collector = await self._repository.get(collector_id)
-        toml_config = generate_toml(collector, self._registry)
+        toml_config = generate_toml(
+            collector.inputs, collector.processors, collector.outputs, self._registry
+        )
         deployed = self._docker_manager.deploy(collector, toml_config)
         return await self._repository.update(deployed)
 

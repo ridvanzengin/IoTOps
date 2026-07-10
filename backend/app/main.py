@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.ai.api import router as ai_router
+from app.automater.api import router as automater_router
 from app.collector.api import router as collector_router
 from app.config import settings
 from app.dashboard.api import router as dashboard_router
@@ -12,6 +13,7 @@ from app.shared.exceptions import (
     AiGenerationError,
     DuplicateNameError,
     EntityNotFoundError,
+    InvalidOperationError,
     InvalidQueryError,
     PluginConfigurationError,
     QueryExecutionError,
@@ -28,6 +30,7 @@ app.add_middleware(
 )
 
 app.include_router(ai_router)
+app.include_router(automater_router)
 app.include_router(collector_router)
 app.include_router(dashboard_router)
 app.include_router(plugin_router)
@@ -60,6 +63,13 @@ async def query_execution_error_handler(request: Request, exc: QueryExecutionErr
 @app.exception_handler(DuplicateNameError)
 async def duplicate_name_error_handler(request: Request, exc: DuplicateNameError) -> JSONResponse:
     return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@app.exception_handler(InvalidOperationError)
+async def invalid_operation_error_handler(
+    request: Request, exc: InvalidOperationError
+) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
 @app.exception_handler(AiGenerationError)

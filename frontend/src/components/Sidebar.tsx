@@ -16,7 +16,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Overview", to: "/", icon: HomeIcon, end: true },
   { label: "Projects", to: "/projects", icon: ProjectIcon },
   { label: "Collectors", to: "/collectors", icon: CollectorIcon },
-  { label: "Automater", icon: AutomaterIcon, disabled: true },
+  { label: "Automater", to: "/automaters", icon: AutomaterIcon },
   { label: "Dashboards", to: "/dashboards", icon: VisualizerIcon },
 ];
 

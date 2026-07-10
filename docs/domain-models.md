@@ -243,11 +243,18 @@ prefill.
 
 # Automater
 
-Represents an event detection service.
+Represents an event detection service. Shipped shape (Milestone 5,
+2026-07-10) differs from the original MVP sketch below in one structural
+way: there is no `processors` field. A `Rule Processor` is synthesized
+fresh at deploy time from `rules` (see `AutomaterService
+._synthesize_rule_processor`), not persisted as its own plugin instance —
+the domain object only ever stores what the user actually authored.
 
 Fields
 
 id
+
+project_id
 
 name
 
@@ -259,19 +266,28 @@ status
 
 inputs
 
-processors
+rules
 
 outputs
+
+schema_version
+
+docker
 
 created_at
 
 updated_at
 
-The MVP Automater should have
+A project can have any number of Automaters (mirrors Collector, never
+restricted to one per project). An Automater can have more than one mqtt
+input — one per distinct table its rules target, added on demand when a
+new rule needs a table the Automater doesn't already watch (see
+`AutomaterService.create_rule`) — so "one Automater" no longer implies
+"one table". The MVP Automater has
 
-MQTT Input
+MQTT Input(s)
 
-Rule Processor
+Rule Processor (synthesized, not stored)
 
 Celery Output
 
@@ -279,7 +295,9 @@ Celery Output
 
 # Rule
 
-Represents a logical condition.
+Represents a named set of conditions evaluated against one table. Lives
+inside exactly one Automater but has its own lifecycle independent of it
+(activate/deactivate/delete vs. the Automater's deploy/stop/delete).
 
 Fields
 
@@ -289,37 +307,53 @@ name
 
 description
 
+category
+
+event_type
+
+severity
+
+message
+
 enabled
-
-operator
-
-conditions
 
 priority
 
----
+table
 
-# Rule Operator
+conditions
 
-Supported
+identifiers
 
-AND
+ttl
 
-OR
+`category`/`event_type` are free text (UI grouping/filtering only, not
+consumed by plugin logic). `severity` is `low` | `medium` | `high` |
+`critical`. `message` is a `{field}`-interpolated template, filled in by
+the Go rule processor from the matched metric's tags/fields at match
+time. `table` is the measurement/hypertable this rule's conditions
+evaluate against — conditions within one rule always share a table (no
+cross-table correlation). `identifiers` are the tag/field names hashed
+(in order) into the Redis dedup/firing-state key; `ttl` is a Go duration
+string bounding how long a firing state persists between repeat matches.
+
+There is no `operator` field on Rule — see Condition's `join` below.
 
 ---
 
 # Condition
 
-Represents a single comparison.
+Represents a single comparison against one column of a Rule's `table`.
 
 Fields
 
-metric
+column
 
 operator
 
 value
+
+join
 
 Supported operators
 
@@ -335,17 +369,39 @@ Supported operators
 
 !=
 
+`join` (AND/OR) is how this condition combines with the *running result
+of every condition before it* in the Rule's `conditions` list — evaluated
+strictly left-to-right, no operator precedence, no parentheses ("a AND b
+OR c" always means "(a AND b) OR c"). Ignored on a Rule's first
+condition, since nothing precedes it to combine with. This lives on
+Condition, not Rule, specifically so a Rule can express a mixed chain
+like `a==1 AND b>3 OR c<5` — a single per-Rule operator (an earlier,
+superseded design) could only ever be all-AND or all-OR across every
+condition.
+
+`column` matches the DB-schema vocabulary (not `metric`) — the rule
+builder UI works the same way the Dashboard's schema browser does: pick
+table, then column, then operator, then value. `column` may resolve
+against either a tag or a field on the matched metric (evaluation checks
+tag first, then field) — the UI presents both identically.
+
 ---
 
 # Rule Processor Configuration
+
+Synthesized at deploy time from an Automater's `rules`, not stored as its
+own persisted object.
 
 Contains
 
 Rules
 
-Evaluation Mode
-
-Output Field
+There is no `Evaluation Mode` or `Output Field` — every enabled rule on a
+matching table is evaluated independently on its own merits (a single
+metric can produce more than one event); the matched rule's name is
+always written to a fixed tag, not a configurable one. Both were dropped
+from the config surface entirely (no legal alternative value existed to
+select between) rather than kept unused.
 
 Future versions may support
 
@@ -786,7 +842,10 @@ Dashboards own Panels.
 
 Panels own Queries.
 
-Automaters own Rules.
+Automaters own Rules — structurally (a Rule lives in `Automater.rules`,
+never independently persisted), though Rule still has its own lifecycle
+(activate/deactivate/delete) distinct from the Automater's own
+(deploy/stop/delete).
 
 Rules own Conditions.
 
@@ -808,7 +867,11 @@ one Output.
 
 Dashboard names must be unique.
 
-Rule names must be unique inside an Automater.
+An Automater must contain at least one Rule; a Rule must contain at
+least one Condition. Rule names are deliberately *not* required unique
+(within an Automater or globally) — the Redis firing-state key is keyed
+on Rule `id`, not `name`, precisely so two same-named rules never
+collide.
 
 Panel positions cannot overlap.
 
