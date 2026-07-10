@@ -4,7 +4,8 @@ from uuid import uuid4
 import pytest
 
 from app.collector.generator import generate_toml
-from app.collector.models import Collector, InputPlugin, OutputPlugin
+from app.collector.models import Collector
+from app.shared.models import InputPlugin, OutputPlugin
 from app.plugin.registry import build_default_registry
 from app.shared.exceptions import PluginConfigurationError
 
@@ -37,7 +38,7 @@ def test_generate_toml_includes_inputs_and_outputs() -> None:
     registry = build_default_registry()
     collector = _collector()
 
-    toml_str = generate_toml(collector, registry)
+    toml_str = generate_toml(collector.inputs, [], collector.outputs, registry)
     document = tomllib.loads(toml_str)
 
     assert document["inputs"]["mqtt_consumer"][0]["servers"] == ["tcp://mosquitto:1883"]
@@ -59,7 +60,7 @@ def test_generate_toml_skips_disabled_plugins() -> None:
         ]
     )
 
-    toml_str = generate_toml(collector, registry)
+    toml_str = generate_toml(collector.inputs, [], collector.outputs, registry)
     document = tomllib.loads(toml_str)
 
     assert "inputs" not in document
@@ -77,7 +78,7 @@ def test_generate_toml_fills_in_defaults_for_omitted_fields() -> None:
         ]
     )
 
-    toml_str = generate_toml(collector, registry)
+    toml_str = generate_toml(collector.inputs, [], collector.outputs, registry)
     document = tomllib.loads(toml_str)
 
     assert document["inputs"]["mqtt_consumer"][0]["servers"] == ["tcp://mosquitto:1883"]
@@ -97,4 +98,4 @@ def test_generate_toml_rejects_invalid_configuration() -> None:
     )
 
     with pytest.raises(PluginConfigurationError):
-        generate_toml(collector, registry)
+        generate_toml(collector.inputs, [], collector.outputs, registry)

@@ -2,7 +2,8 @@ from uuid import uuid4
 
 import pytest
 
-from app.collector.models import Collector, InputPlugin, OutputPlugin
+from app.collector.models import Collector
+from app.shared.models import InputPlugin, OutputPlugin
 from app.shared.enums import CollectorStatus
 
 
