@@ -41,8 +41,14 @@ just the first showcase — more domain showcases are planned post-v1. See
    templates, not by writing new application code.
 4. **Domain-organized repo**, not layer-organized — see
    [docs/repository-structure.md](docs/repository-structure.md).
-5. **Mongo stores configuration, TimescaleDB stores telemetry.** Never mix
-   the two.
+5. **Mongo stores configuration and discrete structured records (e.g.
+   Events); TimescaleDB stores continuous numeric telemetry.** Never mix
+   the two. An Event (a Rule match/clear occurrence) is variably-shaped
+   and inherently low-volume (match/clear + TTL dedup already collapses
+   it to meaningful transitions, not per-tick data) — Mongo's document
+   queries fit it, not TimescaleDB's fixed-hypertable-columns/range-
+   aggregation model. See iotops-workspace/ROADMAP.md's "Events sidebar"
+   note for the full reasoning.
 
 ## Docs
 

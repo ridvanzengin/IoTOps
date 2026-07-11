@@ -86,7 +86,8 @@ FastAPI never collects telemetry itself.
 
 ## MongoDB
 
-Stores platform configuration.
+Stores platform configuration, plus discrete structured records that
+aren't continuous numeric telemetry.
 
 Examples
 
@@ -95,6 +96,10 @@ Examples
 - rules
 - templates
 - plugin configurations
+- events (Rule match/clear occurrences — variably-shaped, inherently
+  low-volume thanks to match/clear + TTL dedup, and queried like a feed
+  (recent-first, filter, paginate) rather than range-aggregated, so this
+  fits Mongo's document model, not TimescaleDB's)
 
 MongoDB is the source of truth.
 

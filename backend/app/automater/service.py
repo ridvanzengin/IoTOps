@@ -6,6 +6,7 @@ from app.automater.repository import AutomaterRepository
 from app.collector.generator import generate_toml
 from app.collector.models import Collector
 from app.collector.repository import CollectorRepository
+from app.plugin.processors.rule import DeployedRule
 from app.plugin.registry import PluginRegistry
 from app.shared.exceptions import EntityNotFoundError, InvalidOperationError
 from app.shared.models import InputPlugin, OutputPlugin, ProcessorPlugin
@@ -162,7 +163,7 @@ class AutomaterService:
     async def _redeploy_or_stop(self, automater: Automater) -> Automater:
         automater = await self._repository.update(automater)
         if any(rule.enabled for rule in automater.rules):
-            processors = [self._synthesize_rule_processor(automater.rules)]
+            processors = [self._synthesize_rule_processor(automater)]
             toml_config = generate_toml(
                 automater.inputs, processors, automater.outputs, self._registry
             )
@@ -176,19 +177,36 @@ class AutomaterService:
     async def get(self, automater_id: UUID) -> Automater:
         return await self._repository.get(automater_id)
 
-    def _synthesize_rule_processor(self, rules: list[Rule]) -> ProcessorPlugin:
+    def _synthesize_rule_processor(self, automater: Automater) -> ProcessorPlugin:
         # The rule plugin instance is never persisted on Automater itself
         # (there's no `processors` field, only `rules`) -- it's built fresh
         # at deploy time from the rules the user actually authored. See
         # iotops-workspace/ROADMAP.md Phase B step 1.
         #
+        # Each rule gets wrapped in a DeployedRule (adds automater_id/
+        # project_id) here, not stored that way on Automater.rules itself --
+        # a Rule's container is implicit via containment, duplicating it
+        # onto every persisted Rule document would be redundant. The Go
+        # plugin stamps these onto every matched metric (see rule.go's
+        # annotate()) so the Celery event consumer can attribute an event
+        # back to a project without a reverse DB lookup. See
+        # iotops-workspace/ROADMAP.md's "Events sidebar" note.
+        #
         # Defined before `list` below: a `list[Rule]` annotation on a method
         # that comes *after* a method literally named `list` in this same
         # class body would resolve `list` against the class namespace (where
         # it's already been rebound to that method), not the builtin.
+        deployed_rules = [
+            DeployedRule(
+                **rule.model_dump(mode="json"),
+                automater_id=automater.id,
+                project_id=automater.project_id,
+            )
+            for rule in automater.rules
+        ]
         configuration = self._registry.validate_configuration(
             _RULE_PLUGIN_TYPE,
-            {"rules": [rule.model_dump(mode="json") for rule in rules]},
+            {"rules": [rule.model_dump(mode="json") for rule in deployed_rules]},
         )
         return ProcessorPlugin(plugin_type=_RULE_PLUGIN_TYPE, configuration=configuration)
 
@@ -218,7 +236,7 @@ class AutomaterService:
 
     async def deploy(self, automater_id: UUID) -> Automater:
         automater = await self._repository.get(automater_id)
-        processors = [self._synthesize_rule_processor(automater.rules)]
+        processors = [self._synthesize_rule_processor(automater)]
         toml_config = generate_toml(
             automater.inputs, processors, automater.outputs, self._registry
         )

@@ -34,6 +34,8 @@ Plugin
 
 Rule
 
+Event
+
 Template (future)
 
 Datasource (future)
@@ -413,6 +415,63 @@ statistics
 
 ---
 
+# Event
+
+Represents one match/clear occurrence from a Rule. Written by the Celery
+worker (`app/automater/tasks.py`'s `log_rule_match`) from the tags/fields
+the Go rule processor already stamped onto the matched metric — not a new
+data source, just persisting what was previously only logged. Stored in
+Mongo, not TimescaleDB — see the Philosophy/principle #5 note and
+`iotops-workspace/ROADMAP.md`'s "Events sidebar" entry for the reasoning.
+
+Fields
+
+id
+
+project_id
+
+automater_id
+
+rule_id
+
+rule_name
+
+table
+
+category
+
+severity
+
+event_type
+
+message
+
+flag
+
+tags
+
+fields
+
+matched_at
+
+created_at
+
+`project_id`/`automater_id` come from `DeployedRule` (see Rule Processor
+Configuration above) — not stored on Rule itself, since a Rule's container
+is already implicit via `Automater.rules`. `rule_id` (not just `rule_name`)
+is what attribution actually keys on, since Rule names aren't required
+unique. `flag` is `"match"` (this occurrence just started firing) or
+`"clear"` (it just stopped). `tags`/`fields` are the full snapshot of the
+matched metric, for anything not already promoted to its own field.
+
+Surfaced via a project-scoped sidebar on every Dashboard within that
+project (not per-Dashboard, not a cross-project view — an Event only ever
+relates to a Project, never to one specific Dashboard), live-updated via
+Server-Sent Events, and summarized on the Overview page (counts per
+project per rule, latest events).
+
+---
+
 # Dashboard
 
 Fields
@@ -767,6 +826,8 @@ Plugin Metadata
 
 Rule
 
+Event
+
 Variables
 
 ---
@@ -784,6 +845,13 @@ Dashboard
 references
 
 Project
+
+Event
+
+references
+
+Project, Automater, Rule (by id, same as Collector/Dashboard -- no
+cascading delete)
 
 Collector
 

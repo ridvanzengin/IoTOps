@@ -443,8 +443,13 @@ version:
   driven condition builder, filtered to the selected project/Collector's
   own tables), automater-cards-with-nested-rule-tables list view with
   confirm-gated Stop/Deactivate/Delete actions.
-- Zero automated tests either repo — explicitly deferred, next up now that
-  the engine itself has substantially settled.
+- ~~Zero automated tests either repo~~ Addressed 2026-07-10 (32 new tests
+  across both repos, plus fixed 7 pre-existing `collector`/`plugin` tests
+  that had silently broken during the `Pipeline` extraction).
+- New, beyond the original milestone scope: a persisted `Event` model
+  (Mongo) and a project-scoped, live-updating (Server-Sent Events) Events
+  sidebar on every Dashboard, plus an Overview-page summary. See
+  `iotops-workspace/ROADMAP.md`'s "Events sidebar" entry.
 
 ---
 
