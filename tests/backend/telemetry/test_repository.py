@@ -94,3 +94,21 @@ async def test_execute_readonly_returns_query_results() -> None:
     rows = await repository.execute_readonly("SELECT avg(temperature) FROM device_metrics", limit=10)
 
     assert rows == [{"avg": 21.5}]
+
+
+async def test_execute_readonly_keeps_most_recent_rows_when_over_limit() -> None:
+    # Regression guard: a panel's SQL is always ordered oldest-first
+    # within its time window (see DashboardService._substitute_and_run).
+    # When there are more matching rows than `limit`, execute_readonly
+    # must keep the *tail* (most recent) rows, not the *front* (oldest) --
+    # keeping the front is exactly the bug that made denser panels (more
+    # series folded into one query) show a stale chart end-label, since
+    # they accumulate rows faster within the same time window.
+    sql = "SELECT time, temperature FROM hive_metrics ORDER BY time ASC"
+    ordered_rows = [{"time": i, "temperature": 20.0 + i} for i in range(5)]
+    pool = FakePool(tables=["hive_metrics"], query_results={sql: ordered_rows})
+    repository = TelemetryRepository(pool)
+
+    rows = await repository.execute_readonly(sql, limit=2)
+
+    assert rows == ordered_rows[-2:]

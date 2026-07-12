@@ -2,6 +2,7 @@ from pathlib import Path
 
 import docker
 import httpx
+import redis.asyncio as async_redis
 
 from app.ai.service import AiService
 from app.automater.docker import AutomaterDockerManager
@@ -14,6 +15,8 @@ from app.config import settings
 from app.dashboard.repository import DashboardRepository
 from app.dashboard.service import DashboardService
 from app.database import get_database, get_timescale_pool
+from app.event.repository import EventRepository
+from app.event.service import EventService
 from app.plugin.registry import PluginRegistry, build_default_registry
 from app.project.repository import ProjectRepository
 from app.project.service import ProjectService
@@ -24,6 +27,7 @@ _registry: PluginRegistry | None = None
 _docker_manager: CollectorDockerManager | None = None
 _automater_docker_manager: AutomaterDockerManager | None = None
 _http_client: httpx.AsyncClient | None = None
+_async_redis_client: async_redis.Redis | None = None
 
 
 def get_plugin_registry() -> PluginRegistry:
@@ -106,3 +110,18 @@ async def get_ai_service() -> AiService:
         base_url=settings.ollama_base_url,
         model=settings.ollama_model,
     )
+
+
+def get_event_service() -> EventService:
+    return EventService(repository=EventRepository(get_database()))
+
+
+def get_async_redis_client() -> async_redis.Redis:
+    # Separate from app/automater/tasks.py's sync redis.Redis client -- that
+    # one runs inside the Celery worker process (sync task), this one is
+    # for the SSE endpoint (app/event/api.py), which needs an async
+    # subscribe/listen loop that doesn't block the FastAPI event loop.
+    global _async_redis_client
+    if _async_redis_client is None:
+        _async_redis_client = async_redis.from_url(settings.redis_uri)
+    return _async_redis_client

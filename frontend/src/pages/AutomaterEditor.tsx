@@ -478,6 +478,15 @@ export function AutomaterEditor() {
                 Collector's MQTT input Tag Keys, or this rule's dedup/message won't behave as expected.
               </p>
             )}
+
+            <div className="wizard-actions">
+              <button type="button" className="button" onClick={() => navigate("/automaters")}>
+                Cancel
+              </button>
+              <button type="submit" className="button button--primary" disabled={!canSubmit() || submitting}>
+                {submitting ? "Creating..." : "Create Rule"}
+              </button>
+            </div>
           </div>
 
           <div className="wizard-panel">
@@ -492,15 +501,6 @@ export function AutomaterEditor() {
               }}
             />
           </div>
-        </div>
-
-        <div className="wizard-actions">
-          <button type="button" className="button" onClick={() => navigate("/automaters")}>
-            Cancel
-          </button>
-          <button type="submit" className="button button--primary" disabled={!canSubmit() || submitting}>
-            {submitting ? "Creating..." : "Create Rule"}
-          </button>
         </div>
       </form>
     </main>

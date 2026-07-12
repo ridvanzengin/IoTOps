@@ -12,6 +12,7 @@ export function ProjectForm() {
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [defaultDashboardId, setDefaultDashboardId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -21,6 +22,7 @@ export function ProjectForm() {
       .then((project) => {
         setName(project.name);
         setDescription(project.description);
+        setDefaultDashboardId(project.default_dashboard_id);
       })
       .catch(() => setError("Failed to load project."));
   }, [id]);
@@ -31,9 +33,12 @@ export function ProjectForm() {
     setSubmitting(true);
     try {
       if (id) {
-        await updateProject(id, { name, description });
+        // Preserve default_dashboard_id -- this form doesn't edit it (set
+        // via the activity bar's dashboard-switcher dropdown instead), so
+        // re-send whatever was loaded rather than clobbering it with null.
+        await updateProject(id, { name, description, default_dashboard_id: defaultDashboardId });
       } else {
-        await createProject({ name, description });
+        await createProject({ name, description, default_dashboard_id: null });
       }
       navigate("/projects");
     } catch (err) {

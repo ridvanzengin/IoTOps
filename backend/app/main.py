@@ -7,6 +7,7 @@ from app.automater.api import router as automater_router
 from app.collector.api import router as collector_router
 from app.config import settings
 from app.dashboard.api import router as dashboard_router
+from app.event.api import router as event_router
 from app.plugin.api import router as plugin_router
 from app.project.api import router as project_router
 from app.shared.exceptions import (
@@ -33,6 +34,7 @@ app.include_router(ai_router)
 app.include_router(automater_router)
 app.include_router(collector_router)
 app.include_router(dashboard_router)
+app.include_router(event_router)
 app.include_router(plugin_router)
 app.include_router(project_router)
 app.include_router(telemetry_router)

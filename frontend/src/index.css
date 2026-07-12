@@ -13,6 +13,14 @@
   --success-bg: #ecf9ef;
   --danger: #c93131;
   --danger-bg: #fdecec;
+  /* Calm-to-red severity scale, for the events sidebar's occurrence
+     cards -- distinct from success/danger (match/clear status), since
+     severity ("how much should I care") and status ("is this still
+     true") are orthogonal and shouldn't share one color channel. */
+  --severity-low: #3b82f6;
+  --severity-medium: #d97706;
+  --severity-high: #ea580c;
+  --severity-critical: #c93131;
   --social-bg: rgba(244, 243, 236, 0.5);
   --radius: 8px;
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
@@ -50,6 +58,10 @@
     --success-bg: rgba(63, 185, 80, 0.12);
     --danger: #f85149;
     --danger-bg: rgba(248, 81, 73, 0.12);
+    --severity-low: #60a5fa;
+    --severity-medium: #fbbf24;
+    --severity-high: #fb923c;
+    --severity-critical: #f85149;
     --social-bg: rgba(47, 48, 58, 0.5);
     --shadow:
       rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;

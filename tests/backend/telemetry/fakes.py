@@ -31,12 +31,24 @@ class FakeConnection:
                     rows.append({"table_name": table, **column})
             return rows
 
-        readonly_match = re.search(r"FROM \((?P<sql>.*)\) AS _q LIMIT \$1", query, re.DOTALL)
+        readonly_match = re.search(
+            r"WITH _panel_rows AS \((?P<sql>.*)\) "
+            r"SELECT \* FROM _panel_rows "
+            r"OFFSET GREATEST\(0, \(SELECT count\(\*\) FROM _panel_rows\) - \$1\)",
+            query,
+            re.DOTALL,
+        )
         if readonly_match:
             sql = readonly_match.group("sql")
             if sql in self.query_errors:
                 raise asyncpg.exceptions.PostgresError(self.query_errors[sql])
-            return self.query_results.get(sql, [])
+            (limit,) = args
+            rows = self.query_results.get(sql, [])
+            # Mirrors the real OFFSET semantics: keep the tail (most
+            # recent) `limit` rows of whatever order query_results was
+            # given in, not the front.
+            offset = max(0, len(rows) - limit)
+            return rows[offset:]
 
         match = re.search(r'FROM "((?:[^"]|"")*)"', query)
         assert match is not None

@@ -24,6 +24,7 @@ class ProjectService:
             update={
                 "name": payload.name,
                 "description": payload.description,
+                "default_dashboard_id": payload.default_dashboard_id,
             }
         )
         return await self._repository.update(updated)

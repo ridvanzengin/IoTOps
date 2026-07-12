@@ -51,6 +51,23 @@ async def test_update_missing_project_raises(service: ProjectService) -> None:
         await service.update(uuid4(), _valid_input())
 
 
+async def test_update_sets_default_dashboard_id(service: ProjectService) -> None:
+    project = await service.create(_valid_input())
+    dashboard_id = uuid4()
+
+    updated = await service.update(project.id, _valid_input(default_dashboard_id=dashboard_id))
+
+    assert updated.default_dashboard_id == dashboard_id
+
+
+async def test_update_clears_default_dashboard_id(service: ProjectService) -> None:
+    project = await service.create(_valid_input(default_dashboard_id=uuid4()))
+
+    updated = await service.update(project.id, _valid_input(default_dashboard_id=None))
+
+    assert updated.default_dashboard_id is None
+
+
 async def test_delete_removes_project(service: ProjectService) -> None:
     project = await service.create(_valid_input())
 

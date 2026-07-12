@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from app.project.models import Project
 
 
@@ -6,6 +8,15 @@ def test_project_defaults() -> None:
 
     assert project.description == ""
     assert project.schema_version == 1
+    assert project.default_dashboard_id is None
+
+
+def test_project_accepts_default_dashboard_id() -> None:
+    dashboard_id = uuid4()
+
+    project = Project(name="Beekeeping", default_dashboard_id=dashboard_id)
+
+    assert project.default_dashboard_id == dashboard_id
 
 
 def test_project_round_trips_through_json() -> None:
