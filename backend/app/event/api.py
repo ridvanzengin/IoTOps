@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from sse_starlette.sse import EventSourceResponse
 
 from app.dependencies import get_async_redis_client, get_event_service
-from app.event.models import Event, EventRuleCount
+from app.event.models import Event, EventRuleCount, Occurrence, ProjectUnresolvedCount
 from app.event.service import EventService
 
 router = APIRouter(prefix="/api/event", tags=["event"])
@@ -29,24 +29,48 @@ async def get_event_counts(
     return await service.counts_by_rule(project_id)
 
 
+@router.get("/occurrences", response_model=list[Occurrence])
+async def list_occurrences(
+    project_id: UUID | None = Query(default=None),
+    limit: int = Query(default=50, le=200),
+    service: EventService = Depends(get_event_service),
+) -> list[Occurrence]:
+    return await service.list_occurrences(project_id, limit)
+
+
+@router.get("/unresolved-counts", response_model=list[ProjectUnresolvedCount])
+async def get_unresolved_counts(
+    service: EventService = Depends(get_event_service),
+) -> list[ProjectUnresolvedCount]:
+    return await service.unresolved_counts_by_project()
+
+
 @router.get("/stream")
 async def stream_events(
-    project_id: UUID,
     redis_client: async_redis.Redis = Depends(get_async_redis_client),
 ) -> EventSourceResponse:
-    return EventSourceResponse(_subscribe(redis_client, project_id))
+    # No project_id -- one connection per session (opened once at the app
+    # shell root), not one per project panel. See iotops-workspace/
+    # ROADMAP.md's "Events sidebar polish" note: feeds both the activity
+    # bar's per-project unresolved counts and whichever project's panel
+    # is currently open, client-side filtered by project_id.
+    return EventSourceResponse(_subscribe(redis_client))
 
 
-async def _subscribe(redis_client: async_redis.Redis, project_id: UUID) -> AsyncIterator[dict[str, str]]:
-    # Channel name must match app/automater/tasks.py's _events_channel() --
-    # that's the only contract between the Celery worker (publisher) and
-    # this endpoint (subscriber); they never call into each other directly.
-    channel = f"events:{project_id}"
+async def _subscribe(redis_client: async_redis.Redis) -> AsyncIterator[dict[str, str]]:
+    # Pattern subscribe across every project's channel -- app/automater/
+    # tasks.py's _events_channel() is unchanged (still publishes to
+    # events:{project_id} per project), only how this endpoint listens
+    # changed. PSUBSCRIBE messages carry type == "pmessage", not
+    # "message" -- easy to miss when switching from subscribe(), and
+    # missing it makes the stream connect successfully but silently
+    # deliver nothing.
+    pattern = "events:*"
     pubsub = redis_client.pubsub()
-    await pubsub.subscribe(channel)
+    await pubsub.psubscribe(pattern)
     try:
         async for message in pubsub.listen():
-            if message["type"] != "message":
+            if message["type"] != "pmessage":
                 continue
             data = message["data"]
             yield {"event": "event", "data": data.decode() if isinstance(data, bytes) else data}
@@ -54,5 +78,5 @@ async def _subscribe(redis_client: async_redis.Redis, project_id: UUID) -> Async
         # Runs when the client disconnects (EventSourceResponse cancels
         # this generator) -- without it, every closed browser tab would
         # leak a subscription on this Redis connection forever.
-        await pubsub.unsubscribe(channel)
+        await pubsub.punsubscribe(pattern)
         await pubsub.close()

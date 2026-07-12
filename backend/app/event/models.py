@@ -51,6 +51,16 @@ class Event(BaseModel):
     message: str = ""
     flag: EventFlag
 
+    # Names (not values -- those are already in `tags` under their own
+    # keys) of the Rule's configured dedup identifiers, stamped by
+    # rule.go's annotate() as the identifier_keys tag. Lets a consumer
+    # tell which of `tags` are the rule's identifiers vs. incidental tags
+    # like `host`, needed to group raw match/clear events into
+    # occurrences (see iotops-workspace/ROADMAP.md's "Events sidebar
+    # polish" note). Empty for events written before this field existed,
+    # or for a rule with no configured identifiers.
+    identifier_keys: list[str] = Field(default_factory=list)
+
     # Full snapshot of the matched metric, for anything not promoted to
     # its own field above (identifiers, other tags/fields the rule didn't
     # reference).
@@ -69,4 +79,47 @@ class EventRuleCount(BaseModel):
     project_id: UUID
     rule_id: UUID
     rule_name: str
+    count: int
+
+
+class OccurrenceStatus(str, Enum):
+    ACTIVE = "active"
+    RESOLVED = "resolved"
+
+
+class Occurrence(BaseModel):
+    """One match/clear pair (or a lone trailing match, if it hasn't
+    cleared yet) -- what the events list actually renders, not the raw
+    `Event` stream. See EventRepository._pair_occurrences for how these
+    are built and iotops-workspace/ROADMAP.md's "Events sidebar polish"
+    note for the settled semantics: an occurrence never reopens once
+    resolved -- the same rule/identifiers firing again after a clear is a
+    new occurrence, not the old one flipping back to active.
+    """
+
+    rule_id: UUID
+    rule_name: str
+    category: str
+    severity: RuleSeverity
+    event_type: str
+    message: str
+    identifiers: dict[str, str]
+    status: OccurrenceStatus
+    matched_at: datetime
+    resolved_at: datetime | None = None
+
+    # Beyond the roadmap's originally-proposed minimal shape: the card
+    # redesign's detail drawer needs raw tags/fields and attribution ids,
+    # and baking them in here (from the match event) avoids a second
+    # lazy-fetch endpoint for a payload-size concern that's not worth
+    # optimizing at this feature's scale (same stance already taken on
+    # pairing cost/retention).
+    automater_id: UUID
+    project_id: UUID
+    tags: dict[str, str]
+    fields: dict[str, Any]
+
+
+class ProjectUnresolvedCount(BaseModel):
+    project_id: UUID
     count: int

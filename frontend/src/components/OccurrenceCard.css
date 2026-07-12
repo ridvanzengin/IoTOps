@@ -1,0 +1,141 @@
+.occurrence-card {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  list-style: none;
+}
+
+.occurrence-card--low {
+  border-left-color: var(--severity-low);
+}
+
+.occurrence-card--medium {
+  border-left-color: var(--severity-medium);
+}
+
+.occurrence-card--high {
+  border-left-color: var(--severity-high);
+}
+
+.occurrence-card--critical {
+  border-left-color: var(--severity-critical);
+}
+
+.occurrence-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.occurrence-card__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.occurrence-card__status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.occurrence-card__status--active {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.occurrence-card__status--resolved {
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.occurrence-card__time {
+  font-size: 11px;
+  color: var(--text);
+}
+
+.occurrence-card__rule {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.occurrence-card__identifiers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.occurrence-card__identifier {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  background: var(--bg-subtle);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.occurrence-card__expand-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.occurrence-card__expand {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-h);
+  cursor: pointer;
+}
+
+.occurrence-card__drawer {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.occurrence-card__drawer-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  margin: 0 0 8px;
+  font-size: 11px;
+}
+
+.occurrence-card__drawer-list dt {
+  color: var(--text);
+}
+
+.occurrence-card__drawer-list dd {
+  margin: 0;
+  color: var(--text-h);
+  font-family: var(--mono);
+  word-break: break-all;
+}
+
+.occurrence-card__drawer-json {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  background: var(--code-bg);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow-x: auto;
+  max-height: 240px;
+}

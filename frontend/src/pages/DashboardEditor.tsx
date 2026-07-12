@@ -7,8 +7,9 @@ import "react-resizable/css/styles.css";
 import { ApiError } from "../api/client";
 import { getDashboard, removePanel, runPanelQuery, saveLayout } from "../api/dashboard";
 import { ChartPreview } from "../components/ChartPreview";
-import { DashboardSidebar } from "../components/DashboardSidebar";
 import { MoreIcon, PlusIcon } from "../components/icons";
+import { TypeaheadSelect } from "../components/TypeaheadSelect";
+import { useEvents } from "../context/EventsContext";
 import { DEFAULT_REFRESH_INTERVAL, REFRESH_INTERVALS } from "../constants/refreshIntervals";
 import { DEFAULT_TIME_RANGE, TIME_RANGES } from "../constants/timeRanges";
 import { resolveVariablesFrom } from "../utils/variables";
@@ -33,6 +34,8 @@ export function DashboardEditor() {
   const [variableOptions, setVariableOptions] = useState<Record<string, string[]>>({});
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [titleMenuOpen, setTitleMenuOpen] = useState(false);
+  const { projects, dashboardsByProject, setDefaultDashboard } = useEvents();
 
   // A fixed-position backdrop can't be used to detect outside clicks here:
   // react-grid-layout positions panels with a CSS `transform`, which makes
@@ -45,6 +48,7 @@ export function DashboardEditor() {
       if (!(event.target instanceof Element) || !event.target.closest(".dashboard-menu")) {
         setOpenMenu(null);
         setAddMenuOpen(false);
+        setTitleMenuOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -162,21 +166,59 @@ export function DashboardEditor() {
         <div className="dashboard-page__content">
           <div className="dashboard-toolbar">
             <div className="dashboard-toolbar__left">
-              <h1 className="dashboard-toolbar__title">{dashboard.name}</h1>
+              <div className="dashboard-menu">
+                <button
+                  type="button"
+                  className="dashboard-toolbar__control dashboard-toolbar__title"
+                  onClick={() => setTitleMenuOpen((open) => !open)}
+                >
+                  <span className="dashboard-toolbar__title-text">{dashboard.name}</span>
+                  <span className="dashboard-toolbar__title-caret">▾</span>
+                </button>
+                {titleMenuOpen && (
+                  <div className="dashboard-menu__list dashboard-menu__list--title">
+                    {(dashboardsByProject[dashboard.project_id] ?? []).map((sibling) => {
+                      const project = projects.find((p) => p.id === dashboard.project_id);
+                      const isDefault = project?.default_dashboard_id === sibling.id;
+                      return (
+                        <div key={sibling.id} className="dashboard-title-menu__row">
+                          <button
+                            type="button"
+                            className={`dashboard-menu__item ${
+                              sibling.id === dashboard.id ? "dashboard-menu__item--current" : ""
+                            }`}
+                            onClick={() => {
+                              setTitleMenuOpen(false);
+                              if (sibling.id !== dashboard.id) navigate(`/dashboards/${sibling.id}`);
+                            }}
+                          >
+                            {sibling.name}
+                          </button>
+                          <button
+                            type="button"
+                            className={`dashboard-title-menu__star ${
+                              isDefault ? "dashboard-title-menu__star--active" : ""
+                            }`}
+                            title={isDefault ? "Default dashboard for this project" : "Set as default dashboard"}
+                            onClick={() => setDefaultDashboard(dashboard.project_id, sibling.id)}
+                          >
+                            {isDefault ? "★" : "☆"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
               {dashboard.variables.map((variable, index) => (
                 <div key={variable.name} className="dashboard-toolbar__variable">
                   <span className="dashboard-toolbar__variable-label">{variable.label}</span>
-                  <select
+                  <TypeaheadSelect
                     className="dashboard-toolbar__control"
+                    options={variableOptions[variable.name] ?? []}
                     value={variableValues[variable.name] ?? ""}
-                    onChange={(event) => handleVariableChange(index, event.target.value)}
-                  >
-                    {(variableOptions[variable.name] ?? []).map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(value) => handleVariableChange(index, value)}
+                  />
                 </div>
               ))}
             </div>
@@ -302,7 +344,6 @@ export function DashboardEditor() {
             </ResponsiveGridLayout>
           )}
         </div>
-        <DashboardSidebar projectId={dashboard.project_id} />
       </div>
     </main>
   );

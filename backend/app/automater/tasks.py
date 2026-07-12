@@ -71,6 +71,7 @@ def log_rule_match(
         event_type=tags.get("rule_event_type", ""),
         message=fields.get("rule_message", ""),
         flag=tags["flag"],
+        identifier_keys=[k for k in tags.get("identifier_keys", "").split(",") if k],
         tags=tags,
         fields=fields,
         matched_at=timestamp,

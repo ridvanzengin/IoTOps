@@ -28,7 +28,14 @@ def test_event_defaults() -> None:
     assert event.category == ""
     assert event.tags == {}
     assert event.fields == {}
+    assert event.identifier_keys == []
     assert event.created_at is not None
+
+
+def test_event_accepts_identifier_keys() -> None:
+    event = _event(identifier_keys=["hive_id", "apiary_id"], tags={"hive_id": "hive-1", "apiary_id": "apiary-2"})
+
+    assert event.identifier_keys == ["hive_id", "apiary_id"]
 
 
 def test_event_accepts_go_rfc3339_nano_timestamp_string() -> None:

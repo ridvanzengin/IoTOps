@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from mongomock_motor import AsyncMongoMockClient
 
-from app.event.models import Event, EventFlag
+from app.event.models import Event, EventFlag, OccurrenceStatus
 from app.event.repository import EventRepository, to_document
 
 
@@ -98,3 +98,115 @@ async def test_counts_by_rule_without_project_id_covers_all_projects() -> None:
     counts = await repository.counts_by_rule()
 
     assert len(counts) == 2
+
+
+async def test_list_occurrences_pairs_match_with_its_clear() -> None:
+    rule_id = uuid4()
+    now = datetime.now(timezone.utc)
+    match = _event(rule_id=rule_id, identifier_keys=["hive_id"], tags={"hive_id": "hive-1"}, matched_at=now)
+    clear = _event(
+        rule_id=rule_id,
+        identifier_keys=["hive_id"],
+        tags={"hive_id": "hive-1"},
+        flag=EventFlag.CLEAR,
+        matched_at=now + timedelta(minutes=1),
+    )
+    repository = await _seeded_repository(match, clear)
+
+    occurrences = await repository.list_occurrences()
+
+    assert len(occurrences) == 1
+    occurrence = occurrences[0]
+    assert occurrence.status == OccurrenceStatus.RESOLVED
+    assert occurrence.matched_at == match.matched_at
+    assert occurrence.resolved_at == clear.matched_at
+    assert occurrence.identifiers == {"hive_id": "hive-1"}
+
+
+async def test_list_occurrences_leaves_trailing_match_active() -> None:
+    match = _event(identifier_keys=["hive_id"], tags={"hive_id": "hive-1"})
+    repository = await _seeded_repository(match)
+
+    occurrences = await repository.list_occurrences()
+
+    assert len(occurrences) == 1
+    assert occurrences[0].status == OccurrenceStatus.ACTIVE
+    assert occurrences[0].resolved_at is None
+
+
+async def test_list_occurrences_repeat_fire_produces_two_rows() -> None:
+    # Confirmed semantics: fires, clears, fires again -- two rows, one
+    # resolved, one active. The re-fire is a *new* occurrence, not the
+    # old one reopening.
+    rule_id = uuid4()
+    now = datetime.now(timezone.utc)
+    events = [
+        _event(rule_id=rule_id, identifier_keys=["hive_id"], tags={"hive_id": "hive-1"}, matched_at=now),
+        _event(
+            rule_id=rule_id,
+            identifier_keys=["hive_id"],
+            tags={"hive_id": "hive-1"},
+            flag=EventFlag.CLEAR,
+            matched_at=now + timedelta(minutes=1),
+        ),
+        _event(rule_id=rule_id, identifier_keys=["hive_id"], tags={"hive_id": "hive-1"}, matched_at=now + timedelta(minutes=2)),
+    ]
+    repository = await _seeded_repository(*events)
+
+    occurrences = await repository.list_occurrences()
+
+    assert len(occurrences) == 2
+    assert {o.status for o in occurrences} == {OccurrenceStatus.RESOLVED, OccurrenceStatus.ACTIVE}
+
+
+async def test_list_occurrences_groups_by_identifier_values_not_just_rule() -> None:
+    rule_id = uuid4()
+    hive1 = _event(rule_id=rule_id, identifier_keys=["hive_id"], tags={"hive_id": "hive-1"})
+    hive2 = _event(rule_id=rule_id, identifier_keys=["hive_id"], tags={"hive_id": "hive-2"})
+    repository = await _seeded_repository(hive1, hive2)
+
+    occurrences = await repository.list_occurrences()
+
+    assert len(occurrences) == 2
+    assert {o.identifiers["hive_id"] for o in occurrences} == {"hive-1", "hive-2"}
+    assert all(o.status == OccurrenceStatus.ACTIVE for o in occurrences)
+
+
+async def test_list_occurrences_with_no_identifier_keys_groups_across_whole_rule() -> None:
+    # Mirrors rule.go's firingKey zero-identifiers branch: a rule with no
+    # configured identifiers shares one firing/occurrence group across
+    # every instance of it, rather than accidentally splitting apart here.
+    rule_id = uuid4()
+    now = datetime.now(timezone.utc)
+    first_match = _event(rule_id=rule_id, matched_at=now)
+    clear = _event(rule_id=rule_id, flag=EventFlag.CLEAR, matched_at=now + timedelta(minutes=1))
+    repository = await _seeded_repository(first_match, clear)
+
+    occurrences = await repository.list_occurrences()
+
+    assert len(occurrences) == 1
+    assert occurrences[0].status == OccurrenceStatus.RESOLVED
+    assert occurrences[0].identifiers == {}
+
+
+async def test_unresolved_counts_by_project_counts_only_active_occurrences() -> None:
+    project_a = uuid4()
+    project_b = uuid4()
+    now = datetime.now(timezone.utc)
+    rule_a1 = uuid4()
+    rule_a2 = uuid4()
+    events = [
+        # project_a: one resolved occurrence (rule_a1) + one active (rule_a2) -> count 1
+        _event(project_id=project_a, rule_id=rule_a1, matched_at=now),
+        _event(project_id=project_a, rule_id=rule_a1, flag=EventFlag.CLEAR, matched_at=now + timedelta(minutes=1)),
+        _event(project_id=project_a, rule_id=rule_a2, matched_at=now),
+        # project_b: one active occurrence -> count 1
+        _event(project_id=project_b, rule_id=uuid4(), matched_at=now),
+    ]
+    repository = await _seeded_repository(*events)
+
+    counts = await repository.unresolved_counts_by_project()
+
+    by_project = {c.project_id: c.count for c in counts}
+    assert by_project[project_a] == 1
+    assert by_project[project_b] == 1

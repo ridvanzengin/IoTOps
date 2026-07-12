@@ -50,6 +50,36 @@ def test_log_rule_match_persists_event_document(fake_clients: tuple) -> None:
     assert document["fields"]["temperature"] == 40.0
 
 
+def test_log_rule_match_parses_identifier_keys_tag(fake_clients: tuple) -> None:
+    collection, _ = fake_clients
+
+    tasks.log_rule_match.run(
+        measurement="hive_metrics",
+        tags=_tags(identifier_keys="hive_id,apiary_id"),
+        fields={"temperature": 40.0},
+        timestamp="2026-07-10T12:00:00Z",
+    )
+
+    document = collection.find_one()
+    assert document is not None
+    assert document["identifier_keys"] == ["hive_id", "apiary_id"]
+
+
+def test_log_rule_match_defaults_identifier_keys_when_tag_missing(fake_clients: tuple) -> None:
+    # Covers events from a rule with no configured identifiers, and events
+    # from before this tag existed at all -- both arrive with no
+    # identifier_keys tag.
+    collection, _ = fake_clients
+
+    tasks.log_rule_match.run(
+        measurement="hive_metrics", tags=_tags(), fields={"temperature": 40.0}, timestamp="2026-07-10T12:00:00Z"
+    )
+
+    document = collection.find_one()
+    assert document is not None
+    assert document["identifier_keys"] == []
+
+
 def test_log_rule_match_publishes_to_project_scoped_channel(fake_clients: tuple) -> None:
     collection, redis_client = fake_clients
     pubsub = redis_client.pubsub()

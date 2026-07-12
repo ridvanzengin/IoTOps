@@ -72,3 +72,45 @@ async def test_get_event_counts_groups_by_rule(client: TestClient) -> None:
     [count] = response.json()
     assert count["rule_name"] == "swarm-alert"
     assert count["count"] == 2
+
+
+async def test_list_occurrences_returns_paired_occurrence(client: TestClient) -> None:
+    project_id = uuid4()
+    rule_id = uuid4()
+    await _seed(
+        client,
+        project_id=project_id,
+        rule_id=rule_id,
+        identifier_keys=["hive_id"],
+        tags={"hive_id": "hive-1"},
+        flag=EventFlag.MATCH,
+    )
+    await _seed(
+        client,
+        project_id=project_id,
+        rule_id=rule_id,
+        identifier_keys=["hive_id"],
+        tags={"hive_id": "hive-1"},
+        flag=EventFlag.CLEAR,
+    )
+
+    response = client.get("/api/event/occurrences", params={"project_id": str(project_id)})
+
+    assert response.status_code == 200
+    [occurrence] = response.json()
+    assert occurrence["status"] == "resolved"
+    assert occurrence["identifiers"] == {"hive_id": "hive-1"}
+
+
+async def test_get_unresolved_counts_covers_all_projects(client: TestClient) -> None:
+    project_a = uuid4()
+    project_b = uuid4()
+    await _seed(client, project_id=project_a, flag=EventFlag.MATCH)
+    await _seed(client, project_id=project_b, flag=EventFlag.MATCH)
+
+    response = client.get("/api/event/unresolved-counts")
+
+    assert response.status_code == 200
+    by_project = {c["project_id"]: c["count"] for c in response.json()}
+    assert by_project[str(project_a)] == 1
+    assert by_project[str(project_b)] == 1

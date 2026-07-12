@@ -41,9 +41,10 @@ export function Home() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Every dashboard within a project renders the identical events sidebar
-  // (see DashboardSidebar's own comment) -- so it doesn't matter *which*
-  // of a project's dashboards this links to when it has more than one.
+  // A project's events panel (opened via the activity bar, see
+  // EventsPanel) is identical regardless of which dashboard you're on --
+  // so it doesn't matter *which* of a project's dashboards this links to
+  // when it has more than one.
   const dashboardLinkByProject = useMemo(() => {
     const map = new Map<string, string>();
     for (const dashboard of dashboards) {
