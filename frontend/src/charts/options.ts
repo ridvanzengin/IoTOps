@@ -25,6 +25,47 @@ function formatAxisValue(value: unknown): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+// connectNulls: false (set below) only creates a visible break where the
+// data array actually has an explicit null -- it does nothing for a gap
+// where a point in time simply has no row at all, which is exactly what
+// a real outage (e.g. an Automater stopped and redeployed) looks like
+// from a plain "SELECT time, value FROM ..." query with no gap-filling.
+// The precise fix belongs in the query itself (TimescaleDB's
+// time_bucket_gapfill(), leaving genuine gaps NULL rather than
+// interpolating with locf()) -- not something this chart layer can do
+// for an arbitrary hand-written panel query. This is the client-side
+// fallback: a *relative* threshold (multiples of this series' own
+// median sampling interval, not a fixed duration -- a rule evaluated
+// every 10s and one every 5m are both "normal," just at different
+// paces), inserting a synthetic null at the midpoint of any gap far
+// wider than that, so connectNulls: false actually has something to
+// break on.
+function insertGapBreaks(points: [unknown, unknown][]): [unknown, unknown][] {
+  if (points.length < 3) return points;
+  const times = points.map(([t]) => new Date(t as string).getTime());
+  const deltas: number[] = [];
+  for (let i = 1; i < times.length; i++) {
+    const delta = times[i] - times[i - 1];
+    if (delta > 0) deltas.push(delta);
+  }
+  if (deltas.length === 0) return points;
+  const sortedDeltas = [...deltas].sort((a, b) => a - b);
+  const medianDelta = sortedDeltas[Math.floor(sortedDeltas.length / 2)];
+  if (medianDelta <= 0) return points;
+  const gapThreshold = medianDelta * 4;
+
+  const result: [unknown, unknown][] = [points[0]];
+  for (let i = 1; i < points.length; i++) {
+    const prevTime = times[i - 1];
+    const curTime = times[i];
+    if (curTime - prevTime > gapThreshold) {
+      result.push([new Date(prevTime + (curTime - prevTime) / 2).toISOString(), null]);
+    }
+    result.push(points[i]);
+  }
+  return result;
+}
+
 // Splits long/tidy rows (one row per series-name/value pair) into one
 // ECharts series per distinct value of `seriesByField`. Each series gets its
 // own independent list of [x, value] points rather than being aligned to a
@@ -49,12 +90,20 @@ function buildLongFormatSeries(
     seriesData.get(name)!.push([row[xField], row[valueField]]);
   }
 
-  return Array.from(seriesData.entries()).map(([name, data]) => ({
-    type: defaultType,
-    name,
-    data: [...data].sort((a, b) => new Date(a[0] as string).getTime() - new Date(b[0] as string).getTime()),
-    smooth: defaultType === "line" ? true : undefined,
-  }));
+  return Array.from(seriesData.entries()).map(([name, data]) => {
+    const sorted = [...data].sort((a, b) => new Date(a[0] as string).getTime() - new Date(b[0] as string).getTime());
+    return {
+      type: defaultType,
+      name,
+      data: defaultType === "line" ? insertGapBreaks(sorted) : sorted,
+      smooth: defaultType === "line" ? true : undefined,
+      // No dots on the line itself, and an explicit gap (no connecting
+      // segment) wherever a value is null -- lets a real data loss read as
+      // a visible break instead of silently interpolating across it.
+      showSymbol: defaultType === "line" ? false : undefined,
+      connectNulls: defaultType === "line" ? false : undefined,
+    };
+  });
 }
 
 function buildXyOption(
@@ -138,6 +187,11 @@ function buildXyOption(
         yAxisIndex: usesRightAxis && series.axis === "right" ? 1 : 0,
         data: axisValues(rows, series.field),
         smooth: type === "line" ? true : undefined,
+        // No dots on the line itself, and an explicit gap (no connecting
+        // segment) wherever a value is null -- lets a real data loss read
+        // as a visible break instead of silently interpolating across it.
+        showSymbol: type === "line" ? false : undefined,
+        connectNulls: type === "line" ? false : undefined,
       };
     }),
   };
@@ -148,14 +202,11 @@ const EVENT_MARK_COLOR: Record<Event["flag"], string> = {
   clear: "#4dd4ac",
 };
 
-// One shape per Rule (cycled if more than 4 are overlaid on one panel) so
+// One shape per Rule (cycled if more than 3 are overlaid on one panel) so
 // multiple overlaid rules stay visually distinguishable from each other,
 // independent of color -- color alone always means active/resolved,
-// never rule identity. Literal shapes requested: triangle, square,
-// diamond -- circle added as a 4th so a 4th+ rule doesn't silently reuse
-// triangle without at least *some* visual cue (still ambiguous past 4,
-// but the tooltip's rule name is the actual disambiguator at that point).
-const EVENT_SYMBOLS = ["triangle", "rect", "diamond", "circle"];
+// never rule identity.
+const EVENT_SYMBOLS = ["diamond", "circle", "rect"];
 
 // Category axes position by exact value equality against the axis's own
 // `data` array (see buildXyOption's wide-format branch) -- an event's
@@ -217,7 +268,7 @@ export function buildEventOverlay(chart: Chart, rows: Row[], events: Event[]): E
         name: `${event.flag === "match" ? "Active" : "Resolved"}: ${event.rule_name}`,
         value: [xValue, 1],
         symbol: EVENT_SYMBOLS[(ruleShapeIndex.get(event.rule_id) ?? 0) % EVENT_SYMBOLS.length],
-        symbolSize: 11,
+        symbolSize: 14,
         itemStyle: { color: EVENT_MARK_COLOR[event.flag] },
       };
     })
