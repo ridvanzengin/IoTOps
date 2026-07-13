@@ -94,6 +94,10 @@ export interface PanelInputPayload {
   time_range: string;
   refresh_interval: number;
   position: PanelPosition;
+  // Which Rules' match/clear Events overlay this panel's chart -- see
+  // iotops-workspace/ROADMAP.md's "Events-as-overlay on Panel charts"
+  // note.
+  event_rule_ids: string[];
 }
 
 export interface Panel extends PanelInputPayload {
@@ -129,6 +133,17 @@ export interface DashboardLayoutInputPayload {
 export interface PanelQueryOverrides {
   time_range?: string;
   variable_values?: Record<string, string>;
+}
+
+export interface PanelQueryResult {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  // The exact [time_from, time_to] window the query's __timeFrom/
+  // __timeTo resolved to -- reused by the events-overlay fetch so it
+  // asks for the same window the panel's own telemetry query used,
+  // not a separately (and therefore slightly later) resolved "now".
+  time_from: string;
+  time_to: string;
 }
 
 export interface DashboardQueryPreview {

@@ -78,6 +78,13 @@ export function PanelBuilder() {
   const [running, setRunning] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Not editable here -- the Overlay Events control lives on the
+  // dashboard panel header instead (see DashboardEditor.tsx) -- but this
+  // form still has to round-trip whatever's already on the panel, since
+  // handleSave below does a full PanelInput replace; without tracking it
+  // here, saving any other field from this page would silently wipe an
+  // existing panel's event_rule_ids back to [].
+  const [eventRuleIds, setEventRuleIds] = useState<string[]>([]);
   const sqlTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   function insertAtCursor(token: string) {
@@ -115,6 +122,7 @@ export function PanelBuilder() {
           setPosition(panel.position);
           setTimeRange(panel.time_range);
           setSql(panel.query.sql);
+          setEventRuleIds(panel.event_rule_ids);
           runQuery(panel.query.sql, panel.time_range, values);
         } else {
           setPosition(findFreePosition(dashboard.panels, DEFAULT_POSITION.width, DEFAULT_POSITION.height));
@@ -173,6 +181,7 @@ export function PanelBuilder() {
         time_range: timeRange,
         refresh_interval: 0,
         position,
+        event_rule_ids: eventRuleIds,
       };
       if (isEdit && panelId) {
         await updatePanel(dashboardId, panelId, payload);

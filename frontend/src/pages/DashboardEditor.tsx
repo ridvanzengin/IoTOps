@@ -1,20 +1,28 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import GridLayout, { WidthProvider } from "react-grid-layout";
 import type { Layout } from "react-grid-layout";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { ApiError } from "../api/client";
-import { getDashboard, removePanel, runPanelQuery, saveLayout } from "../api/dashboard";
+import { getDashboard, removePanel, runPanelQuery, saveLayout, updatePanel } from "../api/dashboard";
+import { listAutomaters } from "../api/automater";
+import { listEventsForOverlay } from "../api/event";
 import { ChartPreview } from "../components/ChartPreview";
 import { MoreIcon, PlusIcon } from "../components/icons";
+import { RuleMultiSelect } from "../components/RuleMultiSelect";
+import type { RuleOption } from "../components/RuleMultiSelect";
 import { TypeaheadSelect } from "../components/TypeaheadSelect";
 import { useEvents } from "../context/EventsContext";
 import { DEFAULT_REFRESH_INTERVAL, REFRESH_INTERVALS } from "../constants/refreshIntervals";
 import { DEFAULT_TIME_RANGE, TIME_RANGES } from "../constants/timeRanges";
-import { resolveVariablesFrom } from "../utils/variables";
-import type { Dashboard, Panel } from "../types/dashboard";
+import { filterEventsByVariables, resolveVariablesFrom } from "../utils/variables";
+import type { Automater } from "../types/automater";
+import type { Dashboard, Panel, PanelInputPayload, Variable } from "../types/dashboard";
+import type { Event } from "../types/event";
 import "./Dashboard.css";
+
+const XY_CHART_TYPES = new Set(["line", "bar", "scatter"]);
 
 const ResponsiveGridLayout = WidthProvider(GridLayout);
 const GRID_COLUMNS = 12;
@@ -26,6 +34,7 @@ export function DashboardEditor() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [layout, setLayout] = useState<Layout[]>([]);
   const [panelRows, setPanelRows] = useState<Record<string, Record<string, unknown>[]>>({});
+  const [panelEvents, setPanelEvents] = useState<Record<string, Event[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [timeRange, setTimeRange] = useState(DEFAULT_TIME_RANGE);
@@ -35,7 +44,28 @@ export function DashboardEditor() {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [titleMenuOpen, setTitleMenuOpen] = useState(false);
-  const { projects, dashboardsByProject, setDefaultDashboard } = useEvents();
+  const [automaters, setAutomaters] = useState<Automater[]>([]);
+  const { projects, dashboardsByProject, setDefaultDashboard, registerDashboardVariables, clearDashboardVariables } =
+    useEvents();
+
+  // Every Rule in this dashboard's project, flattened across that
+  // project's Automaters (Rule has no automater/project backreference of
+  // its own -- mirrors AutomaterEditor.tsx's existing project-scoping
+  // pattern), for each panel header's Overlay Events control.
+  const projectRules: RuleOption[] = useMemo(() => {
+    if (!dashboard) return [];
+    return automaters
+      .filter((automater) => automater.project_id === dashboard.project_id)
+      .flatMap((automater) =>
+        automater.rules.map((rule) => ({ id: rule.id, name: rule.name, automaterName: automater.name })),
+      );
+  }, [automaters, dashboard]);
+
+  useEffect(() => {
+    listAutomaters()
+      .then(setAutomaters)
+      .catch(() => undefined);
+  }, []);
 
   // A fixed-position backdrop can't be used to detect outside clicks here:
   // react-grid-layout positions panels with a CSS `transform`, which makes
@@ -92,11 +122,85 @@ export function DashboardEditor() {
     setVariableOptions((prev) => ({ ...prev, ...options }));
   }
 
-  function refreshPanelData(panels: Panel[], timeRangeCode: string, values: Record<string, string>) {
+  // Applies every identifier that matches one of this dashboard's
+  // variables (by value_column) at once, re-resolving the predicate
+  // chain from the *earliest* matched variable's index -- so e.g. Hive's
+  // options get re-resolved against the *new* Apiary value before Hive
+  // itself is checked against them, instead of each identifier being
+  // applied one at a time against a still-stale predicate. Any
+  // identifier whose value still doesn't resolve after that falls back
+  // to the first available option (resolveVariablesFrom's own existing
+  // behavior, same as a manual dropdown pick that's no longer valid) --
+  // not an error, since a genuine mismatch is an expected outcome here,
+  // not a bug (see EventsContext's ActiveDashboardVariables comment).
+  async function selectIdentifiers(identifiers: Record<string, string>) {
+    if (!id || !dashboard) return;
+    const matchedUpdates: Record<string, string> = {};
+    let earliestIndex = dashboard.variables.length;
+    dashboard.variables.forEach((variable, index) => {
+      const value = identifiers[variable.value_column];
+      if (value === undefined) return;
+      matchedUpdates[variable.name] = value;
+      earliestIndex = Math.min(earliestIndex, index);
+    });
+    if (earliestIndex === dashboard.variables.length) return; // nothing matched
+
+    const baseValues = { ...variableValues, ...matchedUpdates };
+    const { values, options } = await resolveVariablesFrom(id, dashboard.variables, earliestIndex, baseValues);
+    setVariableValues(values);
+    setVariableOptions((prev) => ({ ...prev, ...options }));
+  }
+
+  // Lets the globally-mounted events panel offer "click an identifier to
+  // set the matching dashboard variable(s)" while this dashboard happens
+  // to be open -- see EventsContext.tsx's ActiveDashboardVariables
+  // comment. Re-registers whenever variables/values change so the
+  // events panel always sees this dashboard's current state, not a
+  // stale snapshot from whenever it first mounted.
+  useEffect(() => {
+    if (!dashboard) return;
+    registerDashboardVariables({
+      dashboardId: dashboard.id,
+      projectId: dashboard.project_id,
+      variables: dashboard.variables,
+      selectIdentifiers,
+    });
+    return () => clearDashboardVariables(dashboard.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboard, variableValues]);
+
+  function refreshPanelData(
+    panels: Panel[],
+    timeRangeCode: string,
+    values: Record<string, string>,
+    variables: Variable[],
+  ) {
     if (!id) return;
     for (const panel of panels) {
       runPanelQuery(id, panel.id, { time_range: timeRangeCode, variable_values: values })
-        .then((result) => setPanelRows((prev) => ({ ...prev, [panel.id]: result.rows })))
+        .then((result) => {
+          setPanelRows((prev) => ({ ...prev, [panel.id]: result.rows }));
+          if (panel.event_rule_ids.length === 0) {
+            setPanelEvents((prev) => ({ ...prev, [panel.id]: [] }));
+            return;
+          }
+          // Reuses the exact [time_from, time_to] this panel's own query
+          // just resolved -- not a separately (and therefore slightly
+          // later) resolved "now" -- see iotops-workspace/ROADMAP.md's
+          // "Events-as-overlay on Panel charts" note.
+          listEventsForOverlay(panel.event_rule_ids, result.time_from, result.time_to)
+            .then((events) =>
+              setPanelEvents((prev) => ({
+                ...prev,
+                // Only events that actually belong to whatever the
+                // dashboard's variables currently have selected (e.g. a
+                // panel scoped to hive-1 shouldn't show hive-2's events
+                // just because both share a Rule).
+                [panel.id]: filterEventsByVariables(events, variables, values),
+              })),
+            )
+            .catch(() => setPanelEvents((prev) => ({ ...prev, [panel.id]: [] })));
+        })
         .catch(() => setPanelRows((prev) => ({ ...prev, [panel.id]: [] })));
     }
   }
@@ -108,7 +212,7 @@ export function DashboardEditor() {
 
   useEffect(() => {
     if (dashboard) {
-      refreshPanelData(dashboard.panels, timeRange, variableValues);
+      refreshPanelData(dashboard.panels, timeRange, variableValues, dashboard.variables);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashboard, timeRange, variableValues]);
@@ -117,7 +221,10 @@ export function DashboardEditor() {
     if (!dashboard) return;
     const ms = REFRESH_INTERVALS.find((option) => option.code === refreshInterval)?.ms;
     if (!ms) return;
-    const intervalId = setInterval(() => refreshPanelData(dashboard.panels, timeRange, variableValues), ms);
+    const intervalId = setInterval(
+      () => refreshPanelData(dashboard.panels, timeRange, variableValues, dashboard.variables),
+      ms,
+    );
     return () => clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashboard, timeRange, variableValues, refreshInterval]);
@@ -130,6 +237,31 @@ export function DashboardEditor() {
       await loadDashboard();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to remove panel.");
+    }
+  }
+
+  // The Overlay Events selection is saved on the Panel object itself (see
+  // iotops-workspace/ROADMAP.md's "Events-as-overlay on Panel charts"
+  // note) -- updatePanel is a full PanelInput replace, so every other
+  // field has to be resent unchanged alongside the new event_rule_ids.
+  async function handlePanelEventRuleIdsChange(panel: Panel, ruleIds: string[]) {
+    if (!id || !dashboard) return;
+    const payload: PanelInputPayload = {
+      title: panel.title,
+      chart: panel.chart,
+      query: panel.query,
+      time_range: panel.time_range,
+      refresh_interval: panel.refresh_interval,
+      position: panel.position,
+      event_rule_ids: ruleIds,
+    };
+    try {
+      const updated = await updatePanel(id, panel.id, payload);
+      setDashboard(updated);
+      const updatedPanel = updated.panels.find((p) => p.id === panel.id);
+      if (updatedPanel) refreshPanelData([updatedPanel], timeRange, variableValues, updated.variables);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to update panel.");
     }
   }
 
@@ -299,7 +431,7 @@ export function DashboardEditor() {
               cols={GRID_COLUMNS}
               rowHeight={ROW_HEIGHT}
               draggableHandle=".dashboard-panel__header"
-              draggableCancel=".dashboard-panel__menu-trigger, .dashboard-menu__list"
+              draggableCancel=".dashboard-panel__menu-trigger, .dashboard-menu__list, .rule-multiselect"
               resizeHandles={["se"]}
               onLayoutChange={setLayout}
             >
@@ -307,37 +439,52 @@ export function DashboardEditor() {
                 <div key={panel.id} className="dashboard-panel">
                   <div className="dashboard-panel__header">
                     <span className="dashboard-panel__title">{panel.title}</span>
-                    <div className="dashboard-menu">
-                      <button
-                        className="dashboard-panel__menu-trigger"
-                        aria-label="Panel actions"
-                        onClick={() => setOpenMenu((current) => (current === panel.id ? null : panel.id))}
-                      >
-                        <MoreIcon />
-                      </button>
-                      {openMenu === panel.id && (
-                        <div className="dashboard-menu__list">
-                          <button
-                            className="dashboard-menu__item"
-                            onClick={() => {
-                              setOpenMenu(null);
-                              navigate(`/dashboards/${id}/panels/${panel.id}/edit`);
-                            }}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="dashboard-menu__item dashboard-menu__item--danger"
-                            onClick={() => handleRemovePanel(panel.id)}
-                          >
-                            Remove
-                          </button>
-                        </div>
+                    <div className="dashboard-panel__header-actions">
+                      {XY_CHART_TYPES.has(panel.chart.type) && projectRules.length > 0 && (
+                        <RuleMultiSelect
+                          compact
+                          rules={projectRules}
+                          selectedIds={panel.event_rule_ids}
+                          onChange={(ruleIds) => handlePanelEventRuleIdsChange(panel, ruleIds)}
+                        />
                       )}
+                      <div className="dashboard-menu">
+                        <button
+                          className="dashboard-panel__menu-trigger"
+                          aria-label="Panel actions"
+                          onClick={() => setOpenMenu((current) => (current === panel.id ? null : panel.id))}
+                        >
+                          <MoreIcon />
+                        </button>
+                        {openMenu === panel.id && (
+                          <div className="dashboard-menu__list">
+                            <button
+                              className="dashboard-menu__item"
+                              onClick={() => {
+                                setOpenMenu(null);
+                                navigate(`/dashboards/${id}/panels/${panel.id}/edit`);
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="dashboard-menu__item dashboard-menu__item--danger"
+                              onClick={() => handleRemovePanel(panel.id)}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="dashboard-panel__body">
-                    <ChartPreview chart={panel.chart} rows={panelRows[panel.id] ?? []} height="100%" />
+                    <ChartPreview
+                      chart={panel.chart}
+                      rows={panelRows[panel.id] ?? []}
+                      events={panelEvents[panel.id] ?? []}
+                      height="100%"
+                    />
                   </div>
                 </div>
               ))}

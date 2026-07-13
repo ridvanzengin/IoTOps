@@ -83,8 +83,22 @@
   font-size: 11px;
   color: var(--text);
   background: var(--bg-subtle);
+  border: none;
   border-radius: 4px;
   padding: 1px 6px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.occurrence-card__identifier:hover {
+  background: var(--accent-bg);
+  color: var(--accent-h);
+}
+
+.occurrence-card__identifier-error {
+  font-size: 11px;
+  color: var(--danger);
+  margin: 4px 0 0;
 }
 
 .occurrence-card__expand-row {

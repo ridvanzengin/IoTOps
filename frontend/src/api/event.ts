@@ -9,6 +9,19 @@ export function listEvents(projectId?: string, limit = 50): Promise<Event[]> {
   return apiRequest<Event[]>(`/api/event?${params}`);
 }
 
+// For the Panel-overlay feature: a specific set of Rules' events within a
+// specific time window (the panel's own resolved [time_from, time_to]),
+// not project-scoped -- see iotops-workspace/ROADMAP.md's "Events-as-
+// overlay on Panel charts" note.
+export function listEventsForOverlay(ruleIds: string[], since: string, until: string): Promise<Event[]> {
+  // 200 is GET /api/event's own hard cap (le=200) -- also plenty for a
+  // chart overlay in practice, since more than ~200 markers in one
+  // window would be unreadable as vertical lines anyway.
+  const params = new URLSearchParams({ since, until, limit: "200" });
+  for (const ruleId of ruleIds) params.append("rule_id", ruleId);
+  return apiRequest<Event[]>(`/api/event?${params}`);
+}
+
 export function getEventCounts(projectId?: string): Promise<EventRuleCount[]> {
   const params = new URLSearchParams();
   if (projectId) params.set("project_id", projectId);

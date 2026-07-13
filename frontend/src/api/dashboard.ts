@@ -6,6 +6,7 @@ import type {
   DashboardQueryPreview,
   PanelInputPayload,
   PanelQueryOverrides,
+  PanelQueryResult,
   VariableOptionsRequest,
   VariableOptionsResult,
 } from "../types/dashboard";
@@ -75,8 +76,8 @@ export function runPanelQuery(
   dashboardId: string,
   panelId: string,
   overrides: PanelQueryOverrides,
-): Promise<TelemetrySqlQueryResult> {
-  return apiRequest<TelemetrySqlQueryResult>(`/api/dashboard/${dashboardId}/panel/${panelId}/query`, {
+): Promise<PanelQueryResult> {
+  return apiRequest<PanelQueryResult>(`/api/dashboard/${dashboardId}/panel/${panelId}/query`, {
     method: "POST",
     body: JSON.stringify(overrides),
   });

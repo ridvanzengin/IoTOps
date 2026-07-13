@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -55,6 +55,26 @@ async def test_list_events_filters_by_project_id(client: TestClient) -> None:
     await _seed(client, project_id=uuid4())
 
     response = client.get("/api/event", params={"project_id": str(project_id)})
+
+    assert response.status_code == 200
+    assert [e["id"] for e in response.json()] == [str(matching.id)]
+
+
+async def test_list_events_filters_by_rule_id_and_time_range(client: TestClient) -> None:
+    now = datetime.now(timezone.utc)
+    rule_id = uuid4()
+    matching = await _seed(client, rule_id=rule_id, matched_at=now)
+    await _seed(client, rule_id=uuid4(), matched_at=now)  # wrong rule
+    await _seed(client, rule_id=rule_id, matched_at=now - timedelta(hours=2))  # out of range
+
+    response = client.get(
+        "/api/event",
+        params={
+            "rule_id": [str(rule_id)],
+            "since": (now - timedelta(hours=1)).isoformat(),
+            "until": (now + timedelta(hours=1)).isoformat(),
+        },
+    )
 
     assert response.status_code == 200
     assert [e["id"] for e in response.json()] == [str(matching.id)]

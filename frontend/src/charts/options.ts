@@ -1,5 +1,6 @@
 import type { EChartsOption } from "echarts-for-react";
 import type { Chart, SeriesConfig } from "../types/dashboard";
+import type { Event } from "../types/event";
 
 type Row = Record<string, unknown>;
 
@@ -139,6 +140,101 @@ function buildXyOption(
         smooth: type === "line" ? true : undefined,
       };
     }),
+  };
+}
+
+const EVENT_MARK_COLOR: Record<Event["flag"], string> = {
+  match: "#f2607d",
+  clear: "#4dd4ac",
+};
+
+// One shape per Rule (cycled if more than 4 are overlaid on one panel) so
+// multiple overlaid rules stay visually distinguishable from each other,
+// independent of color -- color alone always means active/resolved,
+// never rule identity. Literal shapes requested: triangle, square,
+// diamond -- circle added as a 4th so a 4th+ rule doesn't silently reuse
+// triangle without at least *some* visual cue (still ambiguous past 4,
+// but the tooltip's rule name is the actual disambiguator at that point).
+const EVENT_SYMBOLS = ["triangle", "rect", "diamond", "circle"];
+
+// Category axes position by exact value equality against the axis's own
+// `data` array (see buildXyOption's wide-format branch) -- an event's
+// matched_at timestamp essentially never matches one exactly, so it has
+// to snap to whichever category tick is closest in time instead. Returns
+// null if no category looks like a timestamp at all (categories aren't
+// time-based), rather than snapping to an arbitrary first entry.
+function nearestCategoryValue(categories: unknown[], targetIso: string): unknown | null {
+  const target = new Date(targetIso).getTime();
+  let nearest: unknown = null;
+  let nearestDiff = Infinity;
+  for (const candidate of categories) {
+    const candidateTime = new Date(String(candidate)).getTime();
+    if (Number.isNaN(candidateTime)) continue;
+    const diff = Math.abs(candidateTime - target);
+    if (diff < nearestDiff) {
+      nearest = candidate;
+      nearestDiff = diff;
+    }
+  }
+  return nearest;
+}
+
+export interface EventOverlay {
+  series: NonNullable<EChartsOption["series"]>;
+  // A dedicated, hidden value axis fixed to [0, 1] -- every event dot
+  // plots at y=1 (top) regardless of what the panel's own data is doing,
+  // so markers form one consistent band above the chart instead of
+  // depending on (and potentially colliding with) the real data's own
+  // scale. Appended after whatever axes buildChartOption already
+  // produced, so it doesn't disturb their existing yAxisIndex values --
+  // the caller (ChartPreview) is responsible for actually appending it
+  // and pointing this overlay's series at its index.
+  yAxis: NonNullable<EChartsOption["yAxis"]> extends (infer T)[] ? T : never;
+}
+
+// Match/clear events as scatter dots on a dedicated top-of-chart lane --
+// see the EventOverlay yAxis comment for why a fixed lane instead of
+// plotting at the real data's value. Pie/gauge charts have no natural
+// x-position, so they never get an overlay -- gated here, matching what
+// buildChartOption itself supports for line/bar/scatter.
+export function buildEventOverlay(chart: Chart, rows: Row[], events: Event[]): EventOverlay | null {
+  if (events.length === 0) return null;
+  if (chart.type !== "line" && chart.type !== "bar" && chart.type !== "scatter") return null;
+
+  const isTimeAxis = Boolean(chart.series_by);
+  const categories = isTimeAxis ? null : axisValues(rows, chart.x_axis);
+
+  const ruleShapeIndex = new Map<string, number>();
+  for (const event of events) {
+    if (!ruleShapeIndex.has(event.rule_id)) ruleShapeIndex.set(event.rule_id, ruleShapeIndex.size);
+  }
+
+  const data = events
+    .map((event) => {
+      const xValue = isTimeAxis ? new Date(event.matched_at).getTime() : nearestCategoryValue(categories!, event.matched_at);
+      if (xValue === null || xValue === undefined || Number.isNaN(xValue)) return null;
+      return {
+        name: `${event.flag === "match" ? "Active" : "Resolved"}: ${event.rule_name}`,
+        value: [xValue, 1],
+        symbol: EVENT_SYMBOLS[(ruleShapeIndex.get(event.rule_id) ?? 0) % EVENT_SYMBOLS.length],
+        symbolSize: 11,
+        itemStyle: { color: EVENT_MARK_COLOR[event.flag] },
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+
+  if (data.length === 0) return null;
+
+  return {
+    series: [
+      {
+        type: "scatter",
+        name: "Events",
+        data,
+        tooltip: { trigger: "item" },
+      },
+    ],
+    yAxis: { type: "value", show: false, min: 0, max: 1 },
   };
 }
 

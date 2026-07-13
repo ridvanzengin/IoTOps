@@ -1,15 +1,34 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import ReactECharts from "echarts-for-react";
-import { buildChartOption } from "../charts/options";
+import { buildChartOption, buildEventOverlay } from "../charts/options";
 import type { Chart } from "../types/dashboard";
+import type { Event } from "../types/event";
 
 interface ChartPreviewProps {
   chart: Chart;
   rows: Record<string, unknown>[];
   height?: number | string;
+  events?: Event[];
 }
 
-export function ChartPreview({ chart, rows, height = 260 }: ChartPreviewProps) {
+export function ChartPreview({ chart, rows, height = 260, events = [] }: ChartPreviewProps) {
+  const option = useMemo(() => {
+    const base = buildChartOption(chart, rows);
+    const overlay = buildEventOverlay(chart, rows, events);
+    if (!overlay) return base;
+    // Append (not replace) whatever axes buildChartOption already built
+    // (a single object, or an array of 2 for a right-axis panel) -- the
+    // events axis's index is always the new last slot, so existing
+    // series' own yAxisIndex references stay correct.
+    const existingYAxis = Array.isArray(base.yAxis) ? base.yAxis : base.yAxis ? [base.yAxis] : [];
+    const eventsYAxisIndex = existingYAxis.length;
+    return {
+      ...base,
+      yAxis: [...existingYAxis, overlay.yAxis],
+      series: [...(base.series ?? []), ...overlay.series.map((series) => ({ ...series, yAxisIndex: eventsYAxisIndex }))],
+    };
+  }, [chart, rows, events]);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ReactECharts>(null);
 
@@ -66,7 +85,7 @@ export function ChartPreview({ chart, rows, height = 260 }: ChartPreviewProps) {
       ) : (
         <ReactECharts
           ref={chartRef}
-          option={buildChartOption(chart, rows)}
+          option={option}
           style={{ height: "100%", width: "100%" }}
           notMerge
         />

@@ -42,6 +42,20 @@ def test_chart_discriminates_by_type() -> None:
     assert isinstance(panel.chart, GaugeChart)
 
 
+def test_panel_defaults_to_no_event_overlay() -> None:
+    panel = _panel()
+
+    assert panel.event_rule_ids == []
+
+
+def test_panel_accepts_event_rule_ids() -> None:
+    rule_id = uuid4()
+
+    panel = _panel(event_rule_ids=[rule_id])
+
+    assert panel.event_rule_ids == [rule_id]
+
+
 def test_dashboard_rejects_overlapping_panels() -> None:
     first = _panel(position=PanelPosition(x=0, y=0, width=6, height=4))
     second = _panel(position=PanelPosition(x=3, y=0, width=6, height=4))
