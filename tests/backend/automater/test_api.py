@@ -8,8 +8,10 @@ from mongomock_motor import AsyncMongoMockClient
 from app.automater.docker import AutomaterDockerManager
 from app.automater.repository import AutomaterRepository
 from app.automater.service import AutomaterService
+from app.collector.docker import CollectorDockerManager
 from app.collector.models import Collector
 from app.collector.repository import CollectorRepository
+from app.collector.service import CollectorService
 from app.dependencies import get_automater_service
 from app.main import app
 from app.plugin.registry import build_default_registry
@@ -31,11 +33,20 @@ def client(tmp_path: Path, collector_repository: CollectorRepository) -> TestCli
         runtime_dir=tmp_path / "runtime",
         host_runtime_dir=Path("/host/runtime"),
     )
+    collector_service = CollectorService(
+        repository=collector_repository,
+        registry=build_default_registry(),
+        docker_manager=CollectorDockerManager(
+            client=FakeDockerClient(),  # type: ignore[arg-type]
+            runtime_dir=tmp_path / "collector-runtime",
+            host_runtime_dir=Path("/host/collector-runtime"),
+        ),
+    )
     service = AutomaterService(
         repository=AutomaterRepository(database),
         registry=build_default_registry(),
         docker_manager=docker_manager,
-        collector_repository=collector_repository,
+        collector_service=collector_service,
     )
     app.dependency_overrides[get_automater_service] = lambda: service
     try:

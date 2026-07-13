@@ -58,6 +58,24 @@ class CollectorService:
         deployed = self._docker_manager.deploy(collector, toml_config)
         return await self._repository.update(deployed)
 
+    async def redeploy_if_running(self, collector: Collector) -> Collector:
+        """Persist a config change made on an already-loaded Collector, and
+        redeploy it only if it's currently running -- otherwise there's
+        nothing to refresh, the next real deploy picks up the change
+        naturally. Used by AutomaterService when it adds/removes the
+        forwarding output an http-sourced Automater depends on, so the
+        Collector doesn't need its own "redeploy because a dependent
+        changed" concept beyond this one narrow case. See
+        iotops-workspace/ROADMAP.md's "Automater fan-out strategy" note.
+        """
+        if collector.docker is None:
+            return await self._repository.update(collector)
+        toml_config = generate_toml(
+            collector.inputs, collector.processors, collector.outputs, self._registry
+        )
+        deployed = self._docker_manager.deploy(collector, toml_config)
+        return await self._repository.update(deployed)
+
     async def stop(self, collector_id: UUID) -> Collector:
         collector = await self._repository.get(collector_id)
         stopped = self._docker_manager.stop(collector)

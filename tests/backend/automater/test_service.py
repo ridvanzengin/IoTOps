@@ -8,8 +8,10 @@ from app.automater.docker import AutomaterDockerManager
 from app.automater.models import Condition, Rule
 from app.automater.repository import AutomaterRepository
 from app.automater.service import AutomaterService
+from app.collector.docker import CollectorDockerManager
 from app.collector.models import Collector
 from app.collector.repository import CollectorRepository
+from app.collector.service import CollectorService
 from app.plugin.registry import build_default_registry
 from app.shared.enums import CollectorStatus
 from app.shared.exceptions import InvalidOperationError
@@ -24,7 +26,20 @@ def collector_repository() -> CollectorRepository:
 
 
 @pytest.fixture
-def service(tmp_path: Path, collector_repository: CollectorRepository) -> AutomaterService:
+def collector_service(tmp_path: Path, collector_repository: CollectorRepository) -> CollectorService:
+    return CollectorService(
+        repository=collector_repository,
+        registry=build_default_registry(),
+        docker_manager=CollectorDockerManager(
+            client=FakeDockerClient(),  # type: ignore[arg-type]
+            runtime_dir=tmp_path / "collector-runtime",
+            host_runtime_dir=Path("/host/collector-runtime"),
+        ),
+    )
+
+
+@pytest.fixture
+def service(tmp_path: Path, collector_service: CollectorService) -> AutomaterService:
     database = AsyncMongoMockClient()["iotops"]
     docker_manager = AutomaterDockerManager(
         client=FakeDockerClient(),  # type: ignore[arg-type]
@@ -35,7 +50,7 @@ def service(tmp_path: Path, collector_repository: CollectorRepository) -> Automa
         repository=AutomaterRepository(database),
         registry=build_default_registry(),
         docker_manager=docker_manager,
-        collector_repository=collector_repository,
+        collector_service=collector_service,
     )
 
 
@@ -259,6 +274,215 @@ async def test_create_rule_scopes_amqp_queue_distinct_from_collector(
     # the Automater's queue still receives every message the Collector's
     # queue does (both bound to the same exchange).
     assert automater.inputs[0].configuration["exchange"] == "telegraf"
+
+
+async def test_create_rule_forwards_http_collector_input_to_new_automater(
+    service: AutomaterService, collector_repository: CollectorRepository
+) -> None:
+    # A webhook push has no broker to fan out to two independent listeners
+    # -- the Collector must forward a copy to the Automater's own listener
+    # via a new outputs.http block. See iotops-workspace/ROADMAP.md's
+    # "Automater fan-out strategy" note.
+    project_id = uuid4()
+    collector = Collector(
+        project_id=project_id,
+        name="HTTP Collector",
+        inputs=[
+            InputPlugin(
+                plugin_type="http",
+                name="hive_metrics-input",
+                configuration={
+                    "name_override": "hive_metrics",
+                    "service_address": "tcp://:9090",
+                    "paths": ["/webhook"],
+                },
+            )
+        ],
+        outputs=[OutputPlugin(plugin_type="timescaledb", configuration={})],
+    )
+    collector = await collector_repository.create(collector)
+
+    automater = await service.create_rule(
+        project_id=project_id,
+        rule=_rule(),
+        automater_id=None,
+        automater_name="New Automater",
+        automater_description="",
+        collector_id=collector.id,
+    )
+
+    updated_collector = await collector_repository.get(collector.id)
+    forwards = [o for o in updated_collector.outputs if o.plugin_type == "http_forward"]
+    assert len(forwards) == 1
+    assert forwards[0].automater_id == automater.id
+    assert forwards[0].configuration["url"] == f"http://iotops-automater-{automater.id}:9090/webhook"
+
+
+async def test_create_rule_scopes_http_listener_config_for_forwarding(
+    service: AutomaterService, collector_repository: CollectorRepository
+) -> None:
+    # Two live-verified fixes bundled into the same scoping step (see
+    # _automater_scoped_configuration's own comment for the full story):
+    # 1. read_timeout/write_timeout bumped well past the fixed 10s
+    #    flush_interval -- Go's net/http.Server falls back to ReadTimeout
+    #    as its idle keep-alive timeout when IdleTimeout isn't set, and
+    #    http_listener_v2 exposes no separate idle-timeout option, so the
+    #    stock 10s default raced the Collector's forwarding outputs.http
+    #    on every single flush.
+    # 2. data_format forced to "influx" -- Telegraf's output JSON
+    #    serializer and input JSON parser are different, non-interoperable
+    #    shapes; a "json"-configured listener silently received
+    #    well-formed-but-empty metrics from a forwarded request, so no
+    #    rule could ever match, with no error anywhere.
+    # 3. JSON-parser-only fields (tag_keys/json_string_fields) dropped --
+    #    Telegraf's strict config validation crash-loops the container if
+    #    a field only parsers.json understands is still set once
+    #    data_format no longer selects it.
+    project_id = uuid4()
+    collector = Collector(
+        project_id=project_id,
+        name="HTTP Collector",
+        inputs=[
+            InputPlugin(
+                plugin_type="http",
+                name="hive_metrics-input",
+                configuration={
+                    "name_override": "hive_metrics",
+                    "service_address": "tcp://:8080",
+                    "read_timeout": "10s",
+                    "write_timeout": "10s",
+                    "data_format": "json",
+                    "tag_keys": ["station_id", "city"],
+                    "json_string_fields": ["notes"],
+                },
+            )
+        ],
+        outputs=[OutputPlugin(plugin_type="timescaledb", configuration={})],
+    )
+    collector = await collector_repository.create(collector)
+
+    automater = await service.create_rule(
+        project_id=project_id,
+        rule=_rule(),
+        automater_id=None,
+        automater_name="New Automater",
+        automater_description="",
+        collector_id=collector.id,
+    )
+
+    scoped_configuration = automater.inputs[0].configuration
+    assert scoped_configuration["read_timeout"] == "60s"
+    assert scoped_configuration["write_timeout"] == "60s"
+    assert scoped_configuration["data_format"] == "influx"
+    assert "tag_keys" not in scoped_configuration
+    assert "json_string_fields" not in scoped_configuration
+
+
+async def test_create_rule_does_not_duplicate_http_forwarding_for_same_url(
+    service: AutomaterService, collector_repository: CollectorRepository
+) -> None:
+    project_id = uuid4()
+    collector = Collector(
+        project_id=project_id,
+        name="HTTP Collector",
+        inputs=[
+            InputPlugin(
+                plugin_type="http",
+                name="hive_metrics-input",
+                configuration={"name_override": "hive_metrics"},
+            ),
+            InputPlugin(
+                plugin_type="http",
+                name="device_status-input",
+                configuration={"name_override": "device_status"},
+            ),
+        ],
+        outputs=[OutputPlugin(plugin_type="timescaledb", configuration={})],
+    )
+    collector = await collector_repository.create(collector)
+
+    automater = await service.create_rule(
+        project_id=project_id,
+        rule=_rule(table="hive_metrics"),
+        automater_id=None,
+        automater_name="New Automater",
+        automater_description="",
+        collector_id=collector.id,
+    )
+    await service.create_rule(
+        project_id=project_id,
+        rule=_rule(name="device-alert", table="device_status"),
+        automater_id=automater.id,
+        automater_name=None,
+        automater_description="",
+        collector_id=collector.id,
+    )
+
+    updated_collector = await collector_repository.get(collector.id)
+    forwards = [o for o in updated_collector.outputs if o.plugin_type == "http_forward"]
+    # Both tables share the same default service_address/path (":8080" +
+    # "/telegraf") in this fixture, so they resolve to the same forward
+    # URL -- exactly one output, not two, since a second identical
+    # outputs.http block would be redundant.
+    assert len(forwards) == 1
+
+
+async def test_delete_removes_http_forwarding_from_collector(
+    service: AutomaterService, collector_repository: CollectorRepository
+) -> None:
+    project_id = uuid4()
+    collector = Collector(
+        project_id=project_id,
+        name="HTTP Collector",
+        inputs=[
+            InputPlugin(
+                plugin_type="http",
+                name="hive_metrics-input",
+                configuration={"name_override": "hive_metrics"},
+            )
+        ],
+        outputs=[OutputPlugin(plugin_type="timescaledb", configuration={})],
+    )
+    collector = await collector_repository.create(collector)
+
+    automater = await service.create_rule(
+        project_id=project_id,
+        rule=_rule(),
+        automater_id=None,
+        automater_name="New Automater",
+        automater_description="",
+        collector_id=collector.id,
+    )
+    forwarding_before = await collector_repository.get(collector.id)
+    assert any(o.plugin_type == "http_forward" for o in forwarding_before.outputs)
+
+    await service.delete(automater.id)
+
+    forwarding_after = await collector_repository.get(collector.id)
+    assert not any(o.plugin_type == "http_forward" for o in forwarding_after.outputs)
+    # The Collector's own unrelated output is untouched.
+    assert any(o.plugin_type == "timescaledb" for o in forwarding_after.outputs)
+
+
+async def test_create_rule_does_not_forward_mqtt_input(
+    service: AutomaterService, collector_repository: CollectorRepository
+) -> None:
+    # mqtt already gets a full independent copy via the broker's native
+    # fan-out -- no forwarding output should ever be created for it.
+    project_id = uuid4()
+    collector = await _seed_collector(collector_repository, project_id, "hive_metrics")
+
+    await service.create_rule(
+        project_id=project_id,
+        rule=_rule(),
+        automater_id=None,
+        automater_name="New Automater",
+        automater_description="",
+        collector_id=collector.id,
+    )
+
+    updated_collector = await collector_repository.get(collector.id)
+    assert not any(o.plugin_type == "http_forward" for o in updated_collector.outputs)
 
 
 async def test_create_rule_leaves_mqtt_configuration_untouched(

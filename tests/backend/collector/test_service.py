@@ -126,6 +126,35 @@ async def test_stop_updates_persisted_status(service: CollectorService) -> None:
     assert stopped.status == CollectorStatus.STOPPED
 
 
+async def test_redeploy_if_running_persists_without_deploying_when_not_running(
+    service: CollectorService,
+) -> None:
+    collector = await service.create(_valid_input())
+    assert collector.docker is None
+    collector.outputs.append(OutputPlugin(plugin_type="timescaledb", configuration={}))
+
+    result = await service.redeploy_if_running(collector)
+
+    assert result.docker is None
+    fetched = await service.get(collector.id)
+    assert len(fetched.outputs) == 2
+
+
+async def test_redeploy_if_running_redeploys_when_already_running(
+    service: CollectorService,
+) -> None:
+    collector = await service.create(_valid_input())
+    collector = await service.deploy(collector.id)
+    assert collector.docker is not None
+    collector.outputs.append(OutputPlugin(plugin_type="timescaledb", configuration={}))
+
+    result = await service.redeploy_if_running(collector)
+
+    assert result.status == CollectorStatus.RUNNING
+    fetched = await service.get(collector.id)
+    assert len(fetched.outputs) == 2
+
+
 async def test_delete_removes_collector(service: CollectorService) -> None:
     collector = await service.create(_valid_input())
     await service.deploy(collector.id)

@@ -31,16 +31,17 @@ def test_list_filters_by_category() -> None:
     processors = registry.list(category=PluginCategory.PROCESSOR)
 
     assert [plugin.name for plugin in inputs] == ["mqtt", "kafka", "http", "amqp"]
-    assert [plugin.name for plugin in outputs] == ["timescaledb", "celery"]
+    assert [plugin.name for plugin in outputs] == ["timescaledb", "celery", "http_forward"]
     assert [plugin.name for plugin in processors] == ["rule"]
 
 
 def test_list_without_category_returns_everything() -> None:
     registry = build_default_registry()
 
-    # mqtt/kafka/http/amqp (inputs), timescaledb + celery (outputs), rule
-    # (processor) -- see app/plugin/registry.py's build_default_registry().
-    assert len(registry.list()) == 7
+    # mqtt/kafka/http/amqp (inputs), timescaledb + celery + http_forward
+    # (outputs), rule (processor) -- see app/plugin/registry.py's
+    # build_default_registry().
+    assert len(registry.list()) == 8
 
 
 def test_plugin_schema_exposes_field_defaults_for_form_prefill() -> None:
@@ -145,6 +146,26 @@ def test_amqp_validate_configuration_fills_in_defaults() -> None:
     assert validated["exchange"] == "telegraf"
     assert validated["queue"] == "device-events"
     assert validated["binding_key"] == "#"
+
+
+def test_http_forward_registered_with_real_telegraf_plugin_name() -> None:
+    registry = build_default_registry()
+
+    http_forward = registry.get("http_forward")
+
+    assert http_forward.category == PluginCategory.OUTPUT
+    assert http_forward.telegraf_name == "http"
+
+
+def test_http_forward_validate_configuration_round_trips_url() -> None:
+    registry = build_default_registry()
+
+    validated = registry.validate_configuration(
+        "http_forward", {"url": "http://iotops-automater-abc:8080/telegraf"}
+    )
+
+    assert validated["url"] == "http://iotops-automater-abc:8080/telegraf"
+    assert validated["data_format"] == "influx"
 
 
 def test_new_input_plugins_share_json_parser_field_pattern_with_mqtt() -> None:

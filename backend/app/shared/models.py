@@ -25,6 +25,14 @@ class OutputPlugin(BaseModel):
     enabled: bool = True
     configuration: dict[str, Any] = Field(default_factory=dict)
 
+    # Set only on a Collector's forwarding output ("http_forward") created
+    # on behalf of a dependent Automater -- lets AutomaterService find and
+    # remove exactly the output(s) it created, across any Collector,
+    # without a second index. Not sent to Telegraf: generate_toml only
+    # reads plugin_type/configuration/enabled. See iotops-workspace/
+    # ROADMAP.md's "Automater fan-out strategy" note.
+    automater_id: UUID | None = Field(default=None)
+
 
 class DockerConfig(BaseModel):
     image: str
