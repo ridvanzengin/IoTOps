@@ -1,4 +1,5 @@
-from uuid import UUID
+from typing import Any
+from uuid import UUID, uuid4
 
 from app.automater.docker import AutomaterDockerManager
 from app.automater.models import Automater, AutomaterInput, Rule
@@ -63,13 +64,13 @@ class AutomaterService:
                         "collector_id is required to add one"
                     )
                 collector = await self._collector_repository.get(collector_id)
-                mqtt_input = self._find_mqtt_input(collector, rule.table)
+                matched_input = self._find_input_for_table(collector, rule.table)
                 automater.inputs.append(
                     InputPlugin(
-                        plugin_type=mqtt_input.plugin_type,
-                        name=mqtt_input.name,
+                        plugin_type=matched_input.plugin_type,
+                        name=matched_input.name,
                         enabled=True,
-                        configuration=mqtt_input.configuration,
+                        configuration=self._automater_scoped_configuration(matched_input.configuration),
                     )
                 )
             automater.rules.append(rule)
@@ -83,7 +84,7 @@ class AutomaterService:
                     "collector_id is required when creating a new Automater"
                 )
             collector = await self._collector_repository.get(collector_id)
-            mqtt_input = self._find_mqtt_input(collector, rule.table)
+            matched_input = self._find_input_for_table(collector, rule.table)
 
             automater = Automater(
                 project_id=project_id,
@@ -91,10 +92,10 @@ class AutomaterService:
                 description=automater_description,
                 inputs=[
                     InputPlugin(
-                        plugin_type=mqtt_input.plugin_type,
-                        name=mqtt_input.name,
+                        plugin_type=matched_input.plugin_type,
+                        name=matched_input.name,
                         enabled=True,
-                        configuration=mqtt_input.configuration,
+                        configuration=self._automater_scoped_configuration(matched_input.configuration),
                     )
                 ],
                 rules=[rule],
@@ -112,23 +113,45 @@ class AutomaterService:
         return await self._redeploy_or_stop(automater)
 
     def _has_input_for_table(self, automater: Automater, table: str) -> bool:
-        return any(
-            i.plugin_type == "mqtt" and i.configuration.get("name_override") == table
-            for i in automater.inputs
-        )
+        # Not scoped to any particular plugin_type -- an Automater's input
+        # can be derived from any of a Collector's input plugins (mqtt,
+        # kafka, http, amqp, ...), matched purely by which TimescaleDB
+        # table it feeds. See iotops-workspace/ROADMAP.md's data-sources
+        # note.
+        return any(i.configuration.get("name_override") == table for i in automater.inputs)
 
-    def _find_mqtt_input(self, collector: Collector, table: str) -> InputPlugin:
-        mqtt_input = next(
-            (
-                i
-                for i in collector.inputs
-                if i.plugin_type == "mqtt" and i.configuration.get("name_override") == table
-            ),
+    def _find_input_for_table(self, collector: Collector, table: str) -> InputPlugin:
+        matched_input = next(
+            (i for i in collector.inputs if i.configuration.get("name_override") == table),
             None,
         )
-        if mqtt_input is None:
-            raise InvalidOperationError(f"Collector {collector.id} has no mqtt input for table {table!r}")
-        return mqtt_input
+        if matched_input is None:
+            raise InvalidOperationError(f"Collector {collector.id} has no input for table {table!r}")
+        return matched_input
+
+    def _automater_scoped_configuration(self, configuration: dict[str, Any]) -> dict[str, Any]:
+        """Kafka consumer groups and AMQP queues are competing-consumer
+        patterns, unlike MQTT's (and Kafka/AMQP's own, across *different*
+        groups/queues) broadcast pub/sub -- if the Automater's derived
+        input reused the Collector's exact consumer_group/queue verbatim,
+        the two would split incoming messages between them (Kafka/AMQP
+        both load-balance same-group/same-queue consumers) instead of
+        each getting its own full copy, silently dropping ~50% of the
+        data -- and matches -- on each side. Scoping these to a value
+        distinct from the Collector's own gives the Automater an
+        independent full copy of the same stream (a second queue bound to
+        the same exchange, or a second consumer group on the same topic),
+        the same effect MQTT/HTTP get for free since neither has a
+        competing-consumer concept. A no-op for plugin types with neither
+        field. See iotops-workspace/ROADMAP.md's data-sources note.
+        """
+        scoped = dict(configuration)
+        suffix = uuid4().hex[:8]
+        if "consumer_group" in scoped:
+            scoped["consumer_group"] = f"{scoped['consumer_group']}-automater-{suffix}"
+        if "queue" in scoped:
+            scoped["queue"] = f"{scoped['queue']}-automater-{suffix}"
+        return scoped
 
     async def set_rule_enabled(self, automater_id: UUID, rule_id: UUID, enabled: bool) -> Automater:
         # Deliberately narrower than a full-rule replace: the only rule edit

@@ -30,7 +30,7 @@ def test_list_filters_by_category() -> None:
     outputs = registry.list(category=PluginCategory.OUTPUT)
     processors = registry.list(category=PluginCategory.PROCESSOR)
 
-    assert [plugin.name for plugin in inputs] == ["mqtt"]
+    assert [plugin.name for plugin in inputs] == ["mqtt", "kafka", "http", "amqp"]
     assert [plugin.name for plugin in outputs] == ["timescaledb", "celery"]
     assert [plugin.name for plugin in processors] == ["rule"]
 
@@ -38,9 +38,9 @@ def test_list_filters_by_category() -> None:
 def test_list_without_category_returns_everything() -> None:
     registry = build_default_registry()
 
-    # mqtt (input), timescaledb + celery (outputs), rule (processor) --
-    # see app/plugin/registry.py's build_default_registry().
-    assert len(registry.list()) == 4
+    # mqtt/kafka/http/amqp (inputs), timescaledb + celery (outputs), rule
+    # (processor) -- see app/plugin/registry.py's build_default_registry().
+    assert len(registry.list()) == 7
 
 
 def test_plugin_schema_exposes_field_defaults_for_form_prefill() -> None:
@@ -87,6 +87,78 @@ def test_validate_configuration_excludes_unset_optional_fields() -> None:
     assert "username" not in validated
     assert "tls_ca" not in validated
     assert "servers" in validated
+
+
+def test_kafka_registered_with_real_telegraf_plugin_name() -> None:
+    registry = build_default_registry()
+
+    kafka = registry.get("kafka")
+
+    assert kafka.category == PluginCategory.INPUT
+    assert kafka.telegraf_name == "kafka_consumer"
+
+
+def test_kafka_validate_configuration_fills_in_defaults() -> None:
+    registry = build_default_registry()
+
+    validated = registry.validate_configuration("kafka", {"topics": ["device.telemetry"]})
+
+    assert validated["brokers"] == ["localhost:9092"]
+    assert validated["topics"] == ["device.telemetry"]
+    assert validated["data_format"] == "json"
+
+
+def test_http_registered_with_real_telegraf_plugin_name() -> None:
+    registry = build_default_registry()
+
+    http = registry.get("http")
+
+    assert http.category == PluginCategory.INPUT
+    assert http.telegraf_name == "http_listener_v2"
+
+
+def test_http_validate_configuration_fills_in_defaults() -> None:
+    registry = build_default_registry()
+
+    validated = registry.validate_configuration("http", {})
+
+    assert validated["service_address"] == "tcp://:8080"
+    assert validated["paths"] == ["/telegraf"]
+    assert validated["methods"] == ["POST", "PUT"]
+
+
+def test_amqp_registered_with_real_telegraf_plugin_name() -> None:
+    registry = build_default_registry()
+
+    amqp = registry.get("amqp")
+
+    assert amqp.category == PluginCategory.INPUT
+    assert amqp.telegraf_name == "amqp_consumer"
+
+
+def test_amqp_validate_configuration_fills_in_defaults() -> None:
+    registry = build_default_registry()
+
+    validated = registry.validate_configuration("amqp", {"queue": "device-events"})
+
+    assert validated["brokers"] == ["amqp://localhost:5672/influxdb"]
+    assert validated["exchange"] == "telegraf"
+    assert validated["queue"] == "device-events"
+    assert validated["binding_key"] == "#"
+
+
+def test_new_input_plugins_share_json_parser_field_pattern_with_mqtt() -> None:
+    # tag_keys/json_string_fields are Telegraf's generic JSON-parser
+    # options (see kafka.py's own comment), not MQTT-specific -- confirms
+    # all three new input plugins expose them the same way mqtt does, so
+    # AutomaterEditor's Dedup Identifiers prefill keeps working generically
+    # regardless of which input plugin type produced a table.
+    registry = build_default_registry()
+
+    for plugin_name in ("kafka", "http", "amqp"):
+        schema = registry.get(plugin_name).configuration_schema
+        assert "tag_keys" in schema["properties"]
+        assert "json_string_fields" in schema["properties"]
 
 
 def test_timescaledb_schema_property_uses_telegraf_schema_alias() -> None:

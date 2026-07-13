@@ -38,6 +38,44 @@ services:
     networks:
       - iotops
 
+  # AMQP broker for the amqp input plugin (see app/plugin/inputs/amqp.py).
+  # Management UI on :15672 (guest/guest) -- useful for inspecting
+  # exchanges/queues directly while testing the amqp Collector input.
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - iotops
+
+  # Kafka broker for the kafka input plugin (see app/plugin/inputs/kafka.py).
+  # Single-node KRaft mode (no Zookeeper). Two listeners: PLAINTEXT for
+  # container-to-container traffic (Collector/Automater Telegraf
+  # containers, the data-sources-showcase publisher -- all reach it via
+  # "kafka:9092"), HOST for the user's own kafka client tools run directly
+  # on the host machine (reach it via "localhost:9094") -- a single
+  # listener can't serve both, since Kafka's advertised address must match
+  # whichever hostname the client actually used to connect.
+  kafka:
+    image: apache/kafka:3.7.0
+    hostname: kafka
+    ports:
+      - "9094:9094"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,HOST://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,HOST://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - iotops
+
   backend:
     build:
       context: .
@@ -135,6 +173,28 @@ services:
       - iotops
     profiles:
       - beekeeping
+
+  # Data Sources Showcase (Kafka/HTTP/AMQP) -- demonstrates the non-MQTT
+  # input plugins end to end: a dedicated Kafka Collector plus a second
+  # Collector with both an http and an amqp input, one Rule per source,
+  # and a Dashboard with a panel per table. Same self-provisioning pattern
+  # as beekeeping-simulator. `docker compose --profile data-sources up -d`
+  data-sources-showcase:
+    build:
+      context: examples/data-sources-showcase
+    environment:
+      BACKEND_BASE_URL: http://backend:8000
+      KAFKA_BROKER: kafka:9092
+      RABBITMQ_HOST: rabbitmq
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - kafka
+      - rabbitmq
+    networks:
+      - iotops
+    profiles:
+      - data-sources
 
 volumes:
   mongo_data:
