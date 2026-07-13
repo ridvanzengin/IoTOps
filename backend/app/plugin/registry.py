@@ -3,6 +3,9 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from app.plugin.inputs.amqp import AmqpConsumerConfig
+from app.plugin.inputs.http_listener import HttpListenerConfig
+from app.plugin.inputs.kafka import KafkaConsumerConfig
 from app.plugin.inputs.mqtt import MqttConsumerConfig
 from app.plugin.models import Plugin, plugin_id
 from app.plugin.outputs.celery import CeleryOutputConfig
@@ -77,6 +80,36 @@ def build_default_registry() -> PluginRegistry:
             telegraf_name="mqtt_consumer",
             config_model=MqttConsumerConfig,
             description="Subscribes to an MQTT broker and ingests telemetry messages.",
+            supported_platforms=["linux/amd64", "linux/arm64"],
+        )
+    )
+    registry.register(
+        PluginDefinition(
+            name="kafka",
+            category=PluginCategory.INPUT,
+            telegraf_name="kafka_consumer",
+            config_model=KafkaConsumerConfig,
+            description="Consumes telemetry messages from Kafka topics.",
+            supported_platforms=["linux/amd64", "linux/arm64"],
+        )
+    )
+    registry.register(
+        PluginDefinition(
+            name="http",
+            category=PluginCategory.INPUT,
+            telegraf_name="http_listener_v2",
+            config_model=HttpListenerConfig,
+            description="Listens for telemetry pushed to an HTTP webhook endpoint.",
+            supported_platforms=["linux/amd64", "linux/arm64"],
+        )
+    )
+    registry.register(
+        PluginDefinition(
+            name="amqp",
+            category=PluginCategory.INPUT,
+            telegraf_name="amqp_consumer",
+            config_model=AmqpConsumerConfig,
+            description="Consumes telemetry messages from an AMQP (e.g. RabbitMQ) broker.",
             supported_platforms=["linux/amd64", "linux/arm64"],
         )
     )

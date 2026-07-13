@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { createRule, listAutomaters } from "../api/automater";
 import { listCollectors } from "../api/collector";
+import { listPlugins } from "../api/plugin";
 import { listProjects } from "../api/project";
 import { getTelemetrySchema } from "../api/telemetry";
 import { isNumericType, SchemaConditionBuilder } from "../components/SchemaConditionBuilder";
@@ -16,6 +17,7 @@ import type {
   RuleSeverity,
 } from "../types/automater";
 import type { Collector, InputPluginPayload } from "../types/collector";
+import type { Plugin } from "../types/plugin";
 import type { Project } from "../types/project";
 import type { TelemetryTableSchema } from "../types/telemetry";
 import "./Collector.css";
@@ -38,12 +40,26 @@ function extractPlaceholders(message: string): string[] {
   return matches.map((token) => token.slice(1, -1));
 }
 
+// Best-effort, informational only -- different input plugin types name
+// their "where does this come from" field differently (mqtt/kafka:
+// topics, http: paths, amqp: queue). Falls back to nothing rather than
+// guessing at a field that doesn't exist for this plugin_type.
+function describeInputSource(configuration: Record<string, unknown>): string | null {
+  for (const key of ["topics", "paths", "queue"]) {
+    const value = configuration[key];
+    if (Array.isArray(value) && value.length > 0) return value.join(", ");
+    if (typeof value === "string" && value) return value;
+  }
+  return null;
+}
+
 export function AutomaterEditor() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
   const [collectors, setCollectors] = useState<Collector[]>([]);
   const [automaters, setAutomaters] = useState<Automater[]>([]);
   const [schema, setSchema] = useState<TelemetryTableSchema[]>([]);
+  const [inputPlugins, setInputPlugins] = useState<Plugin[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [projectId, setProjectId] = useState("");
@@ -80,7 +96,20 @@ export function AutomaterEditor() {
     getTelemetrySchema()
       .then(setSchema)
       .catch(() => setLoadError("Failed to load table schema."));
+    listPlugins("input")
+      .then(setInputPlugins)
+      .catch(() => setLoadError("Failed to load input plugin types."));
   }, []);
+
+  // Telegraf measurement-names an input after its own plugin's Telegraf
+  // name (e.g. "mqtt_consumer", "kafka_consumer") when name_override isn't
+  // set on that instance -- this map lets input-derivation logic match
+  // that real fallback for *any* input plugin_type, not just mqtt. See
+  // iotops-workspace/ROADMAP.md's data-sources note.
+  const telegrafNameByPluginType = useMemo(
+    () => new Map(inputPlugins.map((plugin) => [plugin.name, plugin.telegraf_name])),
+    [inputPlugins],
+  );
 
   const projectAutomaters = useMemo(
     () => automaters.filter((a) => a.project_id === projectId),
@@ -91,33 +120,38 @@ export function AutomaterEditor() {
     [collectors, projectId],
   );
 
-  function mqttTableNames(inputs: { plugin_type: string; configuration: Record<string, unknown> }[]): Set<string> {
-    const names = new Set<string>();
-    for (const input of inputs) {
-      if (input.plugin_type !== "mqtt") continue;
-      const override = input.configuration?.name_override;
-      // Telegraf measurement-names an input after its own plugin name
-      // ("mqtt_consumer") when name_override isn't set -- match that
-      // default rather than treating "no override" as "no table", or the
-      // input just silently vanishes from this filtered list.
-      names.add(typeof override === "string" && override ? override : "mqtt_consumer");
-    }
-    return names;
-  }
+  const inputTableNames = useCallback(
+    (inputs: { plugin_type: string; configuration: Record<string, unknown> }[]): Set<string> => {
+      const names = new Set<string>();
+      for (const input of inputs) {
+        const override = input.configuration?.name_override;
+        // Telegraf measurement-names an input after its own plugin's
+        // Telegraf name (e.g. "mqtt_consumer", "kafka_consumer") when
+        // name_override isn't set -- match that per-plugin-type default
+        // rather than treating "no override" as "no table", or the input
+        // just silently vanishes from this filtered list.
+        const fallback = telegrafNameByPluginType.get(input.plugin_type) ?? input.plugin_type;
+        names.add(typeof override === "string" && override ? override : fallback);
+      }
+      return names;
+    },
+    [telegrafNameByPluginType],
+  );
 
-  // Every table any of the project's Collectors actually write to --
-  // narrows the DB Schema panel down from "every table in TimescaleDB,
-  // from every project" (confusing once more than one project/showcase
-  // exists) to just the ones relevant here. Further narrowed to a single
-  // Collector's own tables below once one is picked.
+  // Every table any of the project's Collectors actually write to, across
+  // any input plugin type (mqtt, kafka, http, amqp, ...) -- narrows the DB
+  // Schema panel down from "every table in TimescaleDB, from every
+  // project" (confusing once more than one project/showcase exists) to
+  // just the ones relevant here. Further narrowed to a single Collector's
+  // own tables below once one is picked.
   const projectTables = useMemo(
-    () => mqttTableNames(projectCollectors.flatMap((c) => c.inputs)),
-    [projectCollectors],
+    () => inputTableNames(projectCollectors.flatMap((c) => c.inputs)),
+    [projectCollectors, inputTableNames],
   );
   const collectorTables = useMemo(() => {
     const collector = collectors.find((c) => c.id === collectorId);
-    return collector ? mqttTableNames(collector.inputs) : null;
-  }, [collectors, collectorId]);
+    return collector ? inputTableNames(collector.inputs) : null;
+  }, [collectors, collectorId, inputTableNames]);
 
   const visibleSchema = useMemo(() => {
     if (!projectId) return schema;
@@ -141,16 +175,16 @@ export function AutomaterEditor() {
   const isNewAutomater = automaterId === NEW_AUTOMATER;
 
   // An Automater can watch more than one table (mirrors how a Collector can
-  // already have more than one mqtt input) -- so an *existing* Automater
+  // already have more than one input) -- so an *existing* Automater
   // doesn't necessarily already have an input for whatever table this new
   // rule ends up targeting. This is the set of tables it already covers,
-  // so we can tell "reuse an existing input" apart from "needs a new one".
+  // across any input plugin type, so we can tell "reuse an existing input"
+  // apart from "needs a new one".
   const existingAutomaterTables = useMemo(() => {
     if (isNewAutomater || !automaterId) return new Set<string>();
     const automater = automaters.find((a) => a.id === automaterId);
     return new Set(
       (automater?.inputs ?? [])
-        .filter((i) => i.plugin_type === "mqtt")
         .map((i) => i.configuration?.name_override as string | undefined)
         .filter((name): name is string => Boolean(name)),
     );
@@ -171,45 +205,44 @@ export function AutomaterEditor() {
   // Automater-Rule notes.
   const derivedInput = useMemo((): InputPluginPayload | null => {
     if (!isNewAutomater && automaterId && !needsNewInputForTable) {
-      const mqttInput = automaters
+      const matchedInput = automaters
         .find((a) => a.id === automaterId)
-        ?.inputs.find((i) => i.plugin_type === "mqtt" && i.configuration?.name_override === table);
-      if (!mqttInput) return null;
+        ?.inputs.find((i) => i.configuration?.name_override === table);
+      if (!matchedInput) return null;
       return {
-        plugin_type: mqttInput.plugin_type,
-        name: mqttInput.name,
+        plugin_type: matchedInput.plugin_type,
+        name: matchedInput.name,
         enabled: true,
-        configuration: mqttInput.configuration,
+        configuration: matchedInput.configuration,
       };
     }
 
-    // A Collector can have more than one mqtt input (one per table/topic --
-    // e.g. device_metrics and device_status), so a multi-input Collector's
-    // input must be matched to the rule's target table via name_override.
-    // But `table` isn't chosen until the user interacts with the DB Schema
-    // panel -- for the common case of a single-mqtt-input Collector there's
-    // no ambiguity to resolve in the first place, so don't make that one
-    // wait on `table` too (it used to resolve immediately on Collector
-    // selection; only gate on `table` when there's actually more than one
-    // candidate to disambiguate).
-    const candidates =
-      collectors.find((c) => c.id === collectorId)?.inputs.filter((i) => i.plugin_type === "mqtt") ?? [];
-    const mqttInput =
+    // A Collector can have more than one input (one per table/topic -- e.g.
+    // device_metrics and device_status, possibly fed by different plugin
+    // types), so a multi-input Collector's input must be matched to the
+    // rule's target table via name_override. But `table` isn't chosen
+    // until the user interacts with the DB Schema panel -- for the common
+    // case of a single-input Collector there's no ambiguity to resolve in
+    // the first place, so don't make that one wait on `table` too (it used
+    // to resolve immediately on Collector selection; only gate on `table`
+    // when there's actually more than one candidate to disambiguate).
+    const candidates = collectors.find((c) => c.id === collectorId)?.inputs ?? [];
+    const matchedInput =
       candidates.length === 1 ? candidates[0] : candidates.find((i) => i.configuration?.name_override === table);
-    if (!mqttInput) return null;
+    if (!matchedInput) return null;
     return {
-      plugin_type: mqttInput.plugin_type,
-      name: mqttInput.name,
+      plugin_type: matchedInput.plugin_type,
+      name: matchedInput.name,
       enabled: true,
-      configuration: mqttInput.configuration,
+      configuration: matchedInput.configuration,
     };
   }, [isNewAutomater, automaterId, needsNewInputForTable, automaters, collectors, collectorId, table]);
 
-  // Distinguishes "this Collector genuinely has no mqtt input" from "it has
-  // more than one and we can't tell which until a table is picked" -- these
-  // need different error messages (see the Collector-picker JSX below).
-  const collectorMqttInputCount = useMemo(
-    () => collectors.find((c) => c.id === collectorId)?.inputs.filter((i) => i.plugin_type === "mqtt").length ?? 0,
+  // Distinguishes "this Collector genuinely has no input" from "it has more
+  // than one and we can't tell which until a table is picked" -- these need
+  // different error messages (see the Collector-picker JSX below).
+  const collectorInputCount = useMemo(
+    () => collectors.find((c) => c.id === collectorId)?.inputs.length ?? 0,
     [collectors, collectorId],
   );
 
@@ -399,18 +432,18 @@ export function AutomaterEditor() {
                 </label>
                 {projectId && projectCollectors.length === 0 && (
                   <p className="collector-page__error">
-                    No Collector exists for this project yet — create one first, an Automater reuses a
-                    Collector's own MQTT input.
+                    No Collector exists for this project yet — create one first, an Automater reuses one
+                    of a Collector's own inputs.
                   </p>
                 )}
-                {collectorId && !derivedInput && collectorMqttInputCount === 0 && (
+                {collectorId && !derivedInput && collectorInputCount === 0 && (
                   <p className="collector-page__error">
-                    The selected Collector has no MQTT input configured.
+                    The selected Collector has no input configured.
                   </p>
                 )}
-                {collectorId && !derivedInput && collectorMqttInputCount > 1 && (
+                {collectorId && !derivedInput && collectorInputCount > 1 && (
                   <p className="automater-editor__warning" style={{ marginTop: -8 }}>
-                    This Collector has {collectorMqttInputCount} MQTT inputs — pick a column from a table in
+                    This Collector has {collectorInputCount} inputs — pick a column from a table in
                     the DB Schema panel first, so we know which one this rule's table is.
                   </p>
                 )}
@@ -418,7 +451,8 @@ export function AutomaterEditor() {
             )}
             {derivedInput && (
               <p className="automater-editor__warning" style={{ marginTop: -8 }}>
-                Input topics {String((derivedInput.configuration.topics as string[] | undefined)?.join(", ") ?? "—")},
+                {describeInputSource(derivedInput.configuration) &&
+                  `Input source ${describeInputSource(derivedInput.configuration)}, `}
                 tag keys {inputTagKeys.length > 0 ? inputTagKeys.join(", ") : "none"}.
               </p>
             )}
@@ -498,7 +532,7 @@ export function AutomaterEditor() {
                 ⚠ {missingTagKeys.join(", ")} {missingTagKeys.length === 1 ? "is" : "are"} referenced by
                 identifiers or the message, but not in the reused input's Tag Keys. Telegraf silently drops
                 any string field not listed there — add {missingTagKeys.length === 1 ? "it" : "them"} to the
-                Collector's MQTT input Tag Keys, or this rule's dedup/message won't behave as expected.
+                Collector's input Tag Keys, or this rule's dedup/message won't behave as expected.
               </p>
             )}
 

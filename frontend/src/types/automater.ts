@@ -80,7 +80,8 @@ export interface CreateRuleRequest {
   rule: RulePayload;
   // Either automater_id (attach to an existing Automater) or
   // automater_name + collector_id (create a new one, deriving its input
-  // from that Collector's MQTT input) must be set.
+  // from one of that Collector's own inputs -- any plugin_type) must be
+  // set.
   automater_id?: string | null;
   automater_name?: string | null;
   automater_description?: string;

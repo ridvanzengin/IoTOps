@@ -132,7 +132,7 @@ async def test_create_rule_raises_when_collector_has_no_matching_table(
     project_id = uuid4()
     collector = await _seed_collector(collector_repository, project_id, "device_status")
 
-    with pytest.raises(InvalidOperationError, match="no mqtt input for table"):
+    with pytest.raises(InvalidOperationError, match="no input for table"):
         await service.create_rule(
             project_id=project_id,
             rule=_rule(table="hive_metrics"),
@@ -141,6 +141,145 @@ async def test_create_rule_raises_when_collector_has_no_matching_table(
             automater_description="",
             collector_id=collector.id,
         )
+
+
+async def test_create_rule_derives_input_from_a_non_mqtt_collector_input(
+    service: AutomaterService, collector_repository: CollectorRepository
+) -> None:
+    # An Automater's input isn't scoped to plugin_type == "mqtt" -- any of a
+    # Collector's input plugins (kafka, http, amqp, ...) can back a rule, as
+    # long as its name_override matches the rule's table. See
+    # iotops-workspace/ROADMAP.md's data-sources note.
+    project_id = uuid4()
+    collector = Collector(
+        project_id=project_id,
+        name="Kafka Collector",
+        inputs=[
+            InputPlugin(
+                plugin_type="kafka",
+                name="hive_metrics-input",
+                configuration={"name_override": "hive_metrics", "topics": ["hive.metrics"]},
+            )
+        ],
+        outputs=[OutputPlugin(plugin_type="timescaledb", configuration={})],
+    )
+    collector = await collector_repository.create(collector)
+
+    automater = await service.create_rule(
+        project_id=project_id,
+        rule=_rule(),
+        automater_id=None,
+        automater_name="New Automater",
+        automater_description="",
+        collector_id=collector.id,
+    )
+
+    assert automater.inputs[0].plugin_type == "kafka"
+    assert automater.inputs[0].configuration["name_override"] == "hive_metrics"
+
+
+async def test_create_rule_scopes_kafka_consumer_group_distinct_from_collector(
+    service: AutomaterService, collector_repository: CollectorRepository
+) -> None:
+    # Kafka consumer groups are competing-consumer, not broadcast -- if the
+    # Automater's derived input reused the Collector's exact
+    # consumer_group, the two would split messages between them instead of
+    # each getting a full copy. See _automater_scoped_configuration's own
+    # comment and iotops-workspace/ROADMAP.md's data-sources note.
+    project_id = uuid4()
+    collector = Collector(
+        project_id=project_id,
+        name="Kafka Collector",
+        inputs=[
+            InputPlugin(
+                plugin_type="kafka",
+                name="hive_metrics-input",
+                configuration={
+                    "name_override": "hive_metrics",
+                    "topics": ["hive.metrics"],
+                    "consumer_group": "telegraf_metrics_consumers",
+                },
+            )
+        ],
+        outputs=[OutputPlugin(plugin_type="timescaledb", configuration={})],
+    )
+    collector = await collector_repository.create(collector)
+
+    automater = await service.create_rule(
+        project_id=project_id,
+        rule=_rule(),
+        automater_id=None,
+        automater_name="New Automater",
+        automater_description="",
+        collector_id=collector.id,
+    )
+
+    automater_group = automater.inputs[0].configuration["consumer_group"]
+    assert automater_group != "telegraf_metrics_consumers"
+    assert automater_group.startswith("telegraf_metrics_consumers-automater-")
+
+
+async def test_create_rule_scopes_amqp_queue_distinct_from_collector(
+    service: AutomaterService, collector_repository: CollectorRepository
+) -> None:
+    # Same reasoning as the Kafka consumer_group case above -- an AMQP
+    # queue is a competing-consumer target too.
+    project_id = uuid4()
+    collector = Collector(
+        project_id=project_id,
+        name="AMQP Collector",
+        inputs=[
+            InputPlugin(
+                plugin_type="amqp",
+                name="hive_metrics-input",
+                configuration={
+                    "name_override": "hive_metrics",
+                    "exchange": "telegraf",
+                    "queue": "telegraf",
+                },
+            )
+        ],
+        outputs=[OutputPlugin(plugin_type="timescaledb", configuration={})],
+    )
+    collector = await collector_repository.create(collector)
+
+    automater = await service.create_rule(
+        project_id=project_id,
+        rule=_rule(),
+        automater_id=None,
+        automater_name="New Automater",
+        automater_description="",
+        collector_id=collector.id,
+    )
+
+    automater_queue = automater.inputs[0].configuration["queue"]
+    assert automater_queue != "telegraf"
+    assert automater_queue.startswith("telegraf-automater-")
+    # The exchange/binding stays identical -- only the queue differs, so
+    # the Automater's queue still receives every message the Collector's
+    # queue does (both bound to the same exchange).
+    assert automater.inputs[0].configuration["exchange"] == "telegraf"
+
+
+async def test_create_rule_leaves_mqtt_configuration_untouched(
+    service: AutomaterService, collector_repository: CollectorRepository
+) -> None:
+    # mqtt has neither consumer_group nor queue -- _automater_scoped_configuration
+    # must be a no-op for it, not accidentally add either field.
+    project_id = uuid4()
+    collector = await _seed_collector(collector_repository, project_id, "hive_metrics")
+
+    automater = await service.create_rule(
+        project_id=project_id,
+        rule=_rule(),
+        automater_id=None,
+        automater_name="New Automater",
+        automater_description="",
+        collector_id=collector.id,
+    )
+
+    assert "consumer_group" not in automater.inputs[0].configuration
+    assert "queue" not in automater.inputs[0].configuration
 
 
 async def test_create_rule_existing_automater_reuses_matching_input_without_collector_id(

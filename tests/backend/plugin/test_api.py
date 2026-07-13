@@ -10,7 +10,7 @@ def test_list_plugins_returns_builtins() -> None:
 
     assert response.status_code == 200
     names = {plugin["name"] for plugin in response.json()}
-    assert names == {"mqtt", "timescaledb", "rule", "celery"}
+    assert names == {"mqtt", "kafka", "http", "amqp", "timescaledb", "rule", "celery"}
 
 
 def test_list_plugins_filters_by_category() -> None:
@@ -19,7 +19,7 @@ def test_list_plugins_filters_by_category() -> None:
     response = client.get("/api/plugin", params={"category": "input"})
 
     assert response.status_code == 200
-    assert [plugin["name"] for plugin in response.json()] == ["mqtt"]
+    assert [plugin["name"] for plugin in response.json()] == ["mqtt", "kafka", "http", "amqp"]
 
 
 def test_get_plugin_returns_configuration_schema() -> None:
