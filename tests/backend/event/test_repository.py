@@ -1,10 +1,14 @@
+import hashlib
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import pytest
 from mongomock_motor import AsyncMongoMockClient
 
-from app.event.models import Event, EventFlag, OccurrenceStatus
+from app.event.models import Event, EventFlag, OccurrenceStatus, ResolveMode
 from app.event.repository import EventRepository, to_document
+from app.shared.exceptions import EntityNotFoundError, InvalidOperationError
 
 
 def _event(**overrides: object) -> Event:
@@ -27,6 +31,17 @@ async def _seeded_repository(*events: Event) -> EventRepository:
     for event in events:
         await collection.insert_one(to_document(event))
     return EventRepository(database)
+
+
+async def _seeded_repository_with_redis(*events: Event) -> tuple[EventRepository, AsyncMock, AsyncMock]:
+    database = AsyncMongoMockClient()["iotops"]
+    collection = database["events"]
+    for event in events:
+        await collection.insert_one(to_document(event))
+    pubsub_client = AsyncMock()
+    firing_client = AsyncMock()
+    repository = EventRepository(database, pubsub_redis_client=pubsub_client, firing_redis_client=firing_client)
+    return repository, pubsub_client, firing_client
 
 
 async def test_list_returns_events_newest_first() -> None:
@@ -236,3 +251,79 @@ async def test_unresolved_counts_by_project_counts_only_active_occurrences() -> 
     by_project = {c.project_id: c.count for c in counts}
     assert by_project[project_a] == 1
     assert by_project[project_b] == 1
+
+
+async def test_resolve_occurrence_resolves_and_stores_notes() -> None:
+    match = _event(
+        resolve_mode=ResolveMode.MANUAL,
+        identifier_keys=["hive_id"],
+        tags={"hive_id": "hive-1"},
+    )
+    repository, pubsub_client, firing_client = await _seeded_repository_with_redis(match)
+
+    occurrence = await repository.resolve_occurrence(match.id, "checked on the hive, false alarm")
+
+    assert occurrence.status == OccurrenceStatus.RESOLVED
+    assert occurrence.resolution_notes == "checked on the hive, false alarm"
+    assert occurrence.resolved_at is not None
+
+    occurrences = await repository.list_occurrences()
+    assert len(occurrences) == 1
+    assert occurrences[0].status == OccurrenceStatus.RESOLVED
+
+
+async def test_resolve_occurrence_deletes_firing_key_and_publishes() -> None:
+    match = _event(resolve_mode=ResolveMode.MANUAL, identifier_keys=["hive_id"], tags={"hive_id": "hive-1"})
+    repository, pubsub_client, firing_client = await _seeded_repository_with_redis(match)
+
+    await repository.resolve_occurrence(match.id, "")
+
+    firing_client.delete.assert_awaited_once()
+    (deleted_key,) = firing_client.delete.await_args.args
+    # Independently reconstructs rule.go's firingKey() -- see
+    # EventRepository._firing_key's own comment for the algorithm.
+    digest = hashlib.sha256(b"hive-1").hexdigest()
+    assert deleted_key == f"automater:firing:{match.rule_name}:{match.rule_id}:{digest}"
+
+    pubsub_client.publish.assert_awaited_once()
+    channel, _payload = pubsub_client.publish.await_args.args
+    assert channel == f"events:{match.project_id}"
+
+
+async def test_resolve_occurrence_rejects_auto_resolve_rule() -> None:
+    match = _event()  # resolve_mode defaults to AUTO
+    repository, _pubsub_client, _firing_client = await _seeded_repository_with_redis(match)
+
+    with pytest.raises(InvalidOperationError):
+        await repository.resolve_occurrence(match.id, "")
+
+
+async def test_resolve_occurrence_rejects_unknown_event() -> None:
+    repository, _pubsub_client, _firing_client = await _seeded_repository_with_redis()
+
+    with pytest.raises(EntityNotFoundError):
+        await repository.resolve_occurrence(uuid4(), "")
+
+
+async def test_resolve_occurrence_rejects_already_resolved() -> None:
+    rule_id = uuid4()
+    now = datetime.now(timezone.utc)
+    match = _event(
+        rule_id=rule_id,
+        resolve_mode=ResolveMode.MANUAL,
+        identifier_keys=["hive_id"],
+        tags={"hive_id": "hive-1"},
+        matched_at=now,
+    )
+    clear = _event(
+        rule_id=rule_id,
+        resolve_mode=ResolveMode.MANUAL,
+        identifier_keys=["hive_id"],
+        tags={"hive_id": "hive-1"},
+        flag=EventFlag.CLEAR,
+        matched_at=now + timedelta(minutes=1),
+    )
+    repository, _pubsub_client, _firing_client = await _seeded_repository_with_redis(match, clear)
+
+    with pytest.raises(InvalidOperationError):
+        await repository.resolve_occurrence(match.id, "")

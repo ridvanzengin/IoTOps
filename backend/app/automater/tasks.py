@@ -72,6 +72,7 @@ def log_rule_match(
         message=fields.get("rule_message", ""),
         flag=tags["flag"],
         identifier_keys=[k for k in tags.get("identifier_keys", "").split(",") if k],
+        resolve_mode=tags.get("resolve_mode", "auto"),
         tags=tags,
         fields=fields,
         matched_at=timestamp,

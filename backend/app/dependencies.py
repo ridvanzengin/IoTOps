@@ -28,6 +28,7 @@ _docker_manager: CollectorDockerManager | None = None
 _automater_docker_manager: AutomaterDockerManager | None = None
 _http_client: httpx.AsyncClient | None = None
 _async_redis_client: async_redis.Redis | None = None
+_firing_redis_client: async_redis.Redis | None = None
 
 
 def get_plugin_registry() -> PluginRegistry:
@@ -113,7 +114,13 @@ async def get_ai_service() -> AiService:
 
 
 def get_event_service() -> EventService:
-    return EventService(repository=EventRepository(get_database()))
+    return EventService(
+        repository=EventRepository(
+            get_database(),
+            pubsub_redis_client=get_async_redis_client(),
+            firing_redis_client=get_firing_redis_client(),
+        )
+    )
 
 
 def get_async_redis_client() -> async_redis.Redis:
@@ -125,3 +132,13 @@ def get_async_redis_client() -> async_redis.Redis:
     if _async_redis_client is None:
         _async_redis_client = async_redis.from_url(settings.redis_uri)
     return _async_redis_client
+
+
+def get_firing_redis_client() -> async_redis.Redis:
+    # DB 0, not DB 1 -- see settings.automater_firing_redis_uri's own
+    # comment. Only EventRepository.resolve_occurrence uses this, to
+    # delete a manually-resolved occurrence's dedup key.
+    global _firing_redis_client
+    if _firing_redis_client is None:
+        _firing_redis_client = async_redis.from_url(settings.automater_firing_redis_uri)
+    return _firing_redis_client

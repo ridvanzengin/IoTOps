@@ -30,3 +30,6 @@ class EventService:
         rule_ids: list[UUID] | None = None,
     ) -> list[Event]:
         return await self._repository.list(project_id, limit, since, until, rule_ids)
+
+    async def resolve_occurrence(self, match_event_id: UUID, notes: str) -> Occurrence:
+        return await self._repository.resolve_occurrence(match_event_id, notes)

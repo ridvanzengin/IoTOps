@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -6,7 +7,7 @@ from fastapi.testclient import TestClient
 from mongomock_motor import AsyncMongoMockClient
 
 from app.dependencies import get_event_service
-from app.event.models import Event, EventFlag
+from app.event.models import Event, EventFlag, ResolveMode
 from app.event.repository import EventRepository, to_document
 from app.event.service import EventService
 from app.main import app
@@ -15,7 +16,9 @@ from app.main import app
 @pytest.fixture
 def client() -> TestClient:
     database = AsyncMongoMockClient()["iotops"]
-    service = EventService(repository=EventRepository(database))
+    service = EventService(
+        repository=EventRepository(database, pubsub_redis_client=AsyncMock(), firing_redis_client=AsyncMock())
+    )
     app.dependency_overrides[get_event_service] = lambda: service
     app.state.test_collection = database["events"]
     try:
@@ -134,3 +137,28 @@ async def test_get_unresolved_counts_covers_all_projects(client: TestClient) -> 
     by_project = {c["project_id"]: c["count"] for c in response.json()}
     assert by_project[str(project_a)] == 1
     assert by_project[str(project_b)] == 1
+
+
+async def test_resolve_occurrence_returns_resolved_occurrence(client: TestClient) -> None:
+    match = await _seed(client, resolve_mode=ResolveMode.MANUAL)
+
+    response = client.post(f"/api/event/occurrences/{match.id}/resolve", json={"notes": "handled"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "resolved"
+    assert body["resolution_notes"] == "handled"
+
+
+async def test_resolve_occurrence_on_auto_rule_is_rejected(client: TestClient) -> None:
+    match = await _seed(client)  # resolve_mode defaults to auto
+
+    response = client.post(f"/api/event/occurrences/{match.id}/resolve", json={"notes": ""})
+
+    assert response.status_code == 400
+
+
+async def test_resolve_occurrence_on_unknown_event_is_404(client: TestClient) -> None:
+    response = client.post(f"/api/event/occurrences/{uuid4()}/resolve", json={"notes": ""})
+
+    assert response.status_code == 404

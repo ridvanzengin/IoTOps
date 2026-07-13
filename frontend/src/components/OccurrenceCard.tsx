@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useEvents } from "../context/EventsContext";
+import { resolveOccurrence } from "../api/event";
+import { ApiError } from "../api/client";
 import type { Occurrence } from "../types/event";
 import "./OccurrenceCard.css";
 
@@ -19,14 +21,45 @@ const HIDDEN_DETAIL_KEYS = new Set(["automater_id", "flag", "matched_rule_id", "
 function detailPayload(occurrence: Occurrence): Record<string, unknown> {
   const merged: Record<string, unknown> = { ...occurrence.tags, ...occurrence.fields };
   for (const key of HIDDEN_DETAIL_KEYS) delete merged[key];
+  // Only ever set on a manually-resolved occurrence -- surfaced in the
+  // JSON dump only (not its own dl row), per the request that a
+  // resolution note is only visible once Show detail is expanded.
+  if (occurrence.resolution_notes) merged.resolution_notes = occurrence.resolution_notes;
   return merged;
 }
 
 export function OccurrenceCard({ occurrence }: { occurrence: Occurrence }) {
   const [expanded, setExpanded] = useState(false);
   const [matchError, setMatchError] = useState<string | null>(null);
+  const [resolving, setResolving] = useState(false);
+  const [note, setNote] = useState("");
+  const [resolveSubmitting, setResolveSubmitting] = useState(false);
+  const [resolveError, setResolveError] = useState<string | null>(null);
   const { activeDashboardVariables, openDashboardAndSelectIdentifiers } = useEvents();
   const identifierEntries = Object.entries(occurrence.identifiers);
+
+  // Only a still-active occurrence from a manual-resolve Rule can be
+  // resolved -- an auto-resolve Rule's occurrences clear themselves, and
+  // an already-resolved one has nothing left to do. See
+  // iotops-workspace/ROADMAP.md's "Event resolution mode" note.
+  const canResolve = occurrence.status === "active" && occurrence.resolve_mode === "manual";
+
+  async function handleResolveSubmit() {
+    setResolveSubmitting(true);
+    setResolveError(null);
+    try {
+      await resolveOccurrence(occurrence.id, note);
+      // No local state mutation here -- the backend publishes a synthetic
+      // clear Event over the same SSE stream EventsContext already
+      // reconciles, so the card flips to resolved on its own shortly.
+      setResolving(false);
+      setNote("");
+    } catch (err) {
+      setResolveError(err instanceof ApiError ? err.message : "Failed to resolve.");
+    } finally {
+      setResolveSubmitting(false);
+    }
+  }
 
   // Clicking *any* identifier chip applies the occurrence's whole
   // identifiers dict, not just that one key/value -- an occurrence's
@@ -94,6 +127,15 @@ export function OccurrenceCard({ occurrence }: { occurrence: Occurrence }) {
       )}
 
       <div className="occurrence-card__expand-row">
+        {canResolve && !resolving && (
+          <button
+            type="button"
+            className="occurrence-card__resolve"
+            onClick={() => setResolving(true)}
+          >
+            Resolve
+          </button>
+        )}
         <button
           type="button"
           className="occurrence-card__expand"
@@ -102,6 +144,40 @@ export function OccurrenceCard({ occurrence }: { occurrence: Occurrence }) {
           {expanded ? "Hide detail" : "Show detail"}
         </button>
       </div>
+      {resolving && (
+        <div className="occurrence-card__resolve-form">
+          <input
+            type="text"
+            className="occurrence-card__resolve-note"
+            placeholder="Resolution notes (optional)"
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            disabled={resolveSubmitting}
+            autoFocus
+          />
+          <button
+            type="button"
+            className="occurrence-card__resolve-submit"
+            onClick={handleResolveSubmit}
+            disabled={resolveSubmitting}
+          >
+            Submit
+          </button>
+          <button
+            type="button"
+            className="occurrence-card__resolve-cancel"
+            onClick={() => {
+              setResolving(false);
+              setNote("");
+              setResolveError(null);
+            }}
+            disabled={resolveSubmitting}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+      {resolveError && <p className="occurrence-card__identifier-error">{resolveError}</p>}
       {expanded && (
         <div className="occurrence-card__drawer">
           <dl className="occurrence-card__drawer-list">

@@ -11,6 +11,7 @@ import type {
   Automater,
   ConditionPayload,
   CreateRuleRequest,
+  ResolveMode,
   RulePayload,
   RuleSeverity,
 } from "../types/automater";
@@ -22,6 +23,7 @@ import "./AutomaterEditor.css";
 import "../components/SchemaConditionBuilder.css";
 
 const RULE_SEVERITIES: RuleSeverity[] = ["low", "medium", "high", "critical"];
+const RESOLVE_MODES: ResolveMode[] = ["auto", "manual"];
 
 // A dropdown option value, not a real Automater id -- selects the "create a
 // new Automater alongside this rule" path instead of attaching to an
@@ -57,6 +59,7 @@ export function AutomaterEditor() {
   const [message, setMessage] = useState("");
   const [identifiers, setIdentifiers] = useState<string[]>([]);
   const [ttl, setTtl] = useState("5m");
+  const [resolveMode, setResolveMode] = useState<ResolveMode>("auto");
 
   const [table, setTable] = useState("");
   const [conditions, setConditions] = useState<ConditionPayload[]>([]);
@@ -269,6 +272,7 @@ export function AutomaterEditor() {
       message,
       enabled: true,
       priority: 0,
+      resolve_mode: resolveMode,
       table,
       conditions,
       identifiers,
@@ -465,7 +469,26 @@ export function AutomaterEditor() {
                 <span>Dedup TTL</span>
                 <input value={ttl} placeholder="5m" onChange={(event) => setTtl(event.target.value)} />
               </label>
+              <label className="field">
+                <span>Resolution</span>
+                <select
+                  value={resolveMode}
+                  onChange={(event) => setResolveMode(event.target.value as ResolveMode)}
+                >
+                  {RESOLVE_MODES.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {mode === "auto" ? "Auto-resolve" : "Manual-resolve"}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
+            {resolveMode === "manual" && (
+              <p className="automater-editor__warning" style={{ marginTop: -8 }}>
+                This rule will never auto-clear -- a matching occurrence stays active until someone
+                resolves it from the Events sidebar.
+              </p>
+            )}
             <label className="field">
               <span>Message</span>
               <textarea rows={3} value={message} onChange={(event) => setMessage(event.target.value)} />

@@ -14,6 +14,13 @@ class Settings(BaseSettings):
     # into by default. Used by the celery-worker service (app/automater/
     # tasks.py), which is what actually consumes them.
     redis_uri: str = "redis://redis:6379/1"
+    # DB 0 -- matches RuleProcessorConfig's own `redis_db` default (see
+    # app/plugin/processors/rule.py), the dedup/firing-key database rule.go
+    # actually writes to. Only used by EventRepository.resolve_occurrence
+    # to delete a firing key on manual resolve -- separate from redis_uri
+    # (DB 1, the Celery broker/SSE-pubsub database) since they're different
+    # logical databases on the same Redis instance.
+    automater_firing_redis_uri: str = "redis://redis:6379/0"
     frontend_origin: str = "http://localhost:5173"
     runtime_dir: str = "runtime"
     host_runtime_dir: str = ""

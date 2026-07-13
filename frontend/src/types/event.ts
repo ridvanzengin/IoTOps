@@ -1,4 +1,4 @@
-import type { RuleSeverity } from "./automater";
+import type { ResolveMode, RuleSeverity } from "./automater";
 
 export type EventFlag = "match" | "clear";
 
@@ -15,6 +15,10 @@ export interface Event {
   message: string;
   flag: EventFlag;
   identifier_keys: string[];
+  resolve_mode: ResolveMode;
+  // Only set on a synthetic `clear` Event written by a manual resolve --
+  // never present on a match, or on an ordinary auto-clear.
+  resolution_notes: string | null;
   tags: Record<string, string>;
   fields: Record<string, unknown>;
   matched_at: string;
@@ -36,6 +40,10 @@ export type OccurrenceStatus = "active" | "resolved";
 // semantics (a re-fire after a clear is a new occurrence, never reopens
 // the old one).
 export interface Occurrence {
+  // The underlying match Event's own id -- an Occurrence has no identity
+  // of its own (it's a live pairing over the Event stream). This is what
+  // a "Resolve" API call targets.
+  id: string;
   rule_id: string;
   rule_name: string;
   category: string;
@@ -50,6 +58,8 @@ export interface Occurrence {
   project_id: string;
   tags: Record<string, string>;
   fields: Record<string, unknown>;
+  resolve_mode: ResolveMode;
+  resolution_notes: string | null;
 }
 
 export interface ProjectUnresolvedCount {
