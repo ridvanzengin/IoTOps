@@ -77,7 +77,7 @@ def get_automater_service() -> AutomaterService:
         repository=AutomaterRepository(get_database()),
         registry=get_plugin_registry(),
         docker_manager=get_automater_docker_manager(),
-        collector_repository=CollectorRepository(get_database()),
+        collector_service=get_collector_service(),
     )
 
 

@@ -1,12 +1,14 @@
 from typing import Any
 from uuid import UUID, uuid4
 
+from urllib.parse import urlsplit
+
 from app.automater.docker import AutomaterDockerManager
 from app.automater.models import Automater, AutomaterInput, Rule
 from app.automater.repository import AutomaterRepository
 from app.collector.generator import generate_toml
 from app.collector.models import Collector
-from app.collector.repository import CollectorRepository
+from app.collector.service import CollectorService
 from app.plugin.processors.rule import DeployedRule
 from app.plugin.registry import PluginRegistry
 from app.shared.exceptions import EntityNotFoundError, InvalidOperationError
@@ -14,6 +16,8 @@ from app.shared.models import InputPlugin, OutputPlugin, ProcessorPlugin
 
 _RULE_PLUGIN_TYPE = "rule"
 _CELERY_TASK_NAME = "automater.tasks.log_rule_match"
+_HTTP_FORWARD_PLUGIN_TYPE = "http_forward"
+_HTTP_INPUT_PLUGIN_TYPE = "http"
 
 
 class AutomaterService:
@@ -22,12 +26,12 @@ class AutomaterService:
         repository: AutomaterRepository,
         registry: PluginRegistry,
         docker_manager: AutomaterDockerManager,
-        collector_repository: CollectorRepository,
+        collector_service: CollectorService,
     ) -> None:
         self._repository = repository
         self._registry = registry
         self._docker_manager = docker_manager
-        self._collector_repository = collector_repository
+        self._collector_service = collector_service
 
     async def create(self, payload: AutomaterInput) -> Automater:
         automater = Automater(**payload.model_dump())
@@ -63,7 +67,7 @@ class AutomaterService:
                         f"Automater {automater_id} has no input for table {rule.table!r} yet; "
                         "collector_id is required to add one"
                     )
-                collector = await self._collector_repository.get(collector_id)
+                collector = await self._collector_service.get(collector_id)
                 matched_input = self._find_input_for_table(collector, rule.table)
                 automater.inputs.append(
                     InputPlugin(
@@ -73,6 +77,7 @@ class AutomaterService:
                         configuration=self._automater_scoped_configuration(matched_input.configuration),
                     )
                 )
+                await self._ensure_http_forwarding(collector, automater, matched_input)
             automater.rules.append(rule)
         else:
             if not automater_name:
@@ -83,7 +88,7 @@ class AutomaterService:
                 raise InvalidOperationError(
                     "collector_id is required when creating a new Automater"
                 )
-            collector = await self._collector_repository.get(collector_id)
+            collector = await self._collector_service.get(collector_id)
             matched_input = self._find_input_for_table(collector, rule.table)
 
             automater = Automater(
@@ -109,6 +114,7 @@ class AutomaterService:
             )
             self._validate_plugin_configurations(automater)
             automater = await self._repository.create(automater)
+            await self._ensure_http_forwarding(collector, automater, matched_input)
 
         return await self._redeploy_or_stop(automater)
 
@@ -144,6 +150,47 @@ class AutomaterService:
         the same effect MQTT/HTTP get for free since neither has a
         competing-consumer concept. A no-op for plugin types with neither
         field. See iotops-workspace/ROADMAP.md's data-sources note.
+
+        http's `read_timeout`/`write_timeout` (HttpListenerConfig, default
+        "10s" each) get bumped for a different, unrelated reason, live-
+        verified while building the Collector-forwards-to-Automater fix
+        (see ROADMAP.md's "Automater fan-out strategy" note): Go's
+        net/http.Server falls back to ReadTimeout as its *idle keep-alive
+        timeout* whenever IdleTimeout isn't set separately, and
+        http_listener_v2 exposes no separate idle-timeout option
+        (confirmed via `telegraf --usage http_listener_v2`). That default
+        exactly matches this platform's fixed 10s flush_interval on the
+        Collector's forwarding `outputs.http` -- a near-guaranteed race
+        between the client reusing a pooled keep-alive connection and the
+        server closing it as idle at the same moment, reproduced as a
+        consistent (not occasional) `EOF`/`connection reset by
+        peer`/`server closed idle connection` failure on every single
+        forward. Bumped well clear of the flush interval so keep-alive
+        connections comfortably survive many flush cycles.
+
+        http's `data_format` is forced to "influx" for the same
+        live-verification reason (see HttpOutputConfig's own comment,
+        app/plugin/outputs/http.py): Telegraf's output JSON serializer and
+        input JSON parser are different, non-interoperable shapes -- a
+        "json"-configured listener silently receives well-formed-but-
+        empty metrics from a forwarded request (no error anywhere, the
+        expected fields/tags just never appear, so no rule can ever
+        match). Safe to override unconditionally here because this
+        listener's only sender is the Collector's forwarding output by
+        design -- a real external webhook always targets the Collector's
+        own URL, never the Automater's directly.
+
+        Switching parsers means dropping the JSON-parser-only fields
+        (`tag_keys`/`json_string_fields`/etc.) too, not just flipping
+        `data_format` -- also live-verified: Telegraf's strict config
+        validation crash-loops the container ("configuration specified
+        the fields [...], but they were not used") if a field only
+        `parsers.json` understands is still set once `data_format` no
+        longer selects it. Not a loss: line protocol carries tags
+        natively in the wire format, so `tag_keys`' JSON-object-key-to-tag
+        promotion has nothing left to do once the Collector's own
+        `outputs.http` (already influx-serializing the already-tagged
+        metric) is what's sending it.
         """
         scoped = dict(configuration)
         suffix = uuid4().hex[:8]
@@ -151,7 +198,76 @@ class AutomaterService:
             scoped["consumer_group"] = f"{scoped['consumer_group']}-automater-{suffix}"
         if "queue" in scoped:
             scoped["queue"] = f"{scoped['queue']}-automater-{suffix}"
+        if "read_timeout" in scoped:
+            scoped["read_timeout"] = "60s"
+        if "write_timeout" in scoped:
+            scoped["write_timeout"] = "60s"
+        if "service_address" in scoped:
+            scoped["data_format"] = "influx"
+            for json_parser_only_field in (
+                "tag_keys",
+                "json_string_fields",
+                "json_time_key",
+                "json_time_format",
+                "json_timezone",
+                "data_type",
+            ):
+                scoped.pop(json_parser_only_field, None)
         return scoped
+
+    async def _ensure_http_forwarding(
+        self, collector: Collector, automater: Automater, matched_input: InputPlugin
+    ) -> None:
+        """A webhook push has no broker to fan out to multiple independent
+        listeners -- unlike mqtt/kafka/amqp, only one of the Collector's and
+        Automater's own `http_listener_v2` instances would ever actually
+        receive a given push. Fix: the Collector forwards a copy of what it
+        received to the Automater's own listener via a new `outputs.http`
+        block, rather than the Automater trying to listen for a push that
+        will never reach it. A no-op for every other plugin_type, which
+        already get a full independent copy via their broker's native
+        fan-out. See iotops-workspace/ROADMAP.md's "Automater fan-out
+        strategy" note.
+        """
+        if matched_input.plugin_type != _HTTP_INPUT_PLUGIN_TYPE:
+            return
+        forward_url = self._http_forward_url(automater.id, matched_input.configuration)
+        # Keyed on (automater_id, url) rather than automater_id alone: a
+        # multi-table Automater can derive two different http tables from
+        # the same Collector, each necessarily on its own port (the
+        # Collector itself couldn't start two http_listener_v2 inputs on
+        # the same port either), so each needs its own forwarding output
+        # rather than the second being silently skipped.
+        already_forwarding = any(
+            o.plugin_type == _HTTP_FORWARD_PLUGIN_TYPE
+            and o.automater_id == automater.id
+            and o.configuration.get("url") == forward_url
+            for o in collector.outputs
+        )
+        if already_forwarding:
+            return
+        collector.outputs.append(
+            OutputPlugin(
+                plugin_type=_HTTP_FORWARD_PLUGIN_TYPE,
+                automater_id=automater.id,
+                configuration={"url": forward_url},
+            )
+        )
+        await self._collector_service.redeploy_if_running(collector)
+
+    def _http_forward_url(self, automater_id: UUID, http_input_configuration: dict[str, Any]) -> str:
+        # Mirrors _container_name's convention in automater/docker.py --
+        # containers reach each other by name on the shared docker network
+        # regardless of published ports. The Automater's own copied
+        # http_listener_v2 input carries an identical service_address/paths
+        # (see _automater_scoped_configuration -- a no-op for http, no
+        # consumer_group/queue to rewrite), so the Collector's own input
+        # configuration this is derived from already reflects where the
+        # Automater will actually be listening.
+        service_address = http_input_configuration.get("service_address", "tcp://:8080")
+        port = urlsplit(service_address).port or 8080
+        path = (http_input_configuration.get("paths") or ["/telegraf"])[0]
+        return f"http://iotops-automater-{automater_id}:{port}{path}"
 
     async def set_rule_enabled(self, automater_id: UUID, rule_id: UUID, enabled: bool) -> Automater:
         # Deliberately narrower than a full-rule replace: the only rule edit
@@ -254,8 +370,25 @@ class AutomaterService:
 
     async def delete(self, automater_id: UUID) -> None:
         automater = await self._repository.get(automater_id)
+        await self._remove_http_forwarding(automater_id)
         self._docker_manager.remove(automater)
         await self._repository.delete(automater_id)
+
+    async def _remove_http_forwarding(self, automater_id: UUID) -> None:
+        # A Collector may have gained an http_forward output on this
+        # Automater's behalf (see _ensure_http_forwarding) -- without this,
+        # deleting the Automater would leave a permanent outputs.http block
+        # retrying against a now-removed container. Not scoped to a single
+        # Collector since an Automater's inputs (and thus the Collectors
+        # they were derived from) aren't tracked back to their source once
+        # copied -- cheap to scan given how rarely an Automater is deleted.
+        for collector in await self._collector_service.list():
+            remaining = [
+                o for o in collector.outputs if o.automater_id != automater_id
+            ]
+            if len(remaining) != len(collector.outputs):
+                collector.outputs = remaining
+                await self._collector_service.redeploy_if_running(collector)
 
     async def deploy(self, automater_id: UUID) -> Automater:
         automater = await self._repository.get(automater_id)

@@ -10,7 +10,16 @@ def test_list_plugins_returns_builtins() -> None:
 
     assert response.status_code == 200
     names = {plugin["name"] for plugin in response.json()}
-    assert names == {"mqtt", "kafka", "http", "amqp", "timescaledb", "rule", "celery"}
+    assert names == {
+        "mqtt",
+        "kafka",
+        "http",
+        "amqp",
+        "timescaledb",
+        "rule",
+        "celery",
+        "http_forward",
+    }
 
 
 def test_list_plugins_filters_by_category() -> None:

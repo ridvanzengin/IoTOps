@@ -9,6 +9,7 @@ from app.plugin.inputs.kafka import KafkaConsumerConfig
 from app.plugin.inputs.mqtt import MqttConsumerConfig
 from app.plugin.models import Plugin, plugin_id
 from app.plugin.outputs.celery import CeleryOutputConfig
+from app.plugin.outputs.http import HttpOutputConfig
 from app.plugin.outputs.timescaledb import TimescaleDBOutputConfig
 from app.plugin.processors.rule import RuleProcessorConfig
 from app.shared.enums import PluginCategory
@@ -142,6 +143,18 @@ def build_default_registry() -> PluginRegistry:
             config_model=CeleryOutputConfig,
             description="Enqueues matched-rule metrics as Celery tasks onto a "
             "Redis-backed broker/queue.",
+            supported_platforms=["linux/amd64", "linux/arm64"],
+        )
+    )
+    registry.register(
+        PluginDefinition(
+            name="http_forward",
+            category=PluginCategory.OUTPUT,
+            telegraf_name="http",
+            config_model=HttpOutputConfig,
+            description="Forwards a copy of received telemetry to another HTTP "
+            "listener -- used internally to fan an http-sourced Collector's "
+            "input out to a dependent Automater's own listener.",
             supported_platforms=["linux/amd64", "linux/arm64"],
         )
     )
