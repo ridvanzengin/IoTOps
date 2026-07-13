@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useEvents } from "../context/EventsContext";
 import type { Occurrence } from "../types/event";
 import "./OccurrenceCard.css";
 
@@ -23,7 +24,46 @@ function detailPayload(occurrence: Occurrence): Record<string, unknown> {
 
 export function OccurrenceCard({ occurrence }: { occurrence: Occurrence }) {
   const [expanded, setExpanded] = useState(false);
+  const [matchError, setMatchError] = useState<string | null>(null);
+  const { activeDashboardVariables, openDashboardAndSelectIdentifiers } = useEvents();
   const identifierEntries = Object.entries(occurrence.identifiers);
+
+  // Clicking *any* identifier chip applies the occurrence's whole
+  // identifiers dict, not just that one key/value -- an occurrence's
+  // identifiers are naturally a set (e.g. apiary_id + hive_id together),
+  // and applying them one at a time was exactly what made a same-click
+  // set a variable to a value that looked invalid: hive-4 only fails
+  // against Hive's *current* options if Apiary hasn't been updated to
+  // apiary-2 yet. Applying the full set together, in dependency order,
+  // is what selectIdentifiers (registered by whichever dashboard is
+  // open) actually does -- see EventsContext.tsx's comment on it.
+  //
+  // An identifier key only lines up with a dashboard variable if that
+  // variable's value_column happens to be named identically, and
+  // there's no enforced relationship between the two (see
+  // iotops-workspace/ROADMAP.md's AI Co-pilot design notes) -- so a miss
+  // here is a normal outcome, not an error condition worth alarming
+  // over.
+  function handleIdentifierClick() {
+    if (activeDashboardVariables && activeDashboardVariables.projectId === occurrence.project_id) {
+      const hasMatch = activeDashboardVariables.variables.some(
+        (variable) => occurrence.identifiers[variable.value_column] !== undefined,
+      );
+      if (!hasMatch) {
+        setMatchError("No open dashboard variable matches this event's identifiers.");
+        return;
+      }
+      setMatchError(null);
+      activeDashboardVariables.selectIdentifiers(occurrence.identifiers);
+      return;
+    }
+
+    // No dashboard open, or a different project's -- open this
+    // occurrence's own project's default dashboard and apply the
+    // selection once it loads.
+    const result = openDashboardAndSelectIdentifiers(occurrence.project_id, occurrence.identifiers);
+    setMatchError(result.ok ? null : result.message);
+  }
 
   return (
     <li className={`occurrence-card occurrence-card--${occurrence.severity}`}>
@@ -35,13 +75,22 @@ export function OccurrenceCard({ occurrence }: { occurrence: Occurrence }) {
       </div>
       <div className="occurrence-card__rule">{occurrence.rule_name}</div>
       {identifierEntries.length > 0 && (
-        <div className="occurrence-card__identifiers">
-          {identifierEntries.map(([key, value]) => (
-            <span key={key} className="occurrence-card__identifier">
-              {key}: {value}
-            </span>
-          ))}
-        </div>
+        <>
+          <div className="occurrence-card__identifiers">
+            {identifierEntries.map(([key, value]) => (
+              <button
+                key={key}
+                type="button"
+                className="occurrence-card__identifier"
+                onClick={handleIdentifierClick}
+                title="Set matching dashboard variable(s) to this occurrence's identifiers"
+              >
+                {key}: {value}
+              </button>
+            ))}
+          </div>
+          {matchError && <p className="occurrence-card__identifier-error">{matchError}</p>}
+        </>
       )}
 
       <div className="occurrence-card__expand-row">

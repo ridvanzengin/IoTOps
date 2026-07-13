@@ -1,8 +1,10 @@
 from collections import defaultdict
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pydantic import TypeAdapter
 
 from app.event.models import (
     Event,
@@ -12,6 +14,17 @@ from app.event.models import (
     OccurrenceStatus,
     ProjectUnresolvedCount,
 )
+
+_datetime_adapter = TypeAdapter(datetime)
+
+
+def _serialize_datetime(value: datetime) -> str:
+    """matched_at is stored as the ISO-8601 string Event.model_dump
+    (mode="json") produces (see to_document below) -- not a native BSON
+    date -- so a $gte/$lte range bound has to be formatted identically
+    (same Pydantic datetime serializer) for string comparison to line up
+    with what's actually stored."""
+    return _datetime_adapter.dump_python(value, mode="json")
 
 
 def to_document(event: Event) -> dict[str, Any]:
@@ -160,10 +173,26 @@ class EventRepository:
                 counts[occurrence.project_id] += 1
         return [ProjectUnresolvedCount(project_id=project_id, count=count) for project_id, count in counts.items()]
 
-    async def list(self, project_id: UUID | None = None, limit: int = 50) -> list[Event]:
+    async def list(
+        self,
+        project_id: UUID | None = None,
+        limit: int = 50,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        rule_ids: list[UUID] | None = None,
+    ) -> list[Event]:
         query: dict[str, Any] = {}
         if project_id is not None:
             query["project_id"] = str(project_id)
+        if rule_ids:
+            query["rule_id"] = {"$in": [str(rule_id) for rule_id in rule_ids]}
+        matched_at_range: dict[str, Any] = {}
+        if since is not None:
+            matched_at_range["$gte"] = _serialize_datetime(since)
+        if until is not None:
+            matched_at_range["$lte"] = _serialize_datetime(until)
+        if matched_at_range:
+            query["matched_at"] = matched_at_range
         documents = (
             await self._collection.find(query)
             .sort("matched_at", -1)

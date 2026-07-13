@@ -9,6 +9,7 @@ from app.dashboard.models import (
     DashboardQueryPreview,
     PanelInput,
     PanelQueryOverrides,
+    PanelQueryResult,
     VariableOptionsRequest,
     VariableOptionsResult,
 )
@@ -96,13 +97,13 @@ async def save_layout(
     return await service.save_layout(dashboard_id, payload)
 
 
-@router.post("/{dashboard_id}/panel/{panel_id}/query", response_model=TelemetrySqlQueryResult)
+@router.post("/{dashboard_id}/panel/{panel_id}/query", response_model=PanelQueryResult)
 async def run_panel_query(
     dashboard_id: UUID,
     panel_id: UUID,
     payload: PanelQueryOverrides,
     service: DashboardService = Depends(get_dashboard_service),
-) -> TelemetrySqlQueryResult:
+) -> PanelQueryResult:
     return await service.run_panel_query_by_id(dashboard_id, panel_id, payload)
 
 

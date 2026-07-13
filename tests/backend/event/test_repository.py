@@ -61,6 +61,32 @@ async def test_list_respects_limit() -> None:
     assert len(result) == 2
 
 
+async def test_list_filters_by_since_and_until() -> None:
+    now = datetime.now(timezone.utc)
+    too_old = _event(matched_at=now - timedelta(hours=2))
+    in_range = _event(matched_at=now - timedelta(minutes=30))
+    too_new = _event(matched_at=now + timedelta(hours=1))
+    repository = await _seeded_repository(too_old, in_range, too_new)
+
+    events = await repository.list(since=now - timedelta(hours=1), until=now)
+
+    assert [e.id for e in events] == [in_range.id]
+
+
+async def test_list_filters_by_rule_ids() -> None:
+    rule_a = uuid4()
+    rule_b = uuid4()
+    rule_c = uuid4()
+    event_a = _event(rule_id=rule_a)
+    event_b = _event(rule_id=rule_b)
+    event_c = _event(rule_id=rule_c)
+    repository = await _seeded_repository(event_a, event_b, event_c)
+
+    events = await repository.list(rule_ids=[rule_a, rule_b])
+
+    assert {e.id for e in events} == {event_a.id, event_b.id}
+
+
 async def test_counts_by_rule_counts_matches_not_clears() -> None:
     project_id = uuid4()
     rule_id = uuid4()

@@ -10,6 +10,7 @@ from app.dashboard.models import (
     Panel,
     PanelInput,
     PanelQueryOverrides,
+    PanelQueryResult,
     Variable,
     VariableOptionsRequest,
     VariableOptionsResult,
@@ -147,19 +148,30 @@ class DashboardService:
         dashboard_variables: list[Variable] | None = None,
         time_range: str | None = None,
         variable_values: dict[str, str] | None = None,
-    ) -> TelemetrySqlQueryResult:
-        return await self._substitute_and_run(
+    ) -> PanelQueryResult:
+        resolved_time_range = time_range or panel.time_range
+        result = await self._substitute_and_run(
             panel.query.sql,
             panel.query.limit,
             static_variables=panel.query.variables,
             dashboard_variables=dashboard_variables or [],
             variable_values=variable_values or {},
-            time_range=time_range or panel.time_range,
+            time_range=resolved_time_range,
+        )
+        # Cheap to resolve again rather than threading a return value
+        # through _substitute_and_run (shared by preview_query/
+        # resolve_variable_options too, neither of which need the
+        # bounds) -- resolve_time_range is just `now() - timedelta`, and
+        # the few milliseconds between this call and the one inside
+        # _substitute_and_run don't matter for a chart overlay window.
+        time_from, time_to = resolve_time_range(resolved_time_range)
+        return PanelQueryResult(
+            columns=result.columns, rows=result.rows, time_from=time_from, time_to=time_to
         )
 
     async def run_panel_query_by_id(
         self, dashboard_id: UUID, panel_id: UUID, overrides: PanelQueryOverrides
-    ) -> TelemetrySqlQueryResult:
+    ) -> PanelQueryResult:
         dashboard = await self._repository.get(dashboard_id)
         panel = next((p for p in dashboard.panels if p.id == panel_id), None)
         if panel is None:

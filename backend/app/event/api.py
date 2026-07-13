@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from datetime import datetime
 from uuid import UUID
 
 import redis.asyncio as async_redis
@@ -16,9 +17,16 @@ router = APIRouter(prefix="/api/event", tags=["event"])
 async def list_events(
     project_id: UUID | None = Query(default=None),
     limit: int = Query(default=50, le=200),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
+    # Repeated ?rule_id=...&rule_id=... query params -- used by the
+    # Panel-overlay feature to fetch a specific set of Rules' events for
+    # a panel's resolved time window. See iotops-workspace/ROADMAP.md's
+    # "Events-as-overlay on Panel charts" note.
+    rule_id: list[UUID] | None = Query(default=None),
     service: EventService = Depends(get_event_service),
 ) -> list[Event]:
-    return await service.list(project_id, limit)
+    return await service.list(project_id, limit, since, until, rule_id)
 
 
 @router.get("/counts", response_model=list[EventRuleCount])

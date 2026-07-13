@@ -50,7 +50,8 @@
 .dashboard-toolbar__title {
   font-size: 20px;
   line-height: 1.2;
-  min-width: 160px;
+  width: auto;
+  min-width: 0;
   max-width: 320px;
   justify-content: space-between;
   gap: 10px;
@@ -170,6 +171,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.dashboard-panel__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  /* Header itself is a react-grid-layout drag handle -- these controls
+     need their own cursor back, not "move". */
+  cursor: default;
 }
 
 .dashboard-panel__menu-trigger {

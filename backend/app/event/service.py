@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from app.event.models import Event, EventRuleCount, Occurrence, ProjectUnresolvedCount
@@ -20,5 +21,12 @@ class EventService:
     async def unresolved_counts_by_project(self) -> list[ProjectUnresolvedCount]:
         return await self._repository.unresolved_counts_by_project()
 
-    async def list(self, project_id: UUID | None = None, limit: int = 50) -> list[Event]:
-        return await self._repository.list(project_id, limit)
+    async def list(
+        self,
+        project_id: UUID | None = None,
+        limit: int = 50,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        rule_ids: list[UUID] | None = None,
+    ) -> list[Event]:
+        return await self._repository.list(project_id, limit, since, until, rule_ids)

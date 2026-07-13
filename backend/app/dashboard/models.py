@@ -5,6 +5,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.telemetry.models import TelemetrySqlQueryResult
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -193,6 +195,19 @@ class PanelInput(BaseModel):
     refresh_interval: int = 0
     position: PanelPosition
 
+    # Which Rules' match/clear Events overlay this panel's chart -- see
+    # iotops-workspace/ROADMAP.md's "Events-as-overlay on Panel charts"
+    # note. Panel-level, not Chart-level: overlay applicability isn't
+    # chart-type-specific at the model layer (pie/gauge just won't render
+    # it, a frontend rendering decision), and it needs to survive
+    # Panel(PanelInput) inheritance the same way time_range already does.
+    # Not validated against the automater/rule collections -- no
+    # cross-collection reference check exists anywhere else in this
+    # module either (Panel.query.sql itself isn't validated against real
+    # tables up front), and a dangling id here is harmless: the frontend
+    # overlay fetch just returns no events for it.
+    event_rule_ids: list[UUID] = Field(default_factory=list)
+
 
 class Panel(PanelInput):
     id: UUID = Field(default_factory=uuid4)
@@ -251,6 +266,17 @@ class DashboardLayoutInput(BaseModel):
 class PanelQueryOverrides(BaseModel):
     time_range: str | None = None
     variable_values: dict[str, str] = Field(default_factory=dict)
+
+
+class PanelQueryResult(TelemetrySqlQueryResult):
+    # The exact [time_from, time_to] window __timeFrom/__timeTo resolved
+    # to for this query -- so the frontend's events-overlay fetch can ask
+    # "which events fell in this window" using the same bounds the panel's
+    # own telemetry query used, not a separately (and therefore slightly
+    # later) resolved "now". See iotops-workspace/ROADMAP.md's
+    # "Events-as-overlay on Panel charts" note.
+    time_from: datetime
+    time_to: datetime
 
 
 class DashboardQueryPreview(BaseModel):

@@ -1,5 +1,6 @@
 import { resolveVariableOptions } from "../api/dashboard";
 import type { Dashboard, Variable } from "../types/dashboard";
+import type { Event } from "../types/event";
 
 // Resolves variable values/options for variables[fromIndex..] in list order,
 // since a variable's predicate may only reference a variable defined earlier
@@ -34,6 +35,35 @@ export async function resolveVariablesFrom(
   }
 
   return { values, options };
+}
+
+// An overlay event should only be shown on a panel if it actually belongs
+// to whatever the dashboard's variables currently have selected (e.g. a
+// panel scoped to hive-1 shouldn't show hive-2's events just because both
+// share a Rule) -- matched against the event's own tags by the variable's
+// value_column, the same column name the panel's SQL filters on. A
+// variable is only used to filter if the event actually carries that tag
+// at all -- a Rule's identifiers don't necessarily include every
+// dashboard variable's column, and an event that's silent on a given
+// column shouldn't be excluded for not matching something it never had
+// an opinion on.
+export function filterEventsByVariables(
+  events: Event[],
+  variables: Variable[],
+  variableValues: Record<string, string>,
+): Event[] {
+  const activeFilters = variables
+    .map((variable) => ({ column: variable.value_column, value: variableValues[variable.name] }))
+    .filter((filter): filter is { column: string; value: string } => Boolean(filter.value));
+
+  if (activeFilters.length === 0) return events;
+
+  return events.filter((event) =>
+    activeFilters.every((filter) => {
+      const tagValue = event.tags[filter.column];
+      return tagValue === undefined || tagValue === filter.value;
+    }),
+  );
 }
 
 export function referencesVariableToken(sql: string, name: string): boolean {

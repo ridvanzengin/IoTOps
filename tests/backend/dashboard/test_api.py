@@ -179,7 +179,12 @@ def test_run_panel_query_returns_rows(client: TestClient) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json() == {"columns": [], "rows": []}
+    body = response.json()
+    assert body["columns"] == []
+    assert body["rows"] == []
+    # Also resolves the query's actual time window, for the events-
+    # overlay feature to reuse -- see PanelQueryResult.
+    assert body["time_from"] < body["time_to"]
 
 
 def test_run_panel_query_missing_panel_returns_404(client: TestClient) -> None:
