@@ -22,10 +22,31 @@ export function ChartPreview({ chart, rows, height = 260, events = [] }: ChartPr
     // series' own yAxisIndex references stay correct.
     const existingYAxis = Array.isArray(base.yAxis) ? base.yAxis : base.yAxis ? [base.yAxis] : [];
     const eventsYAxisIndex = existingYAxis.length;
+    const baseSeries: NonNullable<typeof base.series> = Array.isArray(base.series)
+      ? base.series
+      : base.series
+        ? [base.series]
+        : [];
+    // Explicit legend.data limited to the chart's own series -- without
+    // this, ECharts' default "show every series" legend behavior also
+    // lists the appended Events overlay series as a togglable legend
+    // entry, which reads as part of the data rather than an annotation
+    // layer on top of it. buildXyOption only ever produces a single
+    // legend object (never an array) when chart.legend is enabled.
+    const legend =
+      base.legend && !Array.isArray(base.legend)
+        ? {
+            ...base.legend,
+            data: baseSeries
+              .map((series: { name?: unknown }) => (typeof series.name === "string" ? series.name : undefined))
+              .filter((name): name is string => Boolean(name)),
+          }
+        : base.legend;
     return {
       ...base,
+      legend,
       yAxis: [...existingYAxis, overlay.yAxis],
-      series: [...(base.series ?? []), ...overlay.series.map((series) => ({ ...series, yAxisIndex: eventsYAxisIndex }))],
+      series: [...baseSeries, ...overlay.series.map((series) => ({ ...series, yAxisIndex: eventsYAxisIndex }))],
     };
   }, [chart, rows, events]);
 
