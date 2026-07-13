@@ -12,6 +12,11 @@ export type AutomaterStatus = CollectorStatus;
 export type RuleOperator = "AND" | "OR";
 export type ConditionOperator = ">" | ">=" | "<" | "<=" | "==" | "!=";
 export type RuleSeverity = "low" | "medium" | "high" | "critical";
+// auto (default): a clear event auto-fires the moment the condition stops
+// matching. manual: never auto-clears -- a human resolves it from the
+// Events sidebar instead. See iotops-workspace/ROADMAP.md's "Event
+// resolution mode" note.
+export type ResolveMode = "auto" | "manual";
 
 export interface ConditionPayload {
   column: string;
@@ -33,6 +38,7 @@ export interface RulePayload {
   message: string;
   enabled: boolean;
   priority: number;
+  resolve_mode: ResolveMode;
   table: string;
   conditions: ConditionPayload[];
   identifiers: string[];

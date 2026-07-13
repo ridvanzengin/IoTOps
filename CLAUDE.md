@@ -5,10 +5,14 @@ collection, automate event-driven workflows, and build dashboards without
 hand-writing Telegraf configuration files. Domain-agnostic core (first
 showcase: smart beekeeping).
 
-**Status:** In progress. Milestones 0–2 (bootstrap, Collector management,
-telemetry pipeline) are shipped; Milestone 3 (Dashboard system, plus a
-Project grouping entity and a pulled-forward AI SQL builder) is underway.
-See [docs/development-plan.md](docs/development-plan.md) for current
+**Status:** v1 (Milestones 0–4: Collector, telemetry pipeline, Dashboard
+system, Beekeeping showcase) is shipped. Milestone 5 (Automation Engine,
+v1.1) has its core engine done — real rule/Redis/Celery logic in both
+custom-telegraf plugins, Automater backend + frontend, automated tests,
+and a persisted Events feature (Mongo-backed, SSE-delivered sidebar with
+activity-bar redesign, Panel-chart overlays) — with the beekeeping
+swarm-alert wiring still open. See
+[docs/development-plan.md](docs/development-plan.md) for current
 milestone status.
 
 **Roadmap is phased for a fast v1 ship:** v1 = Collector + Telemetry +

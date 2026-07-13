@@ -33,6 +33,11 @@ class RuleSeverity(str, Enum):
     CRITICAL = "critical"
 
 
+class ResolveMode(str, Enum):
+    AUTO = "auto"
+    MANUAL = "manual"
+
+
 class Condition(BaseModel):
     column: str
     operator: ConditionOperator
@@ -59,6 +64,15 @@ class Rule(BaseModel):
     message: str = ""
     enabled: bool = True
     priority: int = 0
+
+    # auto (default): a clear event auto-fires the moment the condition
+    # stops matching, same as every rule behaved before this field
+    # existed. manual: custom-telegraf's rule.go never auto-clears --
+    # the occurrence stays active until a human resolves it from the
+    # Events sidebar. See iotops-workspace/ROADMAP.md's "Event resolution
+    # mode" note. Flows straight through to RuleConfig's `toml:"resolve_mode"`
+    # tag (see app/plugin/processors/rule.py, rule.go's RuleConfig).
+    resolve_mode: ResolveMode = ResolveMode.AUTO
 
     # The hypertable this rule evaluates against -- a topic maps to exactly
     # one table (see custom-telegraf's outputs.postgresql create_templates,

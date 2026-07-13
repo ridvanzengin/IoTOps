@@ -1,8 +1,10 @@
+import hashlib
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
+import redis.asyncio as async_redis
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import TypeAdapter
 
@@ -13,7 +15,9 @@ from app.event.models import (
     Occurrence,
     OccurrenceStatus,
     ProjectUnresolvedCount,
+    ResolveMode,
 )
+from app.shared.exceptions import EntityNotFoundError, InvalidOperationError
 
 _datetime_adapter = TypeAdapter(datetime)
 
@@ -47,6 +51,7 @@ def _from_document(document: dict[str, Any]) -> Event:
 def _occurrence_from(match: Event, resolved_by: Event | None) -> Occurrence:
     identifiers = {key: match.tags.get(key, "") for key in match.identifier_keys}
     return Occurrence(
+        id=match.id,
         rule_id=match.rule_id,
         rule_name=match.rule_name,
         category=match.category,
@@ -61,7 +66,39 @@ def _occurrence_from(match: Event, resolved_by: Event | None) -> Occurrence:
         project_id=match.project_id,
         tags=match.tags,
         fields=match.fields,
+        resolve_mode=match.resolve_mode,
+        resolution_notes=resolved_by.resolution_notes if resolved_by is not None else None,
     )
+
+
+def _firing_key(match: Event) -> str:
+    """Reconstructs rule.go's firingKey() exactly, from the *match* Event's
+    own captured rule_name/rule_id/tags/fields -- not the Rule's current
+    live state, since a Rule can be renamed after it fires and the
+    original key was built with the name at match time (rc.Name), not
+    just the ID (see firingKey's own comment in rule.go).
+
+    SHA-256 over UTF-8 bytes of "|".join(values), hex-encoded, where each
+    value is identifier_keys[i] looked up in tags then fields, string-
+    formatted -- mirrors Go's identifierValue()'s tag-then-field lookup
+    and %v formatting. Numeric identifier values are a known, accepted
+    edge case: Go's %v float formatting doesn't always byte-match Python's
+    str(), so the hash (and thus the DEL below) can silently miss for a
+    non-string identifier -- the firing key then just survives until its
+    TTL naturally expires, a safe degradation, not a bug that corrupts
+    state. In practice identifiers are almost always tags (strings), where
+    this is a non-issue.
+    """
+    if not match.identifier_keys:
+        return f"automater:firing:{match.rule_name}:{match.rule_id}"
+    values: list[str] = []
+    for key in match.identifier_keys:
+        if key in match.tags:
+            values.append(str(match.tags[key]))
+        else:
+            values.append(str(match.fields.get(key, "")))
+    digest = hashlib.sha256("|".join(values).encode("utf-8")).hexdigest()
+    return f"automater:firing:{match.rule_name}:{match.rule_id}:{digest}"
 
 
 def _pair_occurrences(events: list[Event]) -> list[Occurrence]:
@@ -111,8 +148,19 @@ class EventRepository:
     only contract between them.
     """
 
-    def __init__(self, database: AsyncIOMotorDatabase) -> None:
+    def __init__(
+        self,
+        database: AsyncIOMotorDatabase,
+        pubsub_redis_client: async_redis.Redis | None = None,
+        firing_redis_client: async_redis.Redis | None = None,
+    ) -> None:
         self._collection = database["events"]
+        # Both optional: only resolve_occurrence needs them, and existing
+        # read-only call sites (tests, anywhere not wiring the manual-
+        # resolve feature) shouldn't have to supply Redis clients they'll
+        # never use.
+        self._pubsub_redis_client = pubsub_redis_client
+        self._firing_redis_client = firing_redis_client
 
     # Defined before `list` below: a `list[...]` annotation on a method
     # that comes *after* a method literally named `list` in this same
@@ -200,3 +248,66 @@ class EventRepository:
             .to_list(length=limit)
         )
         return [_from_document(document) for document in documents]
+
+    async def resolve_occurrence(self, match_event_id: UUID, notes: str) -> Occurrence:
+        """Manually resolves a still-open occurrence from a manual-resolve
+        Rule (see iotops-workspace/ROADMAP.md's "Event resolution mode"
+        note) -- writes a synthetic `clear` Event (so this reuses
+        _pair_occurrences/_occurrence_from exactly as an auto-clear would),
+        deletes the underlying Redis firing key (DB 0, distinct from the
+        pub/sub client's DB 1) so the rule can fire fresh immediately if
+        the condition is still true, and publishes the synthetic event over
+        the same SSE channel tasks.py's log_rule_match uses, so an open
+        sidebar reconciles it live with no new frontend pairing logic.
+        """
+        document = await self._collection.find_one({"_id": str(match_event_id)})
+        if document is None:
+            raise EntityNotFoundError("Event", match_event_id)
+        match = _from_document(document)
+        if match.flag != EventFlag.MATCH:
+            raise InvalidOperationError(f"Event {match_event_id} is not a match event")
+        if match.resolve_mode != ResolveMode.MANUAL:
+            raise InvalidOperationError(f"Rule {match.rule_name!r} is not manual-resolve")
+
+        identifiers = {key: match.tags.get(key, "") for key in match.identifier_keys}
+        group_key = tuple(sorted(identifiers.items()))
+        later_events = await self._collection.find(
+            {"rule_id": str(match.rule_id), "matched_at": {"$gt": document["matched_at"]}}
+        ).to_list(length=None)
+        for later_document in later_events:
+            later = _from_document(later_document)
+            later_identifiers = {key: later.tags.get(key, "") for key in later.identifier_keys}
+            if later.flag == EventFlag.CLEAR and tuple(sorted(later_identifiers.items())) == group_key:
+                raise InvalidOperationError(f"Occurrence {match_event_id} is already resolved")
+
+        resolved_event = Event(
+            project_id=match.project_id,
+            automater_id=match.automater_id,
+            rule_id=match.rule_id,
+            rule_name=match.rule_name,
+            table=match.table,
+            category=match.category,
+            severity=match.severity,
+            event_type=match.event_type,
+            message=match.message,
+            flag=EventFlag.CLEAR,
+            identifier_keys=match.identifier_keys,
+            resolve_mode=match.resolve_mode,
+            resolution_notes=notes,
+            tags=match.tags,
+            fields=match.fields,
+            matched_at=datetime.now(timezone.utc),
+        )
+        await self._collection.insert_one(to_document(resolved_event))
+
+        if self._firing_redis_client is not None:
+            # Best-effort: see _firing_key's own comment on why a miss here
+            # (non-string identifier formatting divergence) is a safe
+            # degradation, not an error worth failing the resolve over.
+            await self._firing_redis_client.delete(_firing_key(match))
+
+        if self._pubsub_redis_client is not None:
+            channel = f"events:{resolved_event.project_id}"
+            await self._pubsub_redis_client.publish(channel, resolved_event.model_dump_json())
+
+        return _occurrence_from(match, resolved_by=resolved_event)

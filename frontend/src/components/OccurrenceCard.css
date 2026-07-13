@@ -103,7 +103,7 @@
 
 .occurrence-card__expand-row {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
   margin-top: 6px;
 }
 
@@ -116,6 +116,68 @@
   font-weight: 600;
   color: var(--accent-h);
   cursor: pointer;
+  /* Pinned right regardless of whether a Resolve button precedes it in
+     the row -- see occurrence-card__resolve's own comment. */
+  margin-left: auto;
+}
+
+.occurrence-card__resolve {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--danger);
+  cursor: pointer;
+}
+
+.occurrence-card__resolve:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.occurrence-card__resolve-form {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.occurrence-card__resolve-note {
+  flex: 1;
+  font-size: 11px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-subtle);
+  color: var(--text-h);
+}
+
+.occurrence-card__resolve-submit,
+.occurrence-card__resolve-cancel {
+  border: none;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.occurrence-card__resolve-submit {
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.occurrence-card__resolve-submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.occurrence-card__resolve-cancel {
+  color: var(--text);
+  background: var(--bg-subtle);
 }
 
 .occurrence-card__drawer {

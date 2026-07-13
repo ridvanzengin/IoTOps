@@ -22,6 +22,7 @@ function sameGroup(occurrence: Occurrence, event: Event): boolean {
 
 function occurrenceFromMatch(event: Event): Occurrence {
   return {
+    id: event.id,
     rule_id: event.rule_id,
     rule_name: event.rule_name,
     category: event.category,
@@ -36,6 +37,8 @@ function occurrenceFromMatch(event: Event): Occurrence {
     project_id: event.project_id,
     tags: event.tags,
     fields: event.fields,
+    resolve_mode: event.resolve_mode,
+    resolution_notes: null,
   };
 }
 
@@ -52,7 +55,12 @@ export function reconcileOccurrence(occurrences: Occurrence[], event: Event): Oc
   if (event.flag === "clear") {
     if (activeIndex === -1) return occurrences; // stray clear, nothing open -- ignore
     const next = [...occurrences];
-    next[activeIndex] = { ...next[activeIndex], status: "resolved", resolved_at: event.matched_at };
+    next[activeIndex] = {
+      ...next[activeIndex],
+      status: "resolved",
+      resolved_at: event.matched_at,
+      resolution_notes: event.resolution_notes,
+    };
     return next;
   }
 

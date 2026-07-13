@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from app.automater.models import RuleSeverity
+from app.automater.models import ResolveMode, RuleSeverity
 
 
 def _utcnow() -> datetime:
@@ -50,6 +50,18 @@ class Event(BaseModel):
     event_type: str = ""
     message: str = ""
     flag: EventFlag
+
+    # Copied from the Rule that produced this event (via rule.go's
+    # resolve_mode tag) -- lets an Occurrence built from this event know
+    # whether a "Resolve" UI action should even be offered. See
+    # iotops-workspace/ROADMAP.md's "Event resolution mode" note.
+    resolve_mode: ResolveMode = ResolveMode.AUTO
+
+    # Only set on a synthetic `clear` Event written by a manual resolve
+    # (EventRepository.resolve_occurrence) -- never present on a Go-plugin-
+    # generated match/clear. Surfaced on Occurrence.resolution_notes, shown
+    # in the UI's detail drawer only, never on the collapsed card.
+    resolution_notes: str | None = None
 
     # Names (not values -- those are already in `tags` under their own
     # keys) of the Rule's configured dedup identifiers, stamped by
@@ -97,6 +109,12 @@ class Occurrence(BaseModel):
     new occurrence, not the old one flipping back to active.
     """
 
+    # The underlying match Event's own id -- an Occurrence has no identity
+    # of its own (it's a live pairing over the Event stream, not a
+    # document), so this is what a manual "Resolve" API call addresses.
+    # See iotops-workspace/ROADMAP.md's "Event resolution mode" note.
+    id: UUID
+
     rule_id: UUID
     rule_name: str
     category: str
@@ -107,6 +125,12 @@ class Occurrence(BaseModel):
     status: OccurrenceStatus
     matched_at: datetime
     resolved_at: datetime | None = None
+
+    resolve_mode: ResolveMode = ResolveMode.AUTO
+    # Set only once resolved via the manual "Resolve" UI action (never
+    # for an auto-clear) -- from the resolving clear Event's own
+    # resolution_notes, not the match's.
+    resolution_notes: str | None = None
 
     # Beyond the roadmap's originally-proposed minimal shape: the card
     # redesign's detail drawer needs raw tags/fields and attribution ids,

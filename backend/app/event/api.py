@@ -4,11 +4,16 @@ from uuid import UUID
 
 import redis.asyncio as async_redis
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from app.dependencies import get_async_redis_client, get_event_service
 from app.event.models import Event, EventRuleCount, Occurrence, ProjectUnresolvedCount
 from app.event.service import EventService
+
+
+class ResolveOccurrenceRequest(BaseModel):
+    notes: str = ""
 
 router = APIRouter(prefix="/api/event", tags=["event"])
 
@@ -51,6 +56,15 @@ async def get_unresolved_counts(
     service: EventService = Depends(get_event_service),
 ) -> list[ProjectUnresolvedCount]:
     return await service.unresolved_counts_by_project()
+
+
+@router.post("/occurrences/{event_id}/resolve", response_model=Occurrence)
+async def resolve_occurrence(
+    event_id: UUID,
+    body: ResolveOccurrenceRequest,
+    service: EventService = Depends(get_event_service),
+) -> Occurrence:
+    return await service.resolve_occurrence(event_id, body.notes)
 
 
 @router.get("/stream")

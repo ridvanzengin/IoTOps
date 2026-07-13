@@ -38,6 +38,19 @@ export function getUnresolvedCounts(): Promise<ProjectUnresolvedCount[]> {
   return apiRequest<ProjectUnresolvedCount[]>("/api/event/unresolved-counts");
 }
 
+// occurrenceId is Occurrence.id (the underlying match Event's own id) --
+// only valid for a still-active occurrence from a manual-resolve Rule. The
+// backend writes a synthetic clear Event and publishes it over the same
+// SSE stream subscribeToEvents listens to, so the caller doesn't need to
+// locally patch `occurrences` state itself -- EventsContext's existing
+// reconciliation picks it up live.
+export function resolveOccurrence(occurrenceId: string, notes: string): Promise<Occurrence> {
+  return apiRequest<Occurrence>(`/api/event/occurrences/${occurrenceId}/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ notes }),
+  });
+}
+
 // EventSource (not apiRequest/fetch) -- the browser's native SSE client,
 // which owns its own reconnect-on-drop behavior. Returns the EventSource
 // itself so the caller controls its lifecycle. One connection for the

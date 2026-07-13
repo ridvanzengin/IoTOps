@@ -450,6 +450,13 @@ version:
   (Mongo) and a project-scoped, live-updating (Server-Sent Events) Events
   sidebar on every Dashboard, plus an Overview-page summary. See
   `iotops-workspace/ROADMAP.md`'s "Events sidebar" entry.
+- Further extended 2026-07-11 through 2026-07-13: the sidebar was
+  redesigned around a VSCode-style activity bar (one icon per project,
+  unresolved-match badge counts, occurrence card redesign), events now
+  overlay directly on Panel charts within their matched time window, and
+  clicking an occurrence card's identifier sets a matching dashboard
+  variable. See `iotops-workspace/ROADMAP.md`'s "Events sidebar polish"
+  and "Events-as-overlay on Panel charts" entries.
 
 ---
 
