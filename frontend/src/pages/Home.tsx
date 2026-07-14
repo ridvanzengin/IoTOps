@@ -93,7 +93,7 @@ export function Home() {
         ) : countsByProject.size === 0 ? (
           <p className="home-events__hint">
             No events yet. They'll show up here once a Rule fires — see{" "}
-            <Link to="/automaters">Automater</Link>.
+            <Link to="/automaters">Automation</Link>.
           </p>
         ) : (
           <div className="home-events__projects">
@@ -138,7 +138,7 @@ export function Home() {
 
       <p style={{ marginTop: 24 }}>
         <Link className="button" to="/collectors">
-          Go to Collectors
+          Go to Data Ingestion
         </Link>
       </p>
     </main>

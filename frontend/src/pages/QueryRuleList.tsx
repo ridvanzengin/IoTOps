@@ -91,7 +91,7 @@ export function QueryRuleList() {
   return (
     <main className="collector-page">
       <div className="collector-page__header">
-        <h1>Query Rules</h1>
+        <h1>Scheduled Rules</h1>
         <Link className="button button--primary" to="/query-rules/new">
           + New Rule
         </Link>

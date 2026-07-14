@@ -122,11 +122,6 @@ export function QueryRuleEditor() {
       <div className="collector-page__header">
         <h1>New Scheduled Rule</h1>
       </div>
-      <p style={{ margin: "-16px 0 24px", color: "var(--text)" }}>
-        A SQL query re-run on its own schedule directly against TimescaleDB — for conditions a
-        real-time rule can't express: cross-table joins, time-windowed aggregates (e.g. "last 1h
-        average"). Author it by hand or describe it in plain language on the right.
-      </p>
 
       {loadError && <p className="collector-page__error">{loadError}</p>}
       {submitError && <p className="collector-page__error">{submitError}</p>}
@@ -200,13 +195,6 @@ export function QueryRuleEditor() {
                 </select>
               </label>
             </div>
-            <p className="wizard-panel__hint">
-              Which of the query's selected columns identify one matching entity (e.g. a device or
-              station) — every result row is grouped by these values to tell a new match from a
-              still-open one. Leave empty to treat the whole query as a single system-wide check
-              instead — every matching row then shares one occurrence, same as a real-time Rule
-              with no identifiers.
-            </p>
             {resolveMode === "manual" && (
               <p className="automater-editor__warning" style={{ marginTop: -8 }}>
                 This rule will never auto-clear -- a matching occurrence stays active until someone

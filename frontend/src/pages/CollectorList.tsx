@@ -64,7 +64,7 @@ export function CollectorList() {
   return (
     <main className="collector-page">
       <div className="collector-page__header">
-        <h1>Collectors</h1>
+        <h1>Data Ingestion</h1>
         <Link className="button button--primary" to="/collectors/new">
           + New Collector
         </Link>

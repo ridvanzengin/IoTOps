@@ -15,9 +15,9 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { label: "Overview", to: "/", icon: HomeIcon, end: true },
   { label: "Projects", to: "/projects", icon: ProjectIcon },
-  { label: "Collectors", to: "/collectors", icon: CollectorIcon },
-  { label: "Automater", to: "/automaters", icon: AutomaterIcon },
-  { label: "Query Rules", to: "/query-rules", icon: ScheduleIcon },
+  { label: "Data Ingestion", to: "/collectors", icon: CollectorIcon },
+  { label: "Automation", to: "/automaters", icon: AutomaterIcon },
+  { label: "Scheduled Rules", to: "/query-rules", icon: ScheduleIcon },
   { label: "Dashboards", to: "/dashboards", icon: VisualizerIcon },
 ];
 

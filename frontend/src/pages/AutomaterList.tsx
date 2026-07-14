@@ -104,7 +104,7 @@ export function AutomaterList() {
   return (
     <main className="collector-page">
       <div className="collector-page__header">
-        <h1>Automaters</h1>
+        <h1>Automation</h1>
         <Link className="button button--primary" to="/automaters/new">
           + New Rule
         </Link>
