@@ -1,15 +1,8 @@
 import { useNavigate } from "react-router-dom";
 import { useEvents } from "../context/EventsContext";
-import { hashColor } from "../utils/color";
+import { hashColor, initials } from "../utils/color";
 import { CopilotIcon } from "./icons";
 import "./ActivityBar.css";
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[1][0]).toUpperCase();
-}
 
 // Persistent, always-visible icon rail -- one icon per Project plus one
 // for Co-pilot, reachable from every page (lives in the app root shell,

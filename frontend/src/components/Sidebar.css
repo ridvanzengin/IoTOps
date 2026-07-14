@@ -54,6 +54,18 @@
   color: var(--text-h);
 }
 
+/* AI Co-pilot has no route of its own -- it's a <button> reusing the same
+   .sidebar__link visuals as the NavLink items, reset to lose the browser's
+   default button chrome. */
+.sidebar__link--button {
+  width: 100%;
+  border: none;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
 .sidebar__link--active {
   background: var(--accent-bg);
   color: var(--accent-h);

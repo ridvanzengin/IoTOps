@@ -1,146 +1,313 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ComponentType, SVGProps } from "react";
 import { Link } from "react-router-dom";
-import { listDashboards } from "../api/dashboard";
-import { getEventCounts, listEvents } from "../api/event";
-import { fetchHealth } from "../api/health";
-import { listProjects } from "../api/project";
-import type { Dashboard } from "../types/dashboard";
-import type { Event, EventRuleCount } from "../types/event";
+import { listAutomaters } from "../api/automater";
+import { listCollectors } from "../api/collector";
+import { listQueryRules } from "../api/queryRule";
+import {
+  AutomaterIcon,
+  BellIcon,
+  CollectorIcon,
+  CopilotIcon,
+  ProjectIcon,
+  ScheduleIcon,
+  VisualizerIcon,
+} from "../components/icons";
+import { useEvents } from "../context/EventsContext";
+import { hashColor, initials } from "../utils/color";
+import type { Automater } from "../types/automater";
+import type { Collector } from "../types/collector";
 import type { Project } from "../types/project";
+import type { QueryRule } from "../types/queryRule";
 import "./Home.css";
 
-function relativeTime(iso: string): string {
-  const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (seconds < 60) return "just now";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  return `${Math.floor(seconds / 86400)}d ago`;
+function countByProject<T extends { project_id: string }>(items: T[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const item of items) map.set(item.project_id, (map.get(item.project_id) ?? 0) + 1);
+  return map;
+}
+
+interface Tile {
+  key: string;
+  to: string;
+  icon: ComponentType<SVGProps<SVGSVGElement>>;
+  label: string;
+  count: number;
+  sub: string | null;
+  description: string;
 }
 
 export function Home() {
-  const [backendStatus, setBackendStatus] = useState<"checking" | "ok" | "unreachable">("checking");
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [dashboards, setDashboards] = useState<Dashboard[]>([]);
-  const [counts, setCounts] = useState<EventRuleCount[]>([]);
-  const [latestEvents, setLatestEvents] = useState<Event[]>([]);
+  const { projects, dashboardsByProject, unresolvedCounts, openProjectPanel, openCopilotPanel } = useEvents();
+  const [collectors, setCollectors] = useState<Collector[]>([]);
+  const [automaters, setAutomaters] = useState<Automater[]>([]);
+  const [queryRules, setQueryRules] = useState<QueryRule[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchHealth()
-      .then((health) => setBackendStatus(health.status === "ok" ? "ok" : "unreachable"))
-      .catch(() => setBackendStatus("unreachable"));
-
-    Promise.all([listProjects(), listDashboards(), getEventCounts(), listEvents(undefined, 5)])
-      .then(([fetchedProjects, fetchedDashboards, fetchedCounts, fetchedLatest]) => {
-        setProjects(fetchedProjects);
-        setDashboards(fetchedDashboards);
-        setCounts(fetchedCounts);
-        setLatestEvents(fetchedLatest);
+    Promise.all([listCollectors(), listAutomaters(), listQueryRules()])
+      .then(([fetchedCollectors, fetchedAutomaters, fetchedQueryRules]) => {
+        setCollectors(fetchedCollectors);
+        setAutomaters(fetchedAutomaters);
+        setQueryRules(fetchedQueryRules);
       })
       .catch(() => undefined)
       .finally(() => setLoading(false));
   }, []);
 
-  // A project's events panel (opened via the activity bar, see
-  // EventsPanel) is identical regardless of which dashboard you're on --
-  // so it doesn't matter *which* of a project's dashboards this links to
-  // when it has more than one.
-  const dashboardLinkByProject = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const dashboard of dashboards) {
-      if (!map.has(dashboard.project_id)) map.set(dashboard.project_id, dashboard.id);
-    }
-    return map;
-  }, [dashboards]);
+  const collectorsByProject = useMemo(() => countByProject(collectors), [collectors]);
+  const automatersByProject = useMemo(() => countByProject(automaters), [automaters]);
+  const queryRulesByProject = useMemo(() => countByProject(queryRules), [queryRules]);
 
-  function projectName(projectId: string): string {
-    return projects.find((project) => project.id === projectId)?.name ?? "—";
-  }
+  const runningCollectors = collectors.filter((c) => c.status === "running").length;
+  const runningAutomaters = automaters.filter((a) => a.status === "running").length;
+  const enabledQueryRules = queryRules.filter((q) => q.enabled).length;
+  const totalRules = automaters.reduce((sum, a) => sum + a.rules.length, 0);
+  const totalDashboards = useMemo(
+    () => Object.values(dashboardsByProject).reduce((sum, list) => sum + list.length, 0),
+    [dashboardsByProject],
+  );
+  // Summed only over projects that still exist -- unresolvedCounts itself
+  // is keyed by whatever project_id happens to be stamped on an Event
+  // document, which outlives a deleted Project (nothing cascade-deletes
+  // its old events). Object.values(unresolvedCounts) would silently
+  // include those orphaned counts and never agree with what's shown below
+  // per-project.
+  const totalUnresolved = useMemo(
+    () => projects.reduce((sum, project) => sum + (unresolvedCounts[project.id] ?? 0), 0),
+    [projects, unresolvedCounts],
+  );
 
+  // Same "default dashboard, else its first" preference ActivityBar's own
+  // project-click handler uses -- kept in sync deliberately, since this is
+  // the same underlying action (open this project's visual home).
   function projectLink(projectId: string): string {
-    const dashboardId = dashboardLinkByProject.get(projectId);
-    return dashboardId ? `/dashboards/${dashboardId}` : "/dashboards/new";
+    const project = projects.find((p) => p.id === projectId);
+    const dashboards = dashboardsByProject[projectId] ?? [];
+    const target =
+      (project?.default_dashboard_id && dashboards.find((d) => d.id === project.default_dashboard_id)) ??
+      dashboards[0];
+    return target ? `/dashboards/${target.id}` : "/dashboards/new";
   }
 
-  const countsByProject = useMemo(() => {
-    const map = new Map<string, EventRuleCount[]>();
-    for (const count of counts) {
-      const existing = map.get(count.project_id) ?? [];
-      existing.push(count);
-      map.set(count.project_id, existing);
-    }
-    return map;
-  }, [counts]);
+  const tiles: Tile[] = [
+    {
+      key: "projects",
+      to: "/projects",
+      icon: ProjectIcon,
+      label: "Projects",
+      count: projects.length,
+      sub: null,
+      description: "Group Data Ingestion, Automation, and Dashboards per deployment.",
+    },
+    {
+      key: "ingestion",
+      to: "/collectors",
+      icon: CollectorIcon,
+      label: "Data Ingestion",
+      count: collectors.length,
+      sub: collectors.length > 0 ? `${runningCollectors} running` : null,
+      description: "Telegraf collectors pulling telemetry from your devices.",
+    },
+    {
+      key: "automation",
+      to: "/automaters",
+      icon: AutomaterIcon,
+      label: "Automation",
+      count: automaters.length,
+      sub: totalRules > 0 ? `${totalRules} rule${totalRules === 1 ? "" : "s"}, ${runningAutomaters} running` : null,
+      description: "Real-time rules that detect conditions as data streams in.",
+    },
+    {
+      key: "scheduled",
+      to: "/query-rules",
+      icon: ScheduleIcon,
+      label: "Scheduled Rules",
+      count: queryRules.length,
+      sub: queryRules.length > 0 ? `${enabledQueryRules} enabled` : null,
+      description: "SQL-based rules re-evaluated on a schedule.",
+    },
+    {
+      key: "dashboards",
+      to: "/dashboards",
+      icon: VisualizerIcon,
+      label: "Dashboards",
+      count: totalDashboards,
+      sub: null,
+      description: "Visualize telemetry and event history.",
+    },
+  ];
+
+  const hasAutomation = automaters.length > 0 || queryRules.length > 0;
+  const gettingStartedSteps = [
+    {
+      key: "project",
+      label: "Create a project",
+      done: projects.length > 0,
+      to: projects.length > 0 ? "/projects" : "/projects/new",
+    },
+    {
+      key: "ingestion",
+      label: "Connect Data Ingestion",
+      done: collectors.length > 0,
+      to: collectors.length > 0 ? "/collectors" : "/collectors/new",
+    },
+    {
+      key: "automation",
+      label: "Set up Automation or Scheduled Rules",
+      done: hasAutomation,
+      to: hasAutomation ? "/automaters" : "/automaters/new",
+    },
+    {
+      key: "dashboards",
+      label: "Build a Dashboard",
+      done: totalDashboards > 0,
+      to: totalDashboards > 0 ? "/dashboards" : "/dashboards/new",
+    },
+  ];
+  const completedSteps = gettingStartedSteps.filter((step) => step.done).length;
+  const allStepsDone = completedSteps === gettingStartedSteps.length;
+
+  const copilotCard = (
+    <div className="home-panel-card" key="copilot">
+      <div className="home-panel-card__header">
+        <h2>AI Co-pilot</h2>
+        <span className="home-badge-soon">Coming soon</span>
+      </div>
+      <div className="home-copilot">
+        <CopilotIcon className="home-copilot__icon" />
+        <div className="home-copilot__body">
+          <p className="home-copilot__lead">
+            A persistent assistant that understands your telemetry, rules, and events.
+          </p>
+          <ul className="home-copilot__features">
+            <li>Ask questions over your event history and telemetry trends</li>
+            <li>Get suggested Automation rules from patterns it spots in your data</li>
+            <li>Get suggested Dashboard panels for the schema you're working with</li>
+          </ul>
+          <button type="button" className="button" onClick={openCopilotPanel}>
+            Open Co-pilot
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const gettingStartedCard = (
+    <div className="home-panel-card" key="getting-started">
+      <div className="home-panel-card__header">
+        <h2>Getting Started</h2>
+        <span className="home-panel-card__progress">
+          {completedSteps}/{gettingStartedSteps.length}
+        </span>
+      </div>
+      <ul className="home-getting-started__list">
+        {gettingStartedSteps.map((step) =>
+          step.done ? (
+            <li key={step.key}>
+              <span className="home-getting-started__row home-getting-started__row--done">
+                <span className="home-getting-started__check">✓</span>
+                {step.label}
+              </span>
+            </li>
+          ) : (
+            <li key={step.key}>
+              <Link to={step.to} className="home-getting-started__row">
+                <span className="home-getting-started__check" />
+                {step.label}
+              </Link>
+            </li>
+          ),
+        )}
+      </ul>
+      {allStepsDone && <p className="home-getting-started__done">All set — you're using every part of IoTOps.</p>}
+    </div>
+  );
 
   return (
     <main className="page">
-      <h1>IoTOps</h1>
-      <p style={{ marginTop: 8, marginBottom: 24, maxWidth: 640 }}>
-        Self-hosted IoT operations platform. Configure telemetry collectors, automation rules, and
-        dashboards without hand-writing config files.
-      </p>
-
-      <div className="status-card">
-        <span>Backend</span>
-        <span className={`status-dot status-dot--${backendStatus}`} />
-        <span>{backendStatus}</span>
+      <div className="home-tiles">
+        {tiles.map((tile) => (
+          <Link key={tile.key} to={tile.to} className="home-tile">
+            <tile.icon className="home-tile__icon" />
+            <div className="home-tile__count">{loading ? "—" : tile.count}</div>
+            <div className="home-tile__label">{tile.label}</div>
+            {tile.sub && <div className="home-tile__sub">{tile.sub}</div>}
+            <p className="home-tile__desc">{tile.description}</p>
+          </Link>
+        ))}
+        <div
+          className={`home-tile home-tile--events ${totalUnresolved > 0 ? "home-tile--events-active" : ""}`}
+        >
+          <BellIcon className="home-tile__icon" />
+          <div className="home-tile__count">{loading ? "—" : totalUnresolved}</div>
+          <div className="home-tile__label">Active Events</div>
+          <p className="home-tile__desc">Unresolved matches across all projects.</p>
+        </div>
       </div>
 
-      <section className="home-events">
-        <h2 style={{ marginTop: 32, marginBottom: 12 }}>Events</h2>
+      <section className="home-section">
+        <div className="home-section__header">
+          <h2>Projects</h2>
+          <Link className="home-section__link" to="/projects">
+            Manage projects →
+          </Link>
+        </div>
         {loading ? (
-          <p className="home-events__hint">Loading...</p>
-        ) : countsByProject.size === 0 ? (
-          <p className="home-events__hint">
-            No events yet. They'll show up here once a Rule fires — see{" "}
-            <Link to="/automaters">Automation</Link>.
-          </p>
-        ) : (
-          <div className="home-events__projects">
-            {[...countsByProject.entries()].map(([projectId, projectCounts]) => (
-              <div key={projectId} className="home-events__project-card">
-                <div className="home-events__project-header">
-                  <Link to={projectLink(projectId)}>{projectName(projectId)}</Link>
-                </div>
-                <ul className="home-events__rule-counts">
-                  {projectCounts.map((count) => (
-                    <li key={count.rule_id}>
-                      <span className="home-events__rule-name">{count.rule_name}</span>
-                      <span className="home-events__rule-count">{count.count}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+          <p className="home-hint">Loading...</p>
+        ) : projects.length === 0 ? (
+          <div className="home-empty">
+            <p>
+              No projects yet. A project groups a Collector with its Automaters, Scheduled Rules, and
+              Dashboards.
+            </p>
+            <Link className="button button--primary" to="/projects/new">
+              + New Project
+            </Link>
           </div>
-        )}
-
-        {latestEvents.length > 0 && (
-          <>
-            <h3 style={{ marginTop: 24, marginBottom: 8 }}>Latest events</h3>
-            <ul className="home-events__latest">
-              {latestEvents.map((event) => (
-                <li key={`${event.id}-${event.flag}`}>
-                  <Link to={projectLink(event.project_id)}>
-                    <span className={`home-events__flag home-events__flag--${event.flag}`}>
-                      {event.flag === "match" ? "Firing" : "Resolved"}
-                    </span>{" "}
-                    <span className="home-events__rule-name">{event.rule_name}</span>
-                    <span className="home-events__latest-project"> · {projectName(event.project_id)}</span>
-                    <span className="home-events__event-time"> · {relativeTime(event.matched_at)}</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </>
+        ) : (
+          <div className="home-projects">
+            {projects.map((project: Project) => {
+              const unresolved = unresolvedCounts[project.id] ?? 0;
+              return (
+                <div key={project.id} className="home-project-card">
+                  <div className="home-project-card__header">
+                    <span className="home-project-card__badge" style={{ background: hashColor(project.id) }}>
+                      {initials(project.name)}
+                    </span>
+                    <Link to={projectLink(project.id)} className="home-project-card__name" title={project.name}>
+                      {project.name}
+                    </Link>
+                    {unresolved > 0 && (
+                      <span className="home-project-card__unresolved">{unresolved} active</span>
+                    )}
+                  </div>
+                  {project.description && <p className="home-project-card__desc">{project.description}</p>}
+                  <div className="home-project-card__stats">
+                    <span>{collectorsByProject.get(project.id) ?? 0} collectors</span>
+                    <span>{automatersByProject.get(project.id) ?? 0} automaters</span>
+                    <span>{queryRulesByProject.get(project.id) ?? 0} scheduled</span>
+                    <span>{dashboardsByProject[project.id]?.length ?? 0} dashboards</span>
+                  </div>
+                  <div className="home-project-card__footer">
+                    <Link className="button" to={projectLink(project.id)}>
+                      Open Dashboard
+                    </Link>
+                    <button type="button" className="button" onClick={() => openProjectPanel(project.id)}>
+                      View Events
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </section>
 
-      <p style={{ marginTop: 24 }}>
-        <Link className="button" to="/collectors">
-          Go to Data Ingestion
-        </Link>
-      </p>
+      <div className="home-panels">
+        {gettingStartedCard}
+        {copilotCard}
+      </div>
     </main>
   );
 }

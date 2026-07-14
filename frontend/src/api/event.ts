@@ -10,12 +10,6 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
-export function listEvents(projectId?: string, limit = 50): Promise<Event[]> {
-  const params = new URLSearchParams({ limit: String(limit) });
-  if (projectId) params.set("project_id", projectId);
-  return apiRequest<Event[]>(`/api/event?${params}`);
-}
-
 // For the Panel-overlay feature: a specific set of Rules' events within a
 // specific time window (the panel's own resolved [time_from, time_to]),
 // not project-scoped -- see iotops-workspace/ROADMAP.md's "Events-as-
