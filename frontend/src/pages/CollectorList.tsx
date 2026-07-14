@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { deleteCollector, deployCollector, listCollectors, stopCollectorDeployment } from "../api/collector";
 import { listProjects } from "../api/project";
+import { MoreIcon } from "../components/icons";
 import { StatusBadge } from "../components/StatusBadge";
 import type { Collector } from "../types/collector";
 import type { Project } from "../types/project";
@@ -14,6 +15,17 @@ export function CollectorList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (!(event.target instanceof Element) || !event.target.closest(".dropdown-menu")) {
+        setOpenMenu(null);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   function projectName(projectId: string): string {
     return projects.find((project) => project.id === projectId)?.name ?? "—";
@@ -107,13 +119,32 @@ export function CollectorList() {
                         Deploy
                       </button>
                     )}
-                    <button
-                      className="button button--danger"
-                      disabled={pendingId === collector.id}
-                      onClick={() => withPending(collector.id, () => deleteCollector(collector.id))}
-                    >
-                      Delete
-                    </button>
+                    <div className="dropdown-menu">
+                      <button
+                        type="button"
+                        className="dropdown-menu__trigger"
+                        aria-label="Collector actions"
+                        aria-expanded={openMenu === collector.id}
+                        onClick={() => setOpenMenu((current) => (current === collector.id ? null : collector.id))}
+                      >
+                        <MoreIcon />
+                      </button>
+                      {openMenu === collector.id && (
+                        <div className="dropdown-menu__list">
+                          <button
+                            type="button"
+                            className="dropdown-menu__item dropdown-menu__item--danger"
+                            disabled={pendingId === collector.id}
+                            onClick={() => {
+                              setOpenMenu(null);
+                              withPending(collector.id, () => deleteCollector(collector.id));
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { deleteQueryRule, listQueryRules, updateQueryRule } from "../api/queryRule";
 import { listProjects } from "../api/project";
+import { MoreIcon } from "../components/icons";
 import type { QueryRule } from "../types/queryRule";
 import type { Project } from "../types/project";
 import "./Collector.css";
@@ -18,6 +19,17 @@ export function QueryRuleList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (!(event.target instanceof Element) || !event.target.closest(".dropdown-menu")) {
+        setOpenMenu(null);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   function projectName(projectId: string): string {
     return projects.find((project) => project.id === projectId)?.name ?? "—";
@@ -131,16 +143,33 @@ export function QueryRuleList() {
                     <button className="button" disabled={pendingKey === rule.id} onClick={() => toggleEnabled(rule)}>
                       {rule.enabled ? "Disable" : "Enable"}
                     </button>
-                    <button
-                      className="button button--danger"
-                      disabled={pendingKey === rule.id}
-                      onClick={() => {
-                        if (!window.confirm(`Delete query rule "${rule.name}"? This cannot be undone.`)) return;
-                        withPending(rule.id, () => deleteQueryRule(rule.id));
-                      }}
-                    >
-                      Delete
-                    </button>
+                    <div className="dropdown-menu">
+                      <button
+                        type="button"
+                        className="dropdown-menu__trigger"
+                        aria-label="Rule actions"
+                        aria-expanded={openMenu === rule.id}
+                        onClick={() => setOpenMenu((current) => (current === rule.id ? null : rule.id))}
+                      >
+                        <MoreIcon />
+                      </button>
+                      {openMenu === rule.id && (
+                        <div className="dropdown-menu__list">
+                          <button
+                            type="button"
+                            className="dropdown-menu__item dropdown-menu__item--danger"
+                            disabled={pendingKey === rule.id}
+                            onClick={() => {
+                              setOpenMenu(null);
+                              if (!window.confirm(`Delete query rule "${rule.name}"? This cannot be undone.`)) return;
+                              withPending(rule.id, () => deleteQueryRule(rule.id));
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

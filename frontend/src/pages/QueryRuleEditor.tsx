@@ -5,6 +5,7 @@ import { generateQueryRuleSql } from "../api/ai";
 import { ApiError } from "../api/client";
 import { createQueryRule, previewQueryRule } from "../api/queryRule";
 import { listProjects } from "../api/project";
+import { ChevronIcon } from "../components/icons";
 import { NlSqlBuilder } from "../components/NlSqlBuilder";
 import { SchemaBrowser } from "../components/SchemaBrowser";
 import type { QueryRuleInput } from "../types/queryRule";
@@ -268,16 +269,25 @@ export function QueryRuleEditor() {
           </div>
 
           <div className="panel-builder__column">
-            <div className="wizard-panel">
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <h2 className="wizard-panel__title" style={{ margin: 0 }}>
-                  DB Schema
-                </h2>
-                <button type="button" className="button" onClick={() => setShowSchema((visible) => !visible)}>
-                  {showSchema ? "Hide tables" : "Show tables"}
-                </button>
-              </div>
-              {showSchema && <SchemaBrowser />}
+            <div className="wizard-panel wizard-panel--tight">
+              <button
+                type="button"
+                className="disclosure-header"
+                onClick={() => setShowSchema((visible) => !visible)}
+                aria-expanded={showSchema}
+              >
+                <ChevronIcon
+                  width={16}
+                  height={16}
+                  className={`chevron${showSchema ? " chevron--expanded" : ""}`}
+                />
+                <h2 className="wizard-panel__title">DB Schema</h2>
+              </button>
+              {showSchema && (
+                <div className="disclosure-content">
+                  <SchemaBrowser />
+                </div>
+              )}
             </div>
 
             <div className="wizard-panel">

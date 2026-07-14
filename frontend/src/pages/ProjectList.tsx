@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { deleteProject, listProjects } from "../api/project";
+import { MoreIcon } from "../components/icons";
 import type { Project } from "../types/project";
 import "./Collector.css";
 
@@ -10,6 +11,17 @@ export function ProjectList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (!(event.target instanceof Element) || !event.target.closest(".dropdown-menu")) {
+        setOpenMenu(null);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   async function refresh() {
     try {
@@ -74,13 +86,32 @@ export function ProjectList() {
                     <Link className="button" to={`/projects/${project.id}/edit`}>
                       Edit
                     </Link>
-                    <button
-                      className="button button--danger"
-                      disabled={pendingId === project.id}
-                      onClick={() => handleDelete(project.id)}
-                    >
-                      Delete
-                    </button>
+                    <div className="dropdown-menu">
+                      <button
+                        type="button"
+                        className="dropdown-menu__trigger"
+                        aria-label="Project actions"
+                        aria-expanded={openMenu === project.id}
+                        onClick={() => setOpenMenu((current) => (current === project.id ? null : project.id))}
+                      >
+                        <MoreIcon />
+                      </button>
+                      {openMenu === project.id && (
+                        <div className="dropdown-menu__list">
+                          <button
+                            type="button"
+                            className="dropdown-menu__item dropdown-menu__item--danger"
+                            disabled={pendingId === project.id}
+                            onClick={() => {
+                              setOpenMenu(null);
+                              handleDelete(project.id);
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

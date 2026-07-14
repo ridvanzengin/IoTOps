@@ -43,7 +43,26 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
-  overflow: hidden;
+}
+
+/* .collector-card used to clip overflow to round its corners around a
+   flush table -- but that also clipped any dropdown menu opened from a
+   row/card action near an edge. Round the table's own outer cells instead
+   so the card can stay unclipped. */
+.collector-card > .collector-table thead tr:first-child th:first-child {
+  border-top-left-radius: var(--radius);
+}
+
+.collector-card > .collector-table thead tr:first-child th:last-child {
+  border-top-right-radius: var(--radius);
+}
+
+.collector-card > .collector-table tbody tr:last-child td:first-child {
+  border-bottom-left-radius: var(--radius);
+}
+
+.collector-card > .collector-table tbody tr:last-child td:last-child {
+  border-bottom-right-radius: var(--radius);
 }
 
 .collector-table {
@@ -64,6 +83,13 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* Actions is always the last column across these tables -- right-align its
+   header and cells so row buttons line up against the table's right edge
+   instead of hugging whatever the second-to-last column's width leaves. */
+.collector-table th:last-child {
+  text-align: right;
+}
+
 .collector-table td {
   text-align: left;
   padding: 12px 16px;
@@ -77,6 +103,7 @@
 
 .collector-table__actions {
   display: flex;
+  justify-content: flex-end;
   gap: 8px;
 }
 
@@ -209,6 +236,37 @@
   color: var(--text);
   font-size: 13px;
   margin-bottom: 20px;
+}
+
+/* A wizard-panel that's mostly a collapsible header (e.g. a disclosure
+   toggle with no content shown by default) doesn't need the full 24px of
+   breathing room on all sides — that reads as dead space above/below a
+   single line of text. */
+.wizard-panel--tight {
+  padding: 14px 20px;
+}
+
+.disclosure-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.disclosure-header .wizard-panel__title {
+  margin: 0;
+}
+
+.disclosure-content {
+  margin-top: 14px;
 }
 
 .wizard-actions {

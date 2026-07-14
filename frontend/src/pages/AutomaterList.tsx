@@ -10,6 +10,7 @@ import {
   stopAutomaterDeployment,
 } from "../api/automater";
 import { listProjects } from "../api/project";
+import { ChevronIcon, MoreIcon } from "../components/icons";
 import { StatusBadge } from "../components/StatusBadge";
 import type { Automater, Rule } from "../types/automater";
 import type { Project } from "../types/project";
@@ -31,6 +32,30 @@ export function AutomaterList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (!(event.target instanceof Element) || !event.target.closest(".dropdown-menu")) {
+        setOpenMenu(null);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  function toggleExpanded(id: string) {
+    setExpandedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
 
   function projectName(projectId: string): string {
     return projects.find((project) => project.id === projectId)?.name ?? "—";
@@ -95,111 +120,180 @@ export function AutomaterList() {
         </div>
       ) : (
         <div className="automater-list">
-          {automaters.map((automater) => (
-            <div className="collector-card automater-list__card" key={automater.id}>
-              <div className="automater-list__header">
-                <div>
-                  <strong>{automater.name}</strong>
-                  <span className="automater-list__project">{projectName(automater.project_id)}</span>
-                  <StatusBadge status={automater.status} />
-                </div>
-                <div className="collector-table__actions">
-                  {automater.status === "running" ? (
-                    <button
-                      className="button"
-                      disabled={pendingKey === automater.id}
-                      onClick={() => {
-                        if (!window.confirm(`Stop Automater "${automater.name}"? Its rules will stop evaluating.`)) {
-                          return;
-                        }
-                        withPending(automater.id, () => stopAutomaterDeployment(automater.id));
-                      }}
-                    >
-                      Stop
-                    </button>
-                  ) : (
-                    <button
-                      className="button"
-                      disabled={pendingKey === automater.id}
-                      onClick={() => withPending(automater.id, () => deployAutomater(automater.id))}
-                    >
-                      Deploy
-                    </button>
-                  )}
+          {automaters.map((automater) => {
+            const isExpanded = expandedIds.has(automater.id);
+            return (
+              <div className="collector-card automater-list__card" key={automater.id}>
+                <div className={`automater-list__header${isExpanded ? " automater-list__header--expanded" : ""}`}>
                   <button
-                    className="button button--danger"
-                    disabled={pendingKey === automater.id}
-                    onClick={() => {
-                      if (
-                        !window.confirm(
-                          `Delete Automater "${automater.name}" and all ${automater.rules.length} of its rule(s)? This cannot be undone.`,
-                        )
-                      ) {
-                        return;
-                      }
-                      withPending(automater.id, () => deleteAutomater(automater.id));
-                    }}
+                    type="button"
+                    className="automater-list__header-main"
+                    onClick={() => toggleExpanded(automater.id)}
+                    aria-expanded={isExpanded}
                   >
-                    Delete Automater
+                    <ChevronIcon
+                      width={16}
+                      height={16}
+                      className={`chevron${isExpanded ? " chevron--expanded" : ""}`}
+                    />
+                    <strong>{automater.name}</strong>
+                    <span className="automater-list__project">{projectName(automater.project_id)}</span>
+                    <StatusBadge status={automater.status} />
+                    <span className="automater-list__rule-count">
+                      {automater.rules.length} rule{automater.rules.length === 1 ? "" : "s"}
+                    </span>
                   </button>
-                </div>
-              </div>
-
-              <table className="collector-table">
-                <thead>
-                  <tr>
-                    <th>Rule</th>
-                    <th>Table</th>
-                    <th>Conditions</th>
-                    <th>Severity</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {automater.rules.map((rule) => (
-                    <tr key={rule.id}>
-                      <td>{rule.name}</td>
-                      <td>{rule.table}</td>
-                      <td className="automater-list__conditions">{conditionsSummary(rule)}</td>
-                      <td>{rule.severity}</td>
-                      <td>
-                        <span className={`automater-list__rule-status automater-list__rule-status--${rule.enabled ? "active" : "inactive"}`}>
-                          {rule.enabled ? "Active" : "Inactive"}
-                        </span>
-                      </td>
-                      <td className="collector-table__actions">
-                        <button
-                          className="button"
-                          disabled={pendingKey === `rule-${rule.id}`}
-                          onClick={() => toggleRuleEnabled(automater, rule)}
-                        >
-                          {rule.enabled ? "Deactivate" : "Activate"}
-                        </button>
-                        <button
-                          className="button button--danger"
-                          disabled={pendingKey === `rule-${rule.id}` || automater.rules.length === 1}
-                          title={
-                            automater.rules.length === 1
-                              ? "Cannot delete an Automater's last rule — delete the Automater instead"
-                              : undefined
+                  <div className="automater-list__header-actions">
+                    {automater.status === "running" ? (
+                      <button
+                        className="button"
+                        disabled={pendingKey === automater.id}
+                        onClick={() => {
+                          if (!window.confirm(`Stop Automater "${automater.name}"? Its rules will stop evaluating.`)) {
+                            return;
                           }
-                          onClick={() => {
-                            if (!window.confirm(`Delete rule "${rule.name}"? This cannot be undone.`)) {
-                              return;
-                            }
-                            withPending(`rule-${rule.id}`, () => deleteRule(automater.id, rule.id));
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ))}
+                          withPending(automater.id, () => stopAutomaterDeployment(automater.id));
+                        }}
+                      >
+                        Stop
+                      </button>
+                    ) : (
+                      <button
+                        className="button"
+                        disabled={pendingKey === automater.id}
+                        onClick={() => withPending(automater.id, () => deployAutomater(automater.id))}
+                      >
+                        Deploy
+                      </button>
+                    )}
+                    <div className="dropdown-menu">
+                      <button
+                        type="button"
+                        className="dropdown-menu__trigger"
+                        aria-label="Automater actions"
+                        aria-expanded={openMenu === `automater:${automater.id}`}
+                        onClick={() =>
+                          setOpenMenu((current) => (current === `automater:${automater.id}` ? null : `automater:${automater.id}`))
+                        }
+                      >
+                        <MoreIcon />
+                      </button>
+                      {openMenu === `automater:${automater.id}` && (
+                        <div className="dropdown-menu__list">
+                          <button
+                            type="button"
+                            className="dropdown-menu__item dropdown-menu__item--danger"
+                            disabled={pendingKey === automater.id}
+                            onClick={() => {
+                              setOpenMenu(null);
+                              if (
+                                !window.confirm(
+                                  `Delete Automater "${automater.name}" and all ${automater.rules.length} of its rule(s)? This cannot be undone.`,
+                                )
+                              ) {
+                                return;
+                              }
+                              withPending(automater.id, () => deleteAutomater(automater.id));
+                            }}
+                          >
+                            Delete Automater
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {isExpanded && (
+                  <table className="collector-table automater-list__rules-table">
+                    <colgroup>
+                      <col style={{ width: "16%" }} />
+                      <col style={{ width: "12%" }} />
+                      <col style={{ width: "34%" }} />
+                      <col style={{ width: "10%" }} />
+                      <col style={{ width: "12%" }} />
+                      <col style={{ width: "16%" }} />
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>Rule</th>
+                        <th>Table</th>
+                        <th>Conditions</th>
+                        <th>Severity</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {automater.rules.map((rule) => {
+                        const conditions = conditionsSummary(rule);
+                        return (
+                          <tr key={rule.id}>
+                            <td>{rule.name}</td>
+                            <td>{rule.table}</td>
+                            <td className="automater-list__conditions" title={conditions}>
+                              {conditions}
+                            </td>
+                            <td>{rule.severity}</td>
+                            <td>
+                              <span className={`automater-list__rule-status automater-list__rule-status--${rule.enabled ? "active" : "inactive"}`}>
+                                {rule.enabled ? "Active" : "Inactive"}
+                              </span>
+                            </td>
+                            <td className="collector-table__actions">
+                              <button
+                                className="button"
+                                disabled={pendingKey === `rule-${rule.id}`}
+                                onClick={() => toggleRuleEnabled(automater, rule)}
+                              >
+                                {rule.enabled ? "Deactivate" : "Activate"}
+                              </button>
+                              <div className="dropdown-menu">
+                                <button
+                                  type="button"
+                                  className="dropdown-menu__trigger"
+                                  aria-label="Rule actions"
+                                  aria-expanded={openMenu === `rule:${rule.id}`}
+                                  onClick={() =>
+                                    setOpenMenu((current) => (current === `rule:${rule.id}` ? null : `rule:${rule.id}`))
+                                  }
+                                >
+                                  <MoreIcon />
+                                </button>
+                                {openMenu === `rule:${rule.id}` && (
+                                  <div className="dropdown-menu__list">
+                                    <button
+                                      type="button"
+                                      className="dropdown-menu__item dropdown-menu__item--danger"
+                                      disabled={pendingKey === `rule-${rule.id}` || automater.rules.length === 1}
+                                      title={
+                                        automater.rules.length === 1
+                                          ? "Cannot delete an Automater's last rule — delete the Automater instead"
+                                          : undefined
+                                      }
+                                      onClick={() => {
+                                        setOpenMenu(null);
+                                        if (!window.confirm(`Delete rule "${rule.name}"? This cannot be undone.`)) {
+                                          return;
+                                        }
+                                        withPending(`rule-${rule.id}`, () => deleteRule(automater.id, rule.id));
+                                      }}
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </main>

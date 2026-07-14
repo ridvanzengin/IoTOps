@@ -91,6 +91,14 @@ export function PlusIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function ChevronIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="m9 6 6 6-6 6" />
+    </Icon>
+  );
+}
+
 export function CopilotIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props} strokeWidth="0" fill="currentColor">
