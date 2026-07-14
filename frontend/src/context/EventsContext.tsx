@@ -1,15 +1,23 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { getUnresolvedCounts, listOccurrences, subscribeToEvents } from "../api/event";
+import { getOccurrenceCounts, getUnresolvedCounts, listOccurrences, subscribeToEvents } from "../api/event";
 import { listDashboards } from "../api/dashboard";
 import { listProjects, updateProject } from "../api/project";
-import { reconcileOccurrence } from "../utils/occurrences";
-import type { Occurrence } from "../types/event";
+import { DEFAULT_TIME_RANGE } from "../constants/timeRanges";
+import { debounce } from "../utils/debounce";
+import type { EventRuleCount, Occurrence } from "../types/event";
 import type { Dashboard, Variable } from "../types/dashboard";
 import type { Project } from "../types/project";
 
 export type ActivePanel = { kind: "project"; projectId: string } | { kind: "copilot" } | null;
+
+// What EventsPanel's filter chips can narrow the occurrence list to. Kept
+// here (not local component state) because applying a filter changes what
+// EventsContext fetches.
+export type OccurrenceFilter = { kind: "rule"; ruleId: string } | { kind: "unresolved" };
+
+export const OCCURRENCES_PAGE_SIZE = 20;
 
 // Registered by DashboardEditor while it's mounted (see its own
 // registerDashboardVariables effect) so the globally-mounted events
@@ -46,10 +54,28 @@ interface EventsContextValue {
   activePanel: ActivePanel;
   occurrences: Occurrence[];
   occurrencesLoading: boolean;
+  occurrencesTotal: number;
+  occurrencesOffset: number;
+  occurrenceFilter: OccurrenceFilter | null;
+  timeRange: string;
+  searchQuery: string;
+  // Rules matching the current time range/search, each with its occurrence
+  // count *within that same window* -- also refetched (debounced) on every
+  // live match/clear SSE event for the open project, so a chip's count
+  // never goes stale while the panel is open. See getOccurrenceCounts.
+  ruleCounts: EventRuleCount[];
+  // The panel's "Active" filter chip's count, within the same window/
+  // search as ruleCounts -- distinct from unresolvedCounts (the
+  // ActivityBar badge, never windowed). See its state comment.
+  windowedActiveCount: number;
   activeDashboardVariables: ActiveDashboardVariables | null;
   openProjectPanel: (projectId: string) => void;
   openCopilotPanel: () => void;
   closePanel: () => void;
+  setOccurrenceFilter: (filter: OccurrenceFilter | null) => void;
+  setTimeRange: (range: string) => void;
+  setSearchQuery: (text: string) => void;
+  loadOccurrencesPage: (offset: number) => void;
   setDefaultDashboard: (projectId: string, dashboardId: string) => Promise<void>;
   registerDashboardVariables: (context: ActiveDashboardVariables) => void;
   clearDashboardVariables: (dashboardId: string) => void;
@@ -70,10 +96,9 @@ const EventsContext = createContext<EventsContextValue | null>(null);
 // Owns the one session-wide EventSource (opened once here, at the app
 // shell root) plus the state it feeds: every project's unresolved-match
 // badge count (always live, regardless of which/whether a panel is
-// open) and the occurrence list for whichever project's panel currently
-// is open. See iotops-workspace/ROADMAP.md's "Events sidebar polish"
-// note -- this replaces DashboardSidebar's old per-mount fetch/SSE
-// effect, which only ever covered one project at a time.
+// open) and the occurrence list/counts for whichever project's panel
+// currently is open, both scoped to a time range + optional search text.
+// See iotops-workspace/ROADMAP.md's "Events sidebar polish" note.
 export function EventsProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [dashboardsByProject, setDashboardsByProject] = useState<Record<string, Dashboard[]>>({});
@@ -81,6 +106,22 @@ export function EventsProvider({ children }: { children: ReactNode }) {
   const [activePanel, setActivePanel] = useState<ActivePanel>(null);
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
   const [occurrencesLoading, setOccurrencesLoading] = useState(false);
+  const [occurrencesTotal, setOccurrencesTotal] = useState(0);
+  const [occurrencesOffset, setOccurrencesOffset] = useState(0);
+  const [occurrenceFilter, setOccurrenceFilterState] = useState<OccurrenceFilter | null>(null);
+  // Sticky across project switches (a user who picked "24h" almost
+  // certainly wants that kept, not silently reset to 1h when they click a
+  // different project) -- unlike filter/search, which reset per project.
+  const [timeRange, setTimeRangeState] = useState(DEFAULT_TIME_RANGE);
+  const [searchQuery, setSearchQueryState] = useState("");
+  const [ruleCounts, setRuleCounts] = useState<EventRuleCount[]>([]);
+  // The panel's "Active" filter chip needs its own count *within the same
+  // window/search* as ruleCounts and the list -- unresolvedCounts (below)
+  // is deliberately NOT windowed (that's the ActivityBar badge's "still
+  // broken regardless of age" semantic), so reusing it here would put the
+  // chip's number out of sync with what clicking it actually loads, the
+  // exact bug this whole windowing change exists to close.
+  const [windowedActiveCount, setWindowedActiveCount] = useState(0);
   const [activeDashboardVariables, setActiveDashboardVariables] = useState<ActiveDashboardVariables | null>(null);
   const navigate = useNavigate();
   // Not state -- written by a click, read once by whichever dashboard's
@@ -90,12 +131,32 @@ export function EventsProvider({ children }: { children: ReactNode }) {
   // its own.
   const pendingSelectionRef = useRef<{ dashboardId: string; identifiers: Record<string, string> } | null>(null);
 
-  // Read inside the SSE callback/onopen instead of `activePanel` directly
-  // -- the subscription effect below only runs once, on mount.
+  // Read inside the SSE callback/onopen instead of the corresponding state
+  // directly -- the subscription effect below only runs once, on mount.
   const activePanelRef = useRef(activePanel);
   useEffect(() => {
     activePanelRef.current = activePanel;
   }, [activePanel]);
+
+  const occurrenceFilterRef = useRef(occurrenceFilter);
+  useEffect(() => {
+    occurrenceFilterRef.current = occurrenceFilter;
+  }, [occurrenceFilter]);
+
+  const timeRangeRef = useRef(timeRange);
+  useEffect(() => {
+    timeRangeRef.current = timeRange;
+  }, [timeRange]);
+
+  const searchQueryRef = useRef(searchQuery);
+  useEffect(() => {
+    searchQueryRef.current = searchQuery;
+  }, [searchQuery]);
+
+  const occurrencesOffsetRef = useRef(occurrencesOffset);
+  useEffect(() => {
+    occurrencesOffsetRef.current = occurrencesOffset;
+  }, [occurrencesOffset]);
 
   function refetchUnresolvedCounts() {
     getUnresolvedCounts()
@@ -107,12 +168,92 @@ export function EventsProvider({ children }: { children: ReactNode }) {
       .catch(() => undefined);
   }
 
+  // The single fetch behind the panel's occurrence list, at any filter/
+  // time range/search/page combination -- always asks the backend for
+  // exactly what's being viewed (scoped by rule_id/status/range/search/
+  // offset) instead of client-side-filtering an unrelated, differently-
+  // scoped fetch. `total` (from the same query) is what drives pagination
+  // and is guaranteed consistent with `items`, since both come from one
+  // server-side computation. See ListOccurrencesOptions.
+  function fetchOccurrences(
+    projectId: string,
+    filter: OccurrenceFilter | null,
+    range: string,
+    search: string,
+    offset: number,
+  ) {
+    setOccurrencesLoading(true);
+    listOccurrences(projectId, {
+      limit: OCCURRENCES_PAGE_SIZE,
+      offset,
+      range,
+      search: search || undefined,
+      ruleIds: filter?.kind === "rule" ? [filter.ruleId] : undefined,
+      status: filter?.kind === "unresolved" ? "active" : undefined,
+    })
+      .then((page) => {
+        setOccurrences(page.items);
+        setOccurrencesTotal(page.total);
+        setOccurrencesOffset(offset);
+      })
+      .catch(() => {
+        setOccurrences([]);
+        setOccurrencesTotal(0);
+      })
+      .finally(() => setOccurrencesLoading(false));
+  }
+
+  function fetchCounts(projectId: string, range: string, search: string) {
+    getOccurrenceCounts(projectId, range, search || undefined)
+      .then(setRuleCounts)
+      .catch(() => setRuleCounts([]));
+    // limit=0 -- only `total` is wanted here (the exact count the "Active"
+    // chip's click-through will load), not the items themselves. Same
+    // query the click-through itself issues (status=active, same
+    // range/search), so the two can't structurally disagree.
+    listOccurrences(projectId, { status: "active", range, search: search || undefined, limit: 0, offset: 0 })
+      .then((page) => setWindowedActiveCount(page.total))
+      .catch(() => setWindowedActiveCount(0));
+  }
+
+  // Stable across renders (created once) -- both debounced wrappers only
+  // ever call fetchOccurrences/fetchCounts with explicit arguments and
+  // the always-stable setX state setters, so capturing the first render's
+  // versions is safe; recreating a "debounced" function on every render
+  // would defeat the debouncing (each call would get its own fresh timer).
+  const debouncedSearchFetch = useRef(
+    debounce((projectId: string, filter: OccurrenceFilter | null, range: string, search: string) => {
+      fetchOccurrences(projectId, filter, range, search, 0);
+      fetchCounts(projectId, range, search);
+    }, 300),
+  ).current;
+
+  // A burst of live events (a noisy rule firing repeatedly) shouldn't
+  // trigger one refetch per event.
+  const debouncedLiveRefetch = useRef(
+    debounce((projectId: string) => {
+      fetchOccurrences(
+        projectId,
+        occurrenceFilterRef.current,
+        timeRangeRef.current,
+        searchQueryRef.current,
+        occurrencesOffsetRef.current,
+      );
+      fetchCounts(projectId, timeRangeRef.current, searchQueryRef.current);
+    }, 400),
+  ).current;
+
   function refetchOpenPanel() {
     const panel = activePanelRef.current;
     if (!panel || panel.kind !== "project") return;
-    listOccurrences(panel.projectId)
-      .then(setOccurrences)
-      .catch(() => undefined);
+    fetchOccurrences(
+      panel.projectId,
+      occurrenceFilterRef.current,
+      timeRangeRef.current,
+      searchQueryRef.current,
+      occurrencesOffsetRef.current,
+    );
+    fetchCounts(panel.projectId, timeRangeRef.current, searchQueryRef.current);
   }
 
   useEffect(() => {
@@ -138,9 +279,12 @@ export function EventsProvider({ children }: { children: ReactNode }) {
         // A match always starts a *new* occurrence (Go suppresses repeat
         // matches on an already-firing rule, so this never double-counts
         // an already-open one) and a clear always resolves exactly the
-        // occurrence it paired with -- so +1/-1 here is the same pairing
-        // invariant reconcileOccurrence uses, just without needing the
-        // full occurrence list for every project.
+        // occurrence it paired with -- so +1/-1 here is cheap and doesn't
+        // need a refetch. This badge is intentionally NOT time-windowed
+        // (unlike the panel's own counts) -- it means "currently
+        // unresolved, regardless of age", so a still-broken issue from
+        // outside the panel's time range doesn't silently disappear from
+        // it.
         const delta = event.flag === "match" ? 1 : -1;
         const current = prev[event.project_id] ?? 0;
         return { ...prev, [event.project_id]: Math.max(0, current + delta) };
@@ -148,7 +292,7 @@ export function EventsProvider({ children }: { children: ReactNode }) {
 
       const panel = activePanelRef.current;
       if (panel && panel.kind === "project" && panel.projectId === event.project_id) {
-        setOccurrences((prev) => reconcileOccurrence(prev, event));
+        debouncedLiveRefetch(event.project_id);
       }
     });
 
@@ -168,21 +312,59 @@ export function EventsProvider({ children }: { children: ReactNode }) {
 
   function openProjectPanel(projectId: string) {
     setActivePanel({ kind: "project", projectId });
-    setOccurrencesLoading(true);
-    listOccurrences(projectId)
-      .then(setOccurrences)
-      .catch(() => setOccurrences([]))
-      .finally(() => setOccurrencesLoading(false));
+    setOccurrenceFilterState(null);
+    setSearchQueryState("");
+    fetchOccurrences(projectId, null, timeRange, "", 0);
+    fetchCounts(projectId, timeRange, "");
   }
 
   function openCopilotPanel() {
     setActivePanel({ kind: "copilot" });
     setOccurrences([]);
+    setOccurrencesTotal(0);
+    setOccurrencesOffset(0);
+    setRuleCounts([]);
   }
 
   function closePanel() {
     setActivePanel(null);
     setOccurrences([]);
+    setOccurrencesTotal(0);
+    setOccurrencesOffset(0);
+    setRuleCounts([]);
+    setOccurrenceFilterState(null);
+    setSearchQueryState("");
+  }
+
+  function setOccurrenceFilter(filter: OccurrenceFilter | null) {
+    setOccurrenceFilterState(filter);
+    const panel = activePanelRef.current;
+    if (panel && panel.kind === "project") {
+      fetchOccurrences(panel.projectId, filter, timeRange, searchQuery, 0);
+    }
+  }
+
+  function setTimeRange(range: string) {
+    setTimeRangeState(range);
+    const panel = activePanelRef.current;
+    if (panel && panel.kind === "project") {
+      fetchOccurrences(panel.projectId, occurrenceFilter, range, searchQuery, 0);
+      fetchCounts(panel.projectId, range, searchQuery);
+    }
+  }
+
+  function setSearchQuery(text: string) {
+    setSearchQueryState(text);
+    const panel = activePanelRef.current;
+    if (panel && panel.kind === "project") {
+      debouncedSearchFetch(panel.projectId, occurrenceFilter, timeRange, text);
+    }
+  }
+
+  function loadOccurrencesPage(offset: number) {
+    const panel = activePanelRef.current;
+    if (!panel || panel.kind !== "project") return;
+    fetchOccurrences(panel.projectId, occurrenceFilter, timeRange, searchQuery, offset);
   }
 
   async function setDefaultDashboard(projectId: string, dashboardId: string): Promise<void> {
@@ -238,10 +420,21 @@ export function EventsProvider({ children }: { children: ReactNode }) {
         activePanel,
         occurrences,
         occurrencesLoading,
+        occurrencesTotal,
+        occurrencesOffset,
+        occurrenceFilter,
+        timeRange,
+        searchQuery,
+        ruleCounts,
+        windowedActiveCount,
         activeDashboardVariables,
         openProjectPanel,
         openCopilotPanel,
         closePanel,
+        setOccurrenceFilter,
+        setTimeRange,
+        setSearchQuery,
+        loadOccurrencesPage,
         setDefaultDashboard,
         registerDashboardVariables,
         clearDashboardVariables,

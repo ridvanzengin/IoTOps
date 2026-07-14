@@ -8,8 +8,9 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from app.dependencies import get_async_redis_client, get_event_service
-from app.event.models import Event, EventRuleCount, Occurrence, ProjectUnresolvedCount
+from app.event.models import Event, EventRuleCount, Occurrence, OccurrencePage, OccurrenceStatus, ProjectUnresolvedCount
 from app.event.service import EventService
+from app.shared.time_range import resolve_time_range
 
 
 class ResolveOccurrenceRequest(BaseModel):
@@ -42,13 +43,43 @@ async def get_event_counts(
     return await service.counts_by_rule(project_id)
 
 
-@router.get("/occurrences", response_model=list[Occurrence])
+@router.get("/occurrence-counts", response_model=list[EventRuleCount])
+async def get_occurrence_counts_by_rule(
+    project_id: UUID = Query(),
+    # Same relative-code convention as the Dashboard's own time-range
+    # selector (constants/timeRanges.ts on the frontend) -- resolved to an
+    # absolute cutoff here, not on the client, so "now" is always the
+    # server's clock.
+    range: str = Query(default="1h"),
+    search: str | None = Query(default=None),
+    service: EventService = Depends(get_event_service),
+) -> list[EventRuleCount]:
+    since, _ = resolve_time_range(range)
+    return await service.occurrence_counts_by_rule(project_id, since, search)
+
+
+@router.get("/occurrences", response_model=OccurrencePage)
 async def list_occurrences(
     project_id: UUID | None = Query(default=None),
-    limit: int = Query(default=50, le=200),
+    # 20 by default -- the sidebar panel only ever renders one page at a
+    # time now (see OccurrencePage.total for "how many more"), not a
+    # single unbounded/heavily-capped fetch trying to represent everything
+    # at once.
+    limit: int = Query(default=20, le=200),
+    offset: int = Query(default=0, ge=0),
+    range: str = Query(default="1h"),
+    search: str | None = Query(default=None),
+    # Repeated ?rule_id=...&rule_id=... -- scopes the Mongo query itself
+    # (not a client-side filter of an unrelated generic fetch), so a
+    # rule-filtered panel view can actually load all of that rule's
+    # occurrences instead of whatever happened to survive an unscoped cap.
+    rule_id: list[UUID] | None = Query(default=None),
+    status: OccurrenceStatus | None = Query(default=None),
     service: EventService = Depends(get_event_service),
-) -> list[Occurrence]:
-    return await service.list_occurrences(project_id, limit)
+) -> OccurrencePage:
+    since, _ = resolve_time_range(range)
+    items, total = await service.list_occurrences(project_id, limit, offset, rule_id, status, since, search)
+    return OccurrencePage(items=items, total=total)
 
 
 @router.get("/unresolved-counts", response_model=list[ProjectUnresolvedCount])

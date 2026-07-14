@@ -120,9 +120,180 @@ async def test_list_occurrences_returns_paired_occurrence(client: TestClient) ->
     response = client.get("/api/event/occurrences", params={"project_id": str(project_id)})
 
     assert response.status_code == 200
-    [occurrence] = response.json()
+    body = response.json()
+    assert body["total"] == 1
+    [occurrence] = body["items"]
     assert occurrence["status"] == "resolved"
     assert occurrence["identifiers"] == {"hive_id": "hive-1"}
+
+
+async def test_list_occurrences_status_query_param_filters_to_active(client: TestClient) -> None:
+    project_id = uuid4()
+    resolved_rule = uuid4()
+    active_rule = uuid4()
+    await _seed(client, project_id=project_id, rule_id=resolved_rule, flag=EventFlag.MATCH)
+    await _seed(client, project_id=project_id, rule_id=resolved_rule, flag=EventFlag.CLEAR)
+    await _seed(client, project_id=project_id, rule_id=active_rule, flag=EventFlag.MATCH)
+
+    response = client.get(
+        "/api/event/occurrences", params={"project_id": str(project_id), "status": "active"}
+    )
+
+    assert response.status_code == 200
+    [occurrence] = response.json()["items"]
+    assert occurrence["status"] == "active"
+    assert occurrence["rule_id"] == str(active_rule)
+
+
+async def test_list_occurrences_rule_id_query_param_scopes_results(client: TestClient) -> None:
+    project_id = uuid4()
+    wanted_rule = uuid4()
+    await _seed(client, project_id=project_id, rule_id=uuid4(), flag=EventFlag.MATCH)
+    await _seed(client, project_id=project_id, rule_id=wanted_rule, flag=EventFlag.MATCH)
+
+    response = client.get(
+        "/api/event/occurrences", params={"project_id": str(project_id), "rule_id": str(wanted_rule)}
+    )
+
+    assert response.status_code == 200
+    [occurrence] = response.json()["items"]
+    assert occurrence["rule_id"] == str(wanted_rule)
+
+
+async def test_list_occurrences_default_range_excludes_events_older_than_1h(client: TestClient) -> None:
+    project_id = uuid4()
+    now = datetime.now(timezone.utc)
+    recent = await _seed(client, project_id=project_id, matched_at=now - timedelta(minutes=30))
+    await _seed(client, project_id=project_id, matched_at=now - timedelta(hours=2))
+
+    response = client.get("/api/event/occurrences", params={"project_id": str(project_id)})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert [o["id"] for o in body["items"]] == [str(recent.id)]
+
+
+async def test_list_occurrences_range_param_widens_the_window(client: TestClient) -> None:
+    project_id = uuid4()
+    now = datetime.now(timezone.utc)
+    await _seed(client, project_id=project_id, matched_at=now - timedelta(minutes=30))
+    await _seed(client, project_id=project_id, matched_at=now - timedelta(hours=2))
+
+    response = client.get("/api/event/occurrences", params={"project_id": str(project_id), "range": "24h"})
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 2
+
+
+async def test_list_occurrences_search_param_matches_rule_name(client: TestClient) -> None:
+    project_id = uuid4()
+    wanted = await _seed(client, project_id=project_id, rule_name="high-vibration")
+    await _seed(client, project_id=project_id, rule_name="low-fuel")
+
+    response = client.get("/api/event/occurrences", params={"project_id": str(project_id), "search": "vibration"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == str(wanted.id)
+
+
+async def test_list_occurrences_search_param_matches_identifier_values(client: TestClient) -> None:
+    # A rule with placeholder/test naming (rule_name/message/category all
+    # generic) still has to be searchable by what actually distinguishes
+    # its occurrences -- the identifier chips rendered on the card.
+    project_id = uuid4()
+    wanted = await _seed(
+        client,
+        project_id=project_id,
+        rule_name="sdf",
+        category="sdf",
+        message="dxv",
+        identifier_keys=["hive_id"],
+        tags={"hive_id": "hive-5"},
+    )
+    await _seed(
+        client,
+        project_id=project_id,
+        rule_name="sdf",
+        category="sdf",
+        message="dxv",
+        identifier_keys=["hive_id"],
+        tags={"hive_id": "hive-6"},
+    )
+
+    response = client.get("/api/event/occurrences", params={"project_id": str(project_id), "search": "hive-5"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == str(wanted.id)
+
+
+async def test_list_occurrences_pagination_offset_and_total(client: TestClient) -> None:
+    project_id = uuid4()
+    now = datetime.now(timezone.utc)
+    for i in range(5):
+        await _seed(client, project_id=project_id, matched_at=now - timedelta(minutes=i))
+
+    first_page = client.get(
+        "/api/event/occurrences", params={"project_id": str(project_id), "limit": 2, "offset": 0}
+    ).json()
+    second_page = client.get(
+        "/api/event/occurrences", params={"project_id": str(project_id), "limit": 2, "offset": 2}
+    ).json()
+
+    assert first_page["total"] == 5
+    assert second_page["total"] == 5
+    assert len(first_page["items"]) == 2
+    assert len(second_page["items"]) == 2
+    first_ids = {item["id"] for item in first_page["items"]}
+    second_ids = {item["id"] for item in second_page["items"]}
+    assert first_ids.isdisjoint(second_ids)
+
+
+async def test_get_occurrence_counts_by_rule_respects_range_and_search(client: TestClient) -> None:
+    # Two distinct machines both matching "high-vibration" -- distinct
+    # identifiers, so these are two real, independent Occurrences (not a
+    # "repeat match while one's already open", which _pair_occurrences
+    # would defensively collapse to one -- see the repository-level test
+    # for that behavior specifically).
+    project_id = uuid4()
+    rule_id = uuid4()
+    now = datetime.now(timezone.utc)
+    await _seed(
+        client,
+        project_id=project_id,
+        rule_id=rule_id,
+        rule_name="high-vibration",
+        identifier_keys=["machine_id"],
+        tags={"machine_id": "lathe-01"},
+        matched_at=now - timedelta(minutes=10),
+    )
+    await _seed(
+        client,
+        project_id=project_id,
+        rule_id=rule_id,
+        rule_name="high-vibration",
+        identifier_keys=["machine_id"],
+        tags={"machine_id": "lathe-02"},
+        matched_at=now - timedelta(hours=3),
+    )
+    await _seed(client, project_id=project_id, rule_name="low-fuel", matched_at=now - timedelta(minutes=10))
+
+    default_range = client.get("/api/event/occurrence-counts", params={"project_id": str(project_id)}).json()
+    assert {c["rule_name"]: c["count"] for c in default_range} == {"high-vibration": 1, "low-fuel": 1}
+
+    widened_range = client.get(
+        "/api/event/occurrence-counts", params={"project_id": str(project_id), "range": "24h"}
+    ).json()
+    assert {c["rule_name"]: c["count"] for c in widened_range} == {"high-vibration": 2, "low-fuel": 1}
+
+    searched = client.get(
+        "/api/event/occurrence-counts", params={"project_id": str(project_id), "range": "24h", "search": "vibration"}
+    ).json()
+    assert {c["rule_name"]: c["count"] for c in searched} == {"high-vibration": 2}
 
 
 async def test_get_unresolved_counts_covers_all_projects(client: TestClient) -> None:

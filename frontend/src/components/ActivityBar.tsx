@@ -1,30 +1,8 @@
 import { useNavigate } from "react-router-dom";
 import { useEvents } from "../context/EventsContext";
+import { hashColor } from "../utils/color";
 import { CopilotIcon } from "./icons";
 import "./ActivityBar.css";
-
-// Deterministic project-id -> color, same fallback-avatar pattern
-// Slack/GitHub use for entities with no dedicated icon/color field (no
-// schema change on Project -- see iotops-workspace/ROADMAP.md's "Events
-// sidebar polish" note). Distinct from the severity scale in index.css.
-const PALETTE = [
-  "#6d28d9",
-  "#0f766e",
-  "#b45309",
-  "#be123c",
-  "#1d4ed8",
-  "#15803d",
-  "#a21caf",
-  "#0891b2",
-];
-
-function hashColor(id: string): string {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
-  }
-  return PALETTE[hash % PALETTE.length];
-}
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);

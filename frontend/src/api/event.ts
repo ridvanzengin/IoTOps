@@ -1,5 +1,12 @@
 import { apiRequest } from "./client";
-import type { Event, EventRuleCount, Occurrence, ProjectUnresolvedCount } from "../types/event";
+import type {
+  Event,
+  EventRuleCount,
+  Occurrence,
+  OccurrencePage,
+  OccurrenceStatus,
+  ProjectUnresolvedCount,
+} from "../types/event";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -28,10 +35,43 @@ export function getEventCounts(projectId?: string): Promise<EventRuleCount[]> {
   return apiRequest<EventRuleCount[]>(`/api/event/counts?${params}`);
 }
 
-export function listOccurrences(projectId?: string, limit = 50): Promise<Occurrence[]> {
-  const params = new URLSearchParams({ limit: String(limit) });
+// Counts paired Occurrences, not raw match-flag Events -- unlike
+// getEventCounts (a lifetime "how many times has this fired" stat, used
+// on Home), this is what EventsPanel's rule filter chips need: a chip's
+// count has to equal how many cards clicking it actually reveals. `range`
+// is a relative code (see constants/timeRanges.ts), resolved server-side
+// against the server's own clock -- same convention as the Dashboard's
+// own time-range selector.
+export function getOccurrenceCounts(projectId: string, range: string, search?: string): Promise<EventRuleCount[]> {
+  const params = new URLSearchParams({ project_id: projectId, range });
+  if (search) params.set("search", search);
+  return apiRequest<EventRuleCount[]>(`/api/event/occurrence-counts?${params}`);
+}
+
+export interface ListOccurrencesOptions {
+  limit?: number;
+  offset?: number;
+  ruleIds?: string[];
+  status?: OccurrenceStatus;
+  range?: string;
+  search?: string;
+}
+
+// `ruleIds`/`status`/`range`/`search` all scope the query on the backend
+// itself (not a client-side filter of an unrelated generic fetch) -- pass
+// them whenever the caller wants "all occurrences matching X", so the
+// returned `total` is the actual answer to that question instead of
+// whatever a fixed-size, unscoped window happened to contain. See
+// EventsContext's occurrenceFilter/timeRange/search handling, which is
+// what this was added for.
+export function listOccurrences(projectId?: string, options: ListOccurrencesOptions = {}): Promise<OccurrencePage> {
+  const { limit = 20, offset = 0, ruleIds, status, range = "1h", search } = options;
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset), range });
   if (projectId) params.set("project_id", projectId);
-  return apiRequest<Occurrence[]>(`/api/event/occurrences?${params}`);
+  if (status) params.set("status", status);
+  if (search) params.set("search", search);
+  if (ruleIds) for (const ruleId of ruleIds) params.append("rule_id", ruleId);
+  return apiRequest<OccurrencePage>(`/api/event/occurrences?${params}`);
 }
 
 export function getUnresolvedCounts(): Promise<ProjectUnresolvedCount[]> {

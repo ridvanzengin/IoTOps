@@ -1,11 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { getEventCounts } from "../api/event";
-import { useEvents } from "../context/EventsContext";
+import { useEffect, useRef, useState } from "react";
+import { OCCURRENCES_PAGE_SIZE, useEvents } from "../context/EventsContext";
+import { TIME_RANGES } from "../constants/timeRanges";
+import { hashColor } from "../utils/color";
 import { OccurrenceCard } from "./OccurrenceCard";
-import type { EventRuleCount } from "../types/event";
 import "./EventsPanel.css";
-
-type Filter = { kind: "rule"; ruleId: string } | { kind: "unresolved" } | null;
 
 const WIDTH_STORAGE_KEY = "iotops:events-panel-width";
 const DEFAULT_WIDTH = 340;
@@ -26,9 +24,24 @@ function loadStoredWidth(): number {
 // as panels open and close. See iotops-workspace/ROADMAP.md's "Events
 // sidebar polish" note.
 export function EventsPanel() {
-  const { activePanel, occurrences, occurrencesLoading, projects, unresolvedCounts, closePanel } = useEvents();
-  const [ruleCounts, setRuleCounts] = useState<EventRuleCount[]>([]);
-  const [filter, setFilter] = useState<Filter>(null);
+  const {
+    activePanel,
+    occurrences,
+    occurrencesLoading,
+    occurrencesTotal,
+    occurrencesOffset,
+    occurrenceFilter,
+    timeRange,
+    searchQuery,
+    ruleCounts,
+    windowedActiveCount,
+    projects,
+    closePanel,
+    setOccurrenceFilter,
+    setTimeRange,
+    setSearchQuery,
+    loadOccurrencesPage,
+  } = useEvents();
   // Local state, not context: this component is mounted once at the app
   // shell root (see App.tsx) and never unmounts on route changes, so a
   // plain useState already "remembers" the width across page navigation
@@ -38,21 +51,6 @@ export function EventsPanel() {
   const resizingRef = useRef(false);
 
   const projectId = activePanel?.kind === "project" ? activePanel.projectId : null;
-
-  useEffect(() => {
-    setFilter(null);
-    if (!projectId) {
-      setRuleCounts([]);
-      return;
-    }
-    let cancelled = false;
-    getEventCounts(projectId)
-      .then((counts) => !cancelled && setRuleCounts(counts))
-      .catch(() => !cancelled && setRuleCounts([]));
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
 
   useEffect(() => {
     // The panel sits at the far right of the shell (see App.tsx), so its
@@ -87,25 +85,23 @@ export function EventsPanel() {
     document.body.style.userSelect = "none";
   }
 
-  const visibleOccurrences = useMemo(() => {
-    if (!filter) return occurrences;
-    if (filter.kind === "unresolved") return occurrences.filter((o) => o.status === "active");
-    return occurrences.filter((o) => o.rule_id === filter.ruleId);
-  }, [occurrences, filter]);
-
   function toggleRuleFilter(ruleId: string) {
-    setFilter((prev) => (prev?.kind === "rule" && prev.ruleId === ruleId ? null : { kind: "rule", ruleId }));
+    setOccurrenceFilter(
+      occurrenceFilter?.kind === "rule" && occurrenceFilter.ruleId === ruleId ? null : { kind: "rule", ruleId },
+    );
   }
 
   function toggleUnresolvedFilter() {
-    setFilter((prev) => (prev?.kind === "unresolved" ? null : { kind: "unresolved" }));
+    setOccurrenceFilter(occurrenceFilter?.kind === "unresolved" ? null : { kind: "unresolved" });
   }
 
   if (!activePanel) return null;
 
   const project = projects.find((p) => p.id === projectId);
-  const unresolvedCount = projectId ? (unresolvedCounts[projectId] ?? 0) : 0;
   const title = activePanel.kind === "copilot" ? "Co-pilot" : (project?.name ?? "Events");
+  const hasAnyFilterChips = ruleCounts.length > 0 || windowedActiveCount > 0;
+  const pageStart = occurrencesTotal === 0 ? 0 : occurrencesOffset + 1;
+  const pageEnd = Math.min(occurrencesOffset + OCCURRENCES_PAGE_SIZE, occurrencesTotal);
 
   return (
     <aside className="events-panel" style={{ width }}>
@@ -122,55 +118,101 @@ export function EventsPanel() {
         </div>
       ) : (
         <div className="events-panel__body">
+          <div className="events-panel__toolbar">
+            <select
+              className="events-panel__range"
+              value={timeRange}
+              onChange={(event) => setTimeRange(event.target.value)}
+              aria-label="Time range"
+            >
+              {TIME_RANGES.map((range) => (
+                <option key={range.code} value={range.code}>
+                  {range.label}
+                </option>
+              ))}
+            </select>
+            <input
+              type="text"
+              className="events-panel__search"
+              placeholder="Search events..."
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              aria-label="Search events"
+            />
+          </div>
+
+          {hasAnyFilterChips && (
+            <div className="events-panel__filters">
+              {windowedActiveCount > 0 && (
+                <button
+                  type="button"
+                  className={`events-panel__filter-badge events-panel__filter-badge--unresolved ${
+                    occurrenceFilter?.kind === "unresolved" ? "events-panel__filter-badge--active" : ""
+                  }`}
+                  onClick={toggleUnresolvedFilter}
+                >
+                  Active
+                  <span className="events-panel__filter-count">{windowedActiveCount}</span>
+                </button>
+              )}
+              {ruleCounts.map((rc) => (
+                <button
+                  key={rc.rule_id}
+                  type="button"
+                  className={`events-panel__filter-badge events-panel__filter-badge--rule ${
+                    occurrenceFilter?.kind === "rule" && occurrenceFilter.ruleId === rc.rule_id
+                      ? "events-panel__filter-badge--active"
+                      : ""
+                  }`}
+                  style={{ "--rule-color": hashColor(rc.rule_id) } as React.CSSProperties}
+                  title={rc.rule_name}
+                  onClick={() => toggleRuleFilter(rc.rule_id)}
+                >
+                  <span className="events-panel__filter-badge-label">{rc.rule_name}</span>
+                  <span className="events-panel__filter-count">{rc.count}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
           {occurrencesLoading ? (
             <p className="events-panel__hint">Loading...</p>
           ) : occurrences.length === 0 ? (
             <p className="events-panel__hint">
-              No events yet. They'll show up here as soon as a Rule in this project fires.
+              No events match the current time range/filters. Try widening the time range above.
             </p>
           ) : (
             <>
-              <div className="events-panel__filters">
-                {unresolvedCount > 0 && (
-                  <button
-                    type="button"
-                    className={`events-panel__filter-badge events-panel__filter-badge--unresolved ${
-                      filter?.kind === "unresolved" ? "events-panel__filter-badge--active" : ""
-                    }`}
-                    onClick={toggleUnresolvedFilter}
-                  >
-                    Active
-                    <span className="events-panel__filter-count">{unresolvedCount}</span>
-                  </button>
-                )}
-                {ruleCounts.map((rc) => (
-                  <button
-                    key={rc.rule_id}
-                    type="button"
-                    className={`events-panel__filter-badge ${
-                      filter?.kind === "rule" && filter.ruleId === rc.rule_id
-                        ? "events-panel__filter-badge--active"
-                        : ""
-                    }`}
-                    title={rc.rule_name}
-                    onClick={() => toggleRuleFilter(rc.rule_id)}
-                  >
-                    <span className="events-panel__filter-badge-label">{rc.rule_name}</span>
-                    <span className="events-panel__filter-count">{rc.count}</span>
-                  </button>
+              <ul className="events-panel__list">
+                {occurrences.map((occurrence) => (
+                  <OccurrenceCard
+                    key={`${occurrence.rule_id}-${occurrence.matched_at}-${JSON.stringify(occurrence.identifiers)}`}
+                    occurrence={occurrence}
+                  />
                 ))}
-              </div>
-              {visibleOccurrences.length === 0 ? (
-                <p className="events-panel__hint">No events match this filter.</p>
-              ) : (
-                <ul className="events-panel__list">
-                  {visibleOccurrences.map((occurrence) => (
-                    <OccurrenceCard
-                      key={`${occurrence.rule_id}-${occurrence.matched_at}-${JSON.stringify(occurrence.identifiers)}`}
-                      occurrence={occurrence}
-                    />
-                  ))}
-                </ul>
+              </ul>
+              {occurrencesTotal > OCCURRENCES_PAGE_SIZE && (
+                <div className="events-panel__pagination">
+                  <button
+                    type="button"
+                    className="events-panel__page-button"
+                    disabled={occurrencesOffset === 0}
+                    onClick={() => loadOccurrencesPage(Math.max(0, occurrencesOffset - OCCURRENCES_PAGE_SIZE))}
+                  >
+                    Prev
+                  </button>
+                  <span className="events-panel__page-status">
+                    {pageStart}–{pageEnd} of {occurrencesTotal}
+                  </span>
+                  <button
+                    type="button"
+                    className="events-panel__page-button"
+                    disabled={pageEnd >= occurrencesTotal}
+                    onClick={() => loadOccurrencesPage(occurrencesOffset + OCCURRENCES_PAGE_SIZE)}
+                  >
+                    Next
+                  </button>
+                </div>
               )}
             </>
           )}

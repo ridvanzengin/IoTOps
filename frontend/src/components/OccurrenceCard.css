@@ -1,25 +1,16 @@
 .occurrence-card {
   border: 1px solid var(--border);
-  border-left: 3px solid var(--border);
+  /* --rule-color is set inline per card (hashColor(rule_id)) -- the same
+     function/palette EventsPanel's rule filter chips use, so a card and
+     its chip are visibly the same color. Severity moved to the dot in the
+     header (see occurrence-card__severity-dot below); the border used to
+     be severity-colored, but a card can only have one accent color and
+     "which rule is this" is the more useful at-a-glance signal once
+     there's a filter chip per rule to match it against. */
+  border-left: 3px solid var(--rule-color, var(--border));
   border-radius: 6px;
   padding: 8px 10px;
   list-style: none;
-}
-
-.occurrence-card--low {
-  border-left-color: var(--severity-low);
-}
-
-.occurrence-card--medium {
-  border-left-color: var(--severity-medium);
-}
-
-.occurrence-card--high {
-  border-left-color: var(--severity-high);
-}
-
-.occurrence-card--critical {
-  border-left-color: var(--severity-critical);
 }
 
 .occurrence-card__header {

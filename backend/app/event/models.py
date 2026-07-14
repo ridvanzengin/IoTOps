@@ -166,3 +166,15 @@ class Occurrence(BaseModel):
 class ProjectUnresolvedCount(BaseModel):
     project_id: UUID
     count: int
+
+
+class OccurrencePage(BaseModel):
+    """A page of Occurrences plus the total matching the same filters (time
+    range, rule/status, search) -- both computed from one pairing pass over
+    the same underlying documents, so `total` is guaranteed consistent with
+    what paging through `items` will eventually show, not a separately-
+    computed number that can drift. See EventRepository.list_occurrences.
+    """
+
+    items: list[Occurrence]
+    total: int

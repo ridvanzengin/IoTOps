@@ -141,6 +141,63 @@ async def test_counts_by_rule_without_project_id_covers_all_projects() -> None:
     assert len(counts) == 2
 
 
+async def test_occurrence_counts_by_rule_counts_occurrences_not_raw_matches() -> None:
+    # A repeat match while one's already open is defensively dropped by
+    # _pair_occurrences (see its own docstring) -- counts_by_rule (raw
+    # match-flag documents) would count 3, but there are only 2 real
+    # Occurrences here, and that's what a rule filter chip's count has to
+    # equal for the click-through card count to match it.
+    project_id = uuid4()
+    rule_id = uuid4()
+    now = datetime.now(timezone.utc)
+    repository = await _seeded_repository(
+        _event(project_id=project_id, rule_id=rule_id, rule_name="swarm-alert", flag=EventFlag.MATCH, matched_at=now),
+        _event(
+            project_id=project_id,
+            rule_id=rule_id,
+            rule_name="swarm-alert",
+            flag=EventFlag.MATCH,
+            matched_at=now + timedelta(seconds=1),
+        ),  # stray repeat match while the first is still open -- dropped
+        _event(
+            project_id=project_id,
+            rule_id=rule_id,
+            rule_name="swarm-alert",
+            flag=EventFlag.CLEAR,
+            matched_at=now + timedelta(minutes=1),
+        ),
+        _event(
+            project_id=project_id,
+            rule_id=rule_id,
+            rule_name="swarm-alert",
+            flag=EventFlag.MATCH,
+            matched_at=now + timedelta(minutes=2),
+        ),
+    )
+
+    counts = await repository.occurrence_counts_by_rule(project_id)
+    occurrences, total = await repository.list_occurrences(project_id=project_id, rule_ids=[rule_id], limit=1000)
+
+    assert len(counts) == 1
+    assert counts[0].count == 2
+    assert counts[0].count == total
+    assert counts[0].count == len(occurrences)
+
+
+async def test_occurrence_counts_by_rule_is_scoped_to_its_project() -> None:
+    project_id = uuid4()
+    other_project = uuid4()
+    repository = await _seeded_repository(
+        _event(project_id=project_id, rule_name="swarm-alert", flag=EventFlag.MATCH),
+        _event(project_id=other_project, rule_name="humidity-alert", flag=EventFlag.MATCH),
+    )
+
+    counts = await repository.occurrence_counts_by_rule(project_id)
+
+    assert len(counts) == 1
+    assert counts[0].rule_name == "swarm-alert"
+
+
 async def test_list_occurrences_pairs_match_with_its_clear() -> None:
     rule_id = uuid4()
     now = datetime.now(timezone.utc)
@@ -154,9 +211,10 @@ async def test_list_occurrences_pairs_match_with_its_clear() -> None:
     )
     repository = await _seeded_repository(match, clear)
 
-    occurrences = await repository.list_occurrences()
+    occurrences, total = await repository.list_occurrences()
 
     assert len(occurrences) == 1
+    assert total == 1
     occurrence = occurrences[0]
     assert occurrence.status == OccurrenceStatus.RESOLVED
     assert occurrence.matched_at == match.matched_at
@@ -168,7 +226,7 @@ async def test_list_occurrences_leaves_trailing_match_active() -> None:
     match = _event(identifier_keys=["hive_id"], tags={"hive_id": "hive-1"})
     repository = await _seeded_repository(match)
 
-    occurrences = await repository.list_occurrences()
+    occurrences, _total = await repository.list_occurrences()
 
     assert len(occurrences) == 1
     assert occurrences[0].status == OccurrenceStatus.ACTIVE
@@ -194,10 +252,62 @@ async def test_list_occurrences_repeat_fire_produces_two_rows() -> None:
     ]
     repository = await _seeded_repository(*events)
 
-    occurrences = await repository.list_occurrences()
+    occurrences, _total = await repository.list_occurrences()
 
     assert len(occurrences) == 2
     assert {o.status for o in occurrences} == {OccurrenceStatus.RESOLVED, OccurrenceStatus.ACTIVE}
+
+
+async def test_list_occurrences_status_filter_matches_unresolved_counts() -> None:
+    # The EventsPanel "Active" filter and the ActivityBar badge must agree
+    # on the same project: both ultimately pair the same documents, so a
+    # status=active-filtered list_occurrences() and
+    # unresolved_counts_by_project()'s count for that project should never
+    # diverge -- this is the fix for the badge/list mismatch bug.
+    rule_id = uuid4()
+    project_id = uuid4()
+    now = datetime.now(timezone.utc)
+    events = [
+        _event(project_id=project_id, rule_id=rule_id, identifier_keys=["hive_id"], tags={"hive_id": "hive-1"}, matched_at=now),
+        _event(
+            project_id=project_id,
+            rule_id=rule_id,
+            identifier_keys=["hive_id"],
+            tags={"hive_id": "hive-1"},
+            flag=EventFlag.CLEAR,
+            matched_at=now + timedelta(minutes=1),
+        ),
+        _event(project_id=project_id, rule_id=rule_id, identifier_keys=["hive_id"], tags={"hive_id": "hive-2"}, matched_at=now),
+        _event(project_id=project_id, rule_id=rule_id, identifier_keys=["hive_id"], tags={"hive_id": "hive-3"}, matched_at=now),
+    ]
+    repository = await _seeded_repository(*events)
+
+    active, active_total = await repository.list_occurrences(project_id=project_id, status=OccurrenceStatus.ACTIVE)
+    resolved, resolved_total = await repository.list_occurrences(
+        project_id=project_id, status=OccurrenceStatus.RESOLVED
+    )
+    unresolved_counts = await repository.unresolved_counts_by_project()
+
+    assert len(active) == 2
+    assert active_total == 2
+    assert all(o.status == OccurrenceStatus.ACTIVE for o in active)
+    assert len(resolved) == 1
+    assert resolved_total == 1
+    assert resolved[0].status == OccurrenceStatus.RESOLVED
+    assert next(c.count for c in unresolved_counts if c.project_id == project_id) == active_total
+
+
+async def test_list_occurrences_rule_ids_filter_scopes_the_query() -> None:
+    other_rule_events_dont_leak = _event(rule_id=uuid4())
+    rule_id = uuid4()
+    match = _event(rule_id=rule_id)
+    repository = await _seeded_repository(other_rule_events_dont_leak, match)
+
+    occurrences, total = await repository.list_occurrences(rule_ids=[rule_id])
+
+    assert len(occurrences) == 1
+    assert total == 1
+    assert occurrences[0].rule_id == rule_id
 
 
 async def test_list_occurrences_groups_by_identifier_values_not_just_rule() -> None:
@@ -206,7 +316,7 @@ async def test_list_occurrences_groups_by_identifier_values_not_just_rule() -> N
     hive2 = _event(rule_id=rule_id, identifier_keys=["hive_id"], tags={"hive_id": "hive-2"})
     repository = await _seeded_repository(hive1, hive2)
 
-    occurrences = await repository.list_occurrences()
+    occurrences, _total = await repository.list_occurrences()
 
     assert len(occurrences) == 2
     assert {o.identifiers["hive_id"] for o in occurrences} == {"hive-1", "hive-2"}
@@ -223,7 +333,7 @@ async def test_list_occurrences_with_no_identifier_keys_groups_across_whole_rule
     clear = _event(rule_id=rule_id, flag=EventFlag.CLEAR, matched_at=now + timedelta(minutes=1))
     repository = await _seeded_repository(first_match, clear)
 
-    occurrences = await repository.list_occurrences()
+    occurrences, _total = await repository.list_occurrences()
 
     assert len(occurrences) == 1
     assert occurrences[0].status == OccurrenceStatus.RESOLVED
@@ -267,7 +377,7 @@ async def test_resolve_occurrence_resolves_and_stores_notes() -> None:
     assert occurrence.resolution_notes == "checked on the hive, false alarm"
     assert occurrence.resolved_at is not None
 
-    occurrences = await repository.list_occurrences()
+    occurrences, _total = await repository.list_occurrences()
     assert len(occurrences) == 1
     assert occurrences[0].status == OccurrenceStatus.RESOLVED
 
