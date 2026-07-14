@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -204,6 +205,68 @@ async def test_run_panel_query_substitutes_dashboard_variables() -> None:
     )
 
     assert result.rows == [{"temperature": 21.5}]
+
+
+async def test_run_panel_query_narrows_time_bounds_to_actual_returned_rows() -> None:
+    # Whether narrower rows come from execute_readonly's newest-N-rows
+    # truncation (a busy table, a low limit) or just genuinely sparse
+    # data, the chart only ever renders what's actually in `rows` --
+    # narrowing time_from/time_to to match keeps the events overlay
+    # (which reuses this window) from fetching/plotting events from a
+    # span nothing is actually charted in, which would otherwise stretch
+    # the chart's auto-scaled x-axis into a mostly-empty gap around them.
+    now = datetime.now(timezone.utc)
+    rows = [
+        {"time": now - timedelta(minutes=40), "temperature": 20.5},
+        {"time": now - timedelta(minutes=10), "temperature": 21.0},
+    ]
+    service = _service(query_results={"SELECT * FROM device_metrics": rows})
+    dashboard = await service.create(_valid_input())
+    with_panel = await service.add_panel(
+        dashboard.id,
+        _panel_input(query=Query(sql="SELECT * FROM device_metrics", limit=1000)),
+    )
+
+    result = await service.run_panel_query(with_panel.panels[0])
+
+    assert result.time_from == now - timedelta(minutes=40)
+    assert result.time_to == now - timedelta(minutes=10)
+
+
+async def test_run_panel_query_leaves_nominal_time_bounds_when_no_rows() -> None:
+    # No rows means no actual telemetry span to narrow against -- falls
+    # back to the full requested window rather than an empty/undefined one.
+    service = _service(query_results={"SELECT * FROM device_metrics": []})
+    dashboard = await service.create(_valid_input())
+    with_panel = await service.add_panel(
+        dashboard.id,
+        _panel_input(query=Query(sql="SELECT * FROM device_metrics")),
+    )
+
+    before = datetime.now(timezone.utc)
+    result = await service.run_panel_query(with_panel.panels[0])
+
+    assert result.time_to >= before
+    assert before - result.time_from <= timedelta(hours=1, seconds=5)
+    assert before - result.time_from >= timedelta(minutes=59)
+
+
+async def test_run_panel_query_ignores_rows_without_a_time_column() -> None:
+    rows = [{"temperature": 20.5}, {"temperature": 21.0}]
+    service = _service(query_results={"SELECT temperature FROM device_metrics": rows})
+    dashboard = await service.create(_valid_input())
+    with_panel = await service.add_panel(
+        dashboard.id,
+        _panel_input(query=Query(sql="SELECT temperature FROM device_metrics")),
+    )
+
+    before = datetime.now(timezone.utc)
+    result = await service.run_panel_query(with_panel.panels[0])
+
+    # Same nominal-window fallback as the no-rows case -- nothing to
+    # narrow against without a `time` column to read.
+    assert result.time_to >= before
+    assert before - result.time_from >= timedelta(minutes=59)
 
 
 async def test_run_panel_query_by_id_resolves_panel_and_dashboard_variables() -> None:

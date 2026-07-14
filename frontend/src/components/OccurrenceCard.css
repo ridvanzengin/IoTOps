@@ -29,6 +29,22 @@
   margin-bottom: 4px;
 }
 
+.occurrence-card__header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.occurrence-card__source-icon {
+  display: inline-flex;
+  color: var(--text);
+}
+
+.occurrence-card__source-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
 .occurrence-card__status {
   display: inline-flex;
   align-items: center;

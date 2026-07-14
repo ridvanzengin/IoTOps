@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { AutomaterIcon, CollectorIcon, HomeIcon, ProjectIcon, VisualizerIcon } from "./icons";
+import { AutomaterIcon, CollectorIcon, HomeIcon, ProjectIcon, ScheduleIcon, VisualizerIcon } from "./icons";
 import type { ComponentType } from "react";
 import type { SVGProps } from "react";
 import "./Sidebar.css";
@@ -17,6 +17,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Projects", to: "/projects", icon: ProjectIcon },
   { label: "Collectors", to: "/collectors", icon: CollectorIcon },
   { label: "Automater", to: "/automaters", icon: AutomaterIcon },
+  { label: "Query Rules", to: "/query-rules", icon: ScheduleIcon },
   { label: "Dashboards", to: "/dashboards", icon: VisualizerIcon },
 ];
 

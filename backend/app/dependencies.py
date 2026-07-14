@@ -20,6 +20,8 @@ from app.event.service import EventService
 from app.plugin.registry import PluginRegistry, build_default_registry
 from app.project.repository import ProjectRepository
 from app.project.service import ProjectService
+from app.query_rule.repository import QueryRuleRepository
+from app.query_rule.service import QueryRuleService
 from app.telemetry.repository import TelemetryRepository
 from app.telemetry.service import TelemetryService
 
@@ -88,6 +90,15 @@ async def get_telemetry_service() -> TelemetryService:
 
 def get_project_service() -> ProjectService:
     return ProjectService(repository=ProjectRepository(get_database()))
+
+
+async def get_query_rule_service() -> QueryRuleService:
+    pool = await get_timescale_pool()
+    return QueryRuleService(
+        repository=QueryRuleRepository(get_database()),
+        telemetry_repository=TelemetryRepository(pool),
+        event_repository=EventRepository(get_database(), pubsub_redis_client=get_async_redis_client()),
+    )
 
 
 async def get_dashboard_service() -> DashboardService:

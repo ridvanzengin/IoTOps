@@ -62,7 +62,9 @@ def _occurrence_from(match: Event, resolved_by: Event | None) -> Occurrence:
         status=OccurrenceStatus.RESOLVED if resolved_by is not None else OccurrenceStatus.ACTIVE,
         matched_at=match.matched_at,
         resolved_at=resolved_by.matched_at if resolved_by is not None else None,
+        source_type=match.source_type,
         automater_id=match.automater_id,
+        query_rule_id=match.query_rule_id,
         project_id=match.project_id,
         tags=match.tags,
         fields=match.fields,
@@ -198,10 +200,17 @@ class EventRepository:
 
     # Also defined before `list` below, same reasoning as counts_by_rule
     # above.
-    async def list_occurrences(self, project_id: UUID | None = None, limit: int = 50) -> list[Occurrence]:
+    async def list_occurrences(
+        self,
+        project_id: UUID | None = None,
+        limit: int = 50,
+        rule_ids: list[UUID] | None = None,
+    ) -> list[Occurrence]:
         query: dict[str, Any] = {}
         if project_id is not None:
             query["project_id"] = str(project_id)
+        if rule_ids:
+            query["rule_id"] = {"$in": [str(rule_id) for rule_id in rule_ids]}
         documents = await self._collection.find(query).sort("matched_at", 1).to_list(length=None)
         occurrences = _pair_occurrences([_from_document(document) for document in documents])
         occurrences.sort(key=lambda o: o.resolved_at or o.matched_at, reverse=True)
@@ -249,6 +258,22 @@ class EventRepository:
         )
         return [_from_document(document) for document in documents]
 
+    async def create(self, event: Event) -> Event:
+        """Writes a new match/clear Event and publishes it over the same
+        `events:{project_id}` SSE channel resolve_occurrence/log_rule_match
+        use, so an open sidebar reconciles it live with no new frontend
+        logic. Used directly by writers that can share this repository's
+        async motor client -- e.g. app/query_rule/service.py's scheduled
+        evaluator -- unlike the Go-plugin path, which runs through a
+        separate sync Celery worker that can't share it (see
+        app/automater/tasks.py's own comment on why).
+        """
+        await self._collection.insert_one(to_document(event))
+        if self._pubsub_redis_client is not None:
+            channel = f"events:{event.project_id}"
+            await self._pubsub_redis_client.publish(channel, event.model_dump_json())
+        return event
+
     async def resolve_occurrence(self, match_event_id: UUID, notes: str) -> Occurrence:
         """Manually resolves a still-open occurrence from a manual-resolve
         Rule (see iotops-workspace/ROADMAP.md's "Event resolution mode"
@@ -282,7 +307,9 @@ class EventRepository:
 
         resolved_event = Event(
             project_id=match.project_id,
+            source_type=match.source_type,
             automater_id=match.automater_id,
+            query_rule_id=match.query_rule_id,
             rule_id=match.rule_id,
             rule_name=match.rule_name,
             table=match.table,
@@ -298,16 +325,16 @@ class EventRepository:
             fields=match.fields,
             matched_at=datetime.now(timezone.utc),
         )
-        await self._collection.insert_one(to_document(resolved_event))
-
-        if self._firing_redis_client is not None:
-            # Best-effort: see _firing_key's own comment on why a miss here
-            # (non-string identifier formatting divergence) is a safe
-            # degradation, not an error worth failing the resolve over.
+        if self._firing_redis_client is not None and match.source_type == "automater":
+            # Firing keys only ever exist for Go-plugin-produced matches --
+            # a query_rule-sourced occurrence has no Redis dedup key to
+            # delete (its re-arm semantics come from the next scheduled
+            # evaluation cycle instead, see app/query_rule/service.py).
+            # Best-effort otherwise: see _firing_key's own comment on why a
+            # miss here (non-string identifier formatting divergence) is a
+            # safe degradation, not an error worth failing the resolve over.
             await self._firing_redis_client.delete(_firing_key(match))
 
-        if self._pubsub_redis_client is not None:
-            channel = f"events:{resolved_event.project_id}"
-            await self._pubsub_redis_client.publish(channel, resolved_event.model_dump_json())
+        await self.create(resolved_event)
 
         return _occurrence_from(match, resolved_by=resolved_event)

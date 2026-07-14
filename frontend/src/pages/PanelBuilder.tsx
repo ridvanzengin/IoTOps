@@ -4,6 +4,7 @@ import { generateSql } from "../api/ai";
 import { addPanel, getDashboard, previewDashboardQuery, updatePanel } from "../api/dashboard";
 import { ApiError } from "../api/client";
 import { ChartPreview } from "../components/ChartPreview";
+import { NlSqlBuilder } from "../components/NlSqlBuilder";
 import { defaultChartForType, PanelEditor } from "../components/PanelEditor";
 import { SchemaBrowser } from "../components/SchemaBrowser";
 import { DEFAULT_TIME_RANGE } from "../constants/timeRanges";
@@ -71,10 +72,8 @@ export function PanelBuilder() {
   const [timeRange, setTimeRange] = useState(DEFAULT_TIME_RANGE);
   const [variables, setVariables] = useState<Variable[]>([]);
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
-  const [nlPrompt, setNlPrompt] = useState("");
   const [sql, setSql] = useState("SELECT * FROM ");
   const [result, setResult] = useState<TelemetrySqlQueryResult | null>(null);
-  const [generating, setGenerating] = useState(false);
   const [running, setRunning] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -132,21 +131,12 @@ export function PanelBuilder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashboardId, panelId]);
 
-  async function handleGenerateSql() {
-    if (!nlPrompt.trim()) return;
-    setGenerating(true);
-    setError(null);
-    try {
-      const { sql: generated } = await generateSql(
-        nlPrompt,
-        variables.map((v) => ({ name: v.name, label: v.label })),
-      );
-      setSql(generated);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to generate SQL.");
-    } finally {
-      setGenerating(false);
-    }
+  async function generatePanelSql(prompt: string): Promise<string> {
+    const { sql: generated } = await generateSql(
+      prompt,
+      variables.map((v) => ({ name: v.name, label: v.label })),
+    );
+    return generated;
   }
 
   async function runQuery(query: string, timeRangeOverride?: string, variableValuesOverride?: Record<string, string>) {
@@ -216,37 +206,13 @@ export function PanelBuilder() {
 
           <div className="wizard-panel">
             <h2 className="wizard-panel__title">Query</h2>
-            <p className="wizard-panel__hint">
-              No manual query builder here &mdash; describe the data you want and generate SQL, or
-              hand-edit it directly.
-            </p>
-            <label className="field" style={{ maxWidth: "none" }}>
-              <span>Ask in plain language</span>
-              <input
-                value={nlPrompt}
-                onChange={(event) => setNlPrompt(event.target.value)}
-                placeholder="e.g. average temperature per hour for the last day"
-              />
-            </label>
-            <button
-              type="button"
-              className="button"
-              onClick={handleGenerateSql}
-              disabled={generating || !nlPrompt.trim()}
-            >
-              {generating ? "Generating..." : "Generate SQL"}
-            </button>
-
-            <label className="field" style={{ maxWidth: "none", marginTop: 16 }}>
-              <span>SQL</span>
-              <textarea
-                ref={sqlTextareaRef}
-                className="panel-builder__sql"
-                value={sql}
-                onChange={(event) => setSql(event.target.value)}
-                rows={5}
-              />
-            </label>
+            <NlSqlBuilder
+              sql={sql}
+              onSqlChange={setSql}
+              onGenerate={generatePanelSql}
+              textareaRef={sqlTextareaRef}
+              hint="No manual query builder here — describe the data you want and generate SQL, or hand-edit it directly."
+            />
             <button
               type="button"
               className="button button--primary"

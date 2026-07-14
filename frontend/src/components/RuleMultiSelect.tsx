@@ -4,7 +4,11 @@ import "./RuleMultiSelect.css";
 export interface RuleOption {
   id: string;
   name: string;
-  automaterName: string;
+  // Which Automater a real-time Rule belongs to, or "Scheduled" for a
+  // Query Rule -- generic label, not automater-specific, since this list
+  // spans both rule kinds. See iotops-workspace/ROADMAP.md's "Query
+  // Rules" note.
+  sourceLabel: string;
 }
 
 interface RuleMultiSelectProps {
@@ -40,15 +44,18 @@ export function RuleMultiSelect({ rules, selectedIds, onChange, compact = false 
     onChange(selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id]);
   }
 
-  const selectedRule = selectedIds.length === 1 ? rules.find((r) => r.id === selectedIds[0]) : null;
-  const label =
-    selectedIds.length === 0
-      ? compact
-        ? "Events"
-        : "None"
-      : selectedIds.length === 1
-        ? (selectedRule?.name ?? "1 selected")
-        : `${selectedIds.length} selected`;
+  // Counts (and names, for the tooltip) only ids that resolve to a rule
+  // actually in `rules` today -- `selectedIds` is the panel's raw stored
+  // event_rule_ids, which can outlive the Rule/Query Rule it once pointed
+  // to (deleting one doesn't clean up any Panel referencing it). Counting
+  // the raw array length would show e.g. "3 selected" while only 2
+  // checkboxes are actually checkable/checked. A fixed "Events (N)" label
+  // regardless of count, rather than switching to a rule's own name at
+  // count 1, so the trigger doesn't reflow/change shape as the selection changes.
+  const resolvedNames = selectedIds
+    .map((id) => rules.find((r) => r.id === id)?.name)
+    .filter((name): name is string => Boolean(name));
+  const label = resolvedNames.length > 0 ? `Events (${resolvedNames.length})` : "Events";
 
   return (
     <div className={`rule-multiselect ${compact ? "rule-multiselect--compact" : ""}`} ref={containerRef}>
@@ -57,7 +64,7 @@ export function RuleMultiSelect({ rules, selectedIds, onChange, compact = false 
         className="rule-multiselect__trigger"
         onClick={() => setOpen((value) => !value)}
         disabled={rules.length === 0}
-        title={selectedIds.length > 0 ? `Overlaying: ${selectedIds.map((id) => rules.find((r) => r.id === id)?.name ?? id).join(", ")}` : "Overlay events"}
+        title={resolvedNames.length > 0 ? `Overlaying: ${resolvedNames.join(", ")}` : "Overlay events"}
       >
         <span className="rule-multiselect__trigger-label">{label}</span>
         <span className="rule-multiselect__trigger-caret">▾</span>
@@ -74,7 +81,7 @@ export function RuleMultiSelect({ rules, selectedIds, onChange, compact = false 
                     <input type="checkbox" checked={selectedIds.includes(rule.id)} onChange={() => toggle(rule.id)} />
                     <span className="rule-multiselect__option-label">
                       {rule.name}
-                      <span className="rule-multiselect__automater"> · {rule.automaterName}</span>
+                      <span className="rule-multiselect__automater"> · {rule.sourceLabel}</span>
                     </span>
                   </label>
                 </li>

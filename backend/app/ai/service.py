@@ -3,8 +3,8 @@ import re
 import httpx
 
 from app.ai.models import AiVariableHint
-from app.ai.prompts import build_sql_prompt
-from app.shared.exceptions import AiGenerationError
+from app.ai.prompts import build_query_rule_sql_prompt, build_sql_prompt
+from app.shared.exceptions import AiGenerationError, InvalidQueryError
 from app.shared.validators import validate_select_only_sql
 from app.telemetry.service import TelemetryService
 
@@ -33,7 +33,16 @@ class AiService:
     ) -> str:
         schema = await self._telemetry_service.get_schema()
         prompt = build_sql_prompt(nl_query, schema, variables)
+        return await self._generate_sql_from_prompt(prompt)
 
+    async def generate_query_rule_sql(
+        self, nl_query: str, identifiers: list[str] | None = None
+    ) -> str:
+        schema = await self._telemetry_service.get_schema()
+        prompt = build_query_rule_sql_prompt(nl_query, schema, identifiers)
+        return await self._generate_sql_from_prompt(prompt)
+
+    async def _generate_sql_from_prompt(self, prompt: str) -> str:
         try:
             response = await self._http_client.post(
                 f"{self._base_url}/api/generate",
@@ -45,5 +54,17 @@ class AiService:
 
         raw = response.json().get("response", "")
         sql = _strip_markdown_fences(raw)
-        validate_select_only_sql(sql)
+        try:
+            validate_select_only_sql(sql)
+        except InvalidQueryError as exc:
+            # Distinct from a user hand-writing bad SQL themselves (that's
+            # InvalidQueryError, a 400) -- this is the AI failing to return
+            # valid SQL at all (an ambiguous/underspecified request most
+            # often), a different failure the caller should be told how to
+            # fix: be more specific, not "your SQL is wrong".
+            raise AiGenerationError(
+                "The AI didn't return valid SQL for this request -- try being more specific "
+                "(e.g. naming the table, or a column/identifier that pins down what you're "
+                "asking about)."
+            ) from exc
         return sql

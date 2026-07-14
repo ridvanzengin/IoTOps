@@ -2,13 +2,21 @@ import type { ResolveMode, RuleSeverity } from "./automater";
 
 export type EventFlag = "match" | "clear";
 
+// "automater": produced by the Go rule processor via the Celery worker.
+// "query_rule": produced by a scheduled SQL evaluation that never touches
+// Telegraf/Collector/Automater at all -- see types/queryRule.ts.
+export type EventSourceType = "automater" | "query_rule";
+
 export interface Event {
   id: string;
   project_id: string;
-  automater_id: string;
+  source_type: EventSourceType;
+  // Unset for a query_rule-sourced event -- neither concept applies to it.
+  automater_id: string | null;
+  query_rule_id: string | null;
   rule_id: string;
   rule_name: string;
-  table: string;
+  table: string | null;
   category: string;
   severity: RuleSeverity;
   event_type: string;
@@ -54,7 +62,9 @@ export interface Occurrence {
   status: OccurrenceStatus;
   matched_at: string;
   resolved_at: string | null;
-  automater_id: string;
+  source_type: EventSourceType;
+  automater_id: string | null;
+  query_rule_id: string | null;
   project_id: string;
   tags: Record<string, string>;
   fields: Record<string, unknown>;

@@ -5,7 +5,7 @@ from app.telemetry.models import TelemetryColumn, TelemetryTableSchema
 
 
 class _Connection(Protocol):
-    async def fetch(self, query: str, *args: Any) -> list[Any]: ...
+    async def fetch(self, query: str, *args: Any, timeout: float | None = None) -> list[Any]: ...
 
 
 class _Pool(Protocol):
@@ -53,6 +53,18 @@ class TelemetryRepository:
             TelemetryTableSchema(table=table, columns=columns)
             for table, columns in schemas.items()
         ]
+
+    async def execute_match_query(self, sql: str, timeout_seconds: float) -> list[dict[str, Any]]:
+        # Unlike execute_readonly below (Panel-chart-specific: wraps the
+        # query to keep only the newest N rows), a Query Rule's full result
+        # set *is* the current match set -- every currently-matching row,
+        # not a windowed tail -- so no OFFSET/LIMIT wrapping here. Runs
+        # with a native asyncpg timeout (unused anywhere else in this
+        # repository) since this executes unattended, on a schedule, with
+        # nobody watching it hang. See app/query_rule/service.py.
+        async with self._pool.acquire() as conn:
+            records = await conn.fetch(sql, timeout=timeout_seconds)
+        return [dict(record) for record in records]
 
     async def execute_readonly(self, sql: str, limit: int) -> list[dict[str, Any]]:
         # `sql` (built by DashboardService._substitute_and_run) is already
