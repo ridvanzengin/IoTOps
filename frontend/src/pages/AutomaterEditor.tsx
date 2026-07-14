@@ -338,7 +338,7 @@ export function AutomaterEditor() {
   return (
     <main className="collector-page">
       <div className="collector-page__header">
-        <h1>New Rule</h1>
+        <h1>New Real-time Rule</h1>
       </div>
       <p style={{ margin: "-16px 0 24px", color: "var(--text)" }}>
         Pick the rule's metadata on the left, then build its condition(s) from the schema on the right.
@@ -484,7 +484,7 @@ export function AutomaterEditor() {
                 <input value={eventType} onChange={(event) => setEventType(event.target.value)} />
               </label>
               <label className="field">
-                <span>Dedup Identifiers</span>
+                <span>Identifiers</span>
                 <input
                   key={identifiers.join(",")}
                   defaultValue={identifiers.join(", ")}

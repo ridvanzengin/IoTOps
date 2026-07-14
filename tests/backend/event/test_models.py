@@ -30,6 +30,26 @@ def test_event_defaults() -> None:
     assert event.fields == {}
     assert event.identifier_keys == []
     assert event.created_at is not None
+    assert event.source_type == "automater"
+    assert event.query_rule_id is None
+
+
+def test_event_accepts_query_rule_source_with_no_automater_id() -> None:
+    # A scheduled Query Rule never touches Telegraf/Collector/Automater at
+    # all -- automater_id/table have nothing meaningful to hold. See
+    # iotops-workspace/ROADMAP.md's "Query Rules" note.
+    query_rule_id = uuid4()
+    event = _event(
+        source_type="query_rule",
+        automater_id=None,
+        query_rule_id=query_rule_id,
+        table=None,
+    )
+
+    assert event.source_type == "query_rule"
+    assert event.automater_id is None
+    assert event.query_rule_id == query_rule_id
+    assert event.table is None
 
 
 def test_event_accepts_identifier_keys() -> None:

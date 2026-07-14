@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useEvents } from "../context/EventsContext";
 import { resolveOccurrence } from "../api/event";
 import { ApiError } from "../api/client";
+import { AutomaterIcon, ScheduleIcon } from "./icons";
 import type { Occurrence } from "../types/event";
 import "./OccurrenceCard.css";
 
@@ -101,8 +102,16 @@ export function OccurrenceCard({ occurrence }: { occurrence: Occurrence }) {
   return (
     <li className={`occurrence-card occurrence-card--${occurrence.severity}`}>
       <div className="occurrence-card__header">
-        <span className={`occurrence-card__status occurrence-card__status--${occurrence.status}`}>
-          {occurrence.status === "active" ? "Active" : "Resolved"}
+        <span className="occurrence-card__header-left">
+          <span className={`occurrence-card__status occurrence-card__status--${occurrence.status}`}>
+            {occurrence.status === "active" ? "Active" : "Resolved"}
+          </span>
+          <span
+            className="occurrence-card__source-icon"
+            title={occurrence.source_type === "query_rule" ? "Scheduled rule" : "Real-time rule"}
+          >
+            {occurrence.source_type === "query_rule" ? <ScheduleIcon /> : <AutomaterIcon />}
+          </span>
         </span>
         <span className="occurrence-card__time">{relativeTime(occurrence.matched_at)}</span>
       </div>

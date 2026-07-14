@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -15,6 +15,17 @@ def _utcnow() -> datetime:
 class EventFlag(str, Enum):
     MATCH = "match"
     CLEAR = "clear"
+
+
+# "automater" (default): produced by the Go rule processor via the Celery
+# worker, as this whole module originally assumed. "query_rule": produced
+# by a scheduled SQL evaluation (app/query_rule/service.py) that never
+# touches Telegraf/Collector/Automater at all. See iotops-workspace/
+# ROADMAP.md's "Query Rules" note -- automater_id stays around for
+# attribution/display on automater-sourced events but is never used for
+# grouping/pairing (EventRepository._pair_occurrences keys purely on
+# rule_id + identifier tag values), so it's safe to leave unset here.
+EventSourceType = Literal["automater", "query_rule"]
 
 
 class Event(BaseModel):
@@ -40,11 +51,17 @@ class Event(BaseModel):
     # config generated at deploy time does, so every matched metric's tags
     # carry them back here.
     project_id: UUID
-    automater_id: UUID
+    source_type: EventSourceType = "automater"
+    automater_id: UUID | None = None
+    query_rule_id: UUID | None = None
     rule_id: UUID
     rule_name: str
 
-    table: str
+    # Unset for a query_rule-sourced event -- its SQL can span multiple
+    # tables, so there's no single value to put here. Never used for
+    # filtering/pairing (confirmed: only ever written, not read, by
+    # EventRepository), so leaving it unset is inert rather than lossy.
+    table: str | None = None
     category: str = ""
     severity: RuleSeverity = RuleSeverity.LOW
     event_type: str = ""
@@ -138,7 +155,9 @@ class Occurrence(BaseModel):
     # lazy-fetch endpoint for a payload-size concern that's not worth
     # optimizing at this feature's scale (same stance already taken on
     # pairing cost/retention).
-    automater_id: UUID
+    source_type: EventSourceType = "automater"
+    automater_id: UUID | None = None
+    query_rule_id: UUID | None = None
     project_id: UUID
     tags: dict[str, str]
     fields: dict[str, Any]

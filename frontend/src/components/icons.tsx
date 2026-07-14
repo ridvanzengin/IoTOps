@@ -44,6 +44,16 @@ export function AutomaterIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function ScheduleIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="13" r="8" />
+      <path d="M12 9v4l3 2" />
+      <path d="M9 2h6" />
+    </Icon>
+  );
+}
+
 export function VisualizerIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props}>

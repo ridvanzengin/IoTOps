@@ -10,6 +10,7 @@ from app.dashboard.api import router as dashboard_router
 from app.event.api import router as event_router
 from app.plugin.api import router as plugin_router
 from app.project.api import router as project_router
+from app.query_rule.api import router as query_rule_router
 from app.shared.exceptions import (
     AiGenerationError,
     DuplicateNameError,
@@ -37,6 +38,7 @@ app.include_router(dashboard_router)
 app.include_router(event_router)
 app.include_router(plugin_router)
 app.include_router(project_router)
+app.include_router(query_rule_router)
 app.include_router(telemetry_router)
 
 

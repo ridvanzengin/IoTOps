@@ -290,6 +290,28 @@ async def test_resolve_occurrence_deletes_firing_key_and_publishes() -> None:
     assert channel == f"events:{match.project_id}"
 
 
+async def test_resolve_occurrence_skips_firing_key_deletion_for_query_rule_source() -> None:
+    # A query_rule-sourced match has no Redis firing key -- only the Go
+    # plugin ever creates one. Deleting a key that was never set is
+    # harmless in itself, but attempting it signals a design mismatch, so
+    # this is guarded explicitly rather than left as a silent no-op miss.
+    match = _event(
+        source_type="query_rule",
+        automater_id=None,
+        query_rule_id=uuid4(),
+        resolve_mode=ResolveMode.MANUAL,
+        identifier_keys=["station_id"],
+        tags={"station_id": "wx-01"},
+    )
+    repository, pubsub_client, firing_client = await _seeded_repository_with_redis(match)
+
+    occurrence = await repository.resolve_occurrence(match.id, "false alarm")
+
+    assert occurrence.status == OccurrenceStatus.RESOLVED
+    firing_client.delete.assert_not_awaited()
+    pubsub_client.publish.assert_awaited_once()
+
+
 async def test_resolve_occurrence_rejects_auto_resolve_rule() -> None:
     match = _event()  # resolve_mode defaults to AUTO
     repository, _pubsub_client, _firing_client = await _seeded_repository_with_redis(match)

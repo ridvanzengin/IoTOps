@@ -3,15 +3,13 @@ from typing import Any
 
 import pymongo
 import redis
-from celery import Celery
 
+from app.celery_app import celery_app
 from app.config import settings
 from app.event.models import Event
 from app.event.repository import to_document
 
 logger = logging.getLogger(__name__)
-
-celery_app = Celery("automater", broker=settings.redis_uri)
 
 # Sync clients, deliberately separate from the rest of the app's async
 # motor/redis clients (app/database.py, app/dependencies.py) -- a Celery

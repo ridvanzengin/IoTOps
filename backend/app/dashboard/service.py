@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from app.dashboard.models import (
@@ -165,6 +166,23 @@ class DashboardService:
         # the few milliseconds between this call and the one inside
         # _substitute_and_run don't matter for a chart overlay window.
         time_from, time_to = resolve_time_range(resolved_time_range)
+
+        # TelemetryRepository.execute_readonly keeps only the newest
+        # `limit` rows when a query's own window has more than that many
+        # (see its own comment) -- when that trimming happens, the chart's
+        # actual telemetry no longer starts at the nominally-resolved
+        # time_from. Narrowing to what was actually returned keeps the
+        # events overlay (which reuses this window) honest about only
+        # showing events within what's actually charted, instead of also
+        # fetching/plotting events from the trimmed-away portion and
+        # stretching the chart's auto-scaled x-axis into a mostly-empty
+        # gap. A no-op whenever the row count was already under the limit
+        # (the common case), or the query doesn't select a `time` column.
+        row_timestamps = [row["time"] for row in result.rows if isinstance(row.get("time"), datetime)]
+        if row_timestamps:
+            time_from = max(time_from, min(row_timestamps))
+            time_to = min(time_to, max(row_timestamps))
+
         return PanelQueryResult(
             columns=result.columns, rows=result.rows, time_from=time_from, time_to=time_to
         )

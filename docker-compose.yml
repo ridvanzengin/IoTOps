@@ -101,9 +101,14 @@ services:
     networks:
       - iotops
 
-  # Consumes the Celery tasks custom-telegraf's outputs/celery plugin
-  # enqueues on a matched rule -- see app/automater/tasks.py. Reuses the
-  # backend image (same Python env/dependencies) with the command
+  # Executes every Celery task registered on app.celery_app: the tasks
+  # custom-telegraf's outputs/celery plugin enqueues on a matched
+  # real-time rule (app/automater/tasks.py), and the periodic Query Rule
+  # evaluation tick celery-beat below enqueues (app/query_rule/tasks.py).
+  # One shared worker for both -- Celery's own default concurrency
+  # already means one slow task doesn't fully block others; revisit only
+  # if that's actually not enough in practice, not preemptively. Reuses
+  # the backend image (same Python env/dependencies) with the command
   # overridden to run a Celery worker instead of the API server.
   celery-worker:
     build:
@@ -111,7 +116,26 @@ services:
       dockerfile: docker/backend/Dockerfile
     env_file:
       - .env
-    command: ["celery", "-A", "app.automater.tasks", "worker", "--loglevel=info"]
+    command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info"]
+    depends_on:
+      - redis
+    networks:
+      - iotops
+
+  # Enqueues app.query_rule.tasks.evaluate_due_query_rules onto the same
+  # broker every 30s (app.celery_app.conf.beat_schedule) -- Beat only
+  # schedules/enqueues, it never executes a task body itself, so it
+  # doesn't need Mongo/TimescaleDB connectivity, just the broker. The
+  # actual evaluation runs on celery-worker above. See app/query_rule/
+  # tasks.py's own comment on why one fixed tick, not a dynamic
+  # per-QueryRule schedule.
+  celery-beat:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    env_file:
+      - .env
+    command: ["celery", "-A", "app.celery_app", "beat", "--loglevel=info"]
     depends_on:
       - redis
     networks:

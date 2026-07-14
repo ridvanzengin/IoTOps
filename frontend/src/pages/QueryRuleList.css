@@ -1,0 +1,24 @@
+.query-rule-list__identifiers {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.query-rule-list__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.query-rule-list__status--active {
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.query-rule-list__status--inactive {
+  color: var(--text);
+  background: var(--bg-subtle);
+}

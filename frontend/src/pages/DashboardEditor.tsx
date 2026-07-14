@@ -7,6 +7,7 @@ import "react-resizable/css/styles.css";
 import { ApiError } from "../api/client";
 import { getDashboard, removePanel, runPanelQuery, saveLayout, updatePanel } from "../api/dashboard";
 import { listAutomaters } from "../api/automater";
+import { listQueryRules } from "../api/queryRule";
 import { listEventsForOverlay } from "../api/event";
 import { ChartPreview } from "../components/ChartPreview";
 import { MoreIcon, PlusIcon } from "../components/icons";
@@ -18,6 +19,7 @@ import { DEFAULT_REFRESH_INTERVAL, REFRESH_INTERVALS } from "../constants/refres
 import { DEFAULT_TIME_RANGE, TIME_RANGES } from "../constants/timeRanges";
 import { filterEventsByVariables, resolveVariablesFrom } from "../utils/variables";
 import type { Automater } from "../types/automater";
+import type { QueryRule } from "../types/queryRule";
 import type { Dashboard, Panel, PanelInputPayload, Variable } from "../types/dashboard";
 import type { Event } from "../types/event";
 import "./Dashboard.css";
@@ -45,25 +47,38 @@ export function DashboardEditor() {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [titleMenuOpen, setTitleMenuOpen] = useState(false);
   const [automaters, setAutomaters] = useState<Automater[]>([]);
+  const [queryRules, setQueryRules] = useState<QueryRule[]>([]);
   const { projects, dashboardsByProject, setDefaultDashboard, registerDashboardVariables, clearDashboardVariables } =
     useEvents();
 
-  // Every Rule in this dashboard's project, flattened across that
-  // project's Automaters (Rule has no automater/project backreference of
-  // its own -- mirrors AutomaterEditor.tsx's existing project-scoping
-  // pattern), for each panel header's Overlay Events control.
+  // Every Rule in this dashboard's project -- both real-time Rules
+  // (flattened across that project's Automaters; Rule has no automater/
+  // project backreference of its own, mirrors AutomaterEditor.tsx's
+  // existing project-scoping pattern) and Query Rules (a separate
+  // top-level entity, not nested in an Automater) -- for each panel
+  // header's Overlay Events control. `Event.rule_id` is just the
+  // producing rule's own id regardless of source (confirmed:
+  // EventRepository's pairing/filtering never distinguishes them), so
+  // both kinds work as event_rule_ids entries with no backend changes.
   const projectRules: RuleOption[] = useMemo(() => {
     if (!dashboard) return [];
-    return automaters
+    const realTimeRules = automaters
       .filter((automater) => automater.project_id === dashboard.project_id)
       .flatMap((automater) =>
-        automater.rules.map((rule) => ({ id: rule.id, name: rule.name, automaterName: automater.name })),
+        automater.rules.map((rule) => ({ id: rule.id, name: rule.name, sourceLabel: automater.name })),
       );
-  }, [automaters, dashboard]);
+    const scheduledRules = queryRules
+      .filter((queryRule) => queryRule.project_id === dashboard.project_id)
+      .map((queryRule) => ({ id: queryRule.id, name: queryRule.name, sourceLabel: "Scheduled" }));
+    return [...realTimeRules, ...scheduledRules];
+  }, [automaters, queryRules, dashboard]);
 
   useEffect(() => {
     listAutomaters()
       .then(setAutomaters)
+      .catch(() => undefined);
+    listQueryRules()
+      .then(setQueryRules)
       .catch(() => undefined);
   }, []);
 
