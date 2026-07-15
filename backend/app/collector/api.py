@@ -4,12 +4,14 @@ from fastapi import APIRouter, Depends
 
 from app.collector.models import Collector, CollectorInput
 from app.collector.service import CollectorService
-from app.dependencies import get_collector_service
+from app.dependencies import block_in_demo_mode, get_collector_service
 
 router = APIRouter(prefix="/api/collector", tags=["collector"])
 
 
-@router.post("", response_model=Collector, status_code=201)
+@router.post(
+    "", response_model=Collector, status_code=201, dependencies=[Depends(block_in_demo_mode())]
+)
 async def create_collector(
     payload: CollectorInput,
     service: CollectorService = Depends(get_collector_service),
@@ -32,7 +34,9 @@ async def get_collector(
     return await service.get(collector_id)
 
 
-@router.put("/{collector_id}", response_model=Collector)
+@router.put(
+    "/{collector_id}", response_model=Collector, dependencies=[Depends(block_in_demo_mode())]
+)
 async def update_collector(
     collector_id: UUID,
     payload: CollectorInput,
@@ -41,7 +45,9 @@ async def update_collector(
     return await service.update(collector_id, payload)
 
 
-@router.delete("/{collector_id}", status_code=204)
+@router.delete(
+    "/{collector_id}", status_code=204, dependencies=[Depends(block_in_demo_mode())]
+)
 async def delete_collector(
     collector_id: UUID,
     service: CollectorService = Depends(get_collector_service),
@@ -49,7 +55,11 @@ async def delete_collector(
     await service.delete(collector_id)
 
 
-@router.post("/{collector_id}/deployment", response_model=Collector)
+@router.post(
+    "/{collector_id}/deployment",
+    response_model=Collector,
+    dependencies=[Depends(block_in_demo_mode())],
+)
 async def deploy_collector(
     collector_id: UUID,
     service: CollectorService = Depends(get_collector_service),
@@ -57,7 +67,11 @@ async def deploy_collector(
     return await service.deploy(collector_id)
 
 
-@router.delete("/{collector_id}/deployment", response_model=Collector)
+@router.delete(
+    "/{collector_id}/deployment",
+    response_model=Collector,
+    dependencies=[Depends(block_in_demo_mode())],
+)
 async def stop_collector_deployment(
     collector_id: UUID,
     service: CollectorService = Depends(get_collector_service),

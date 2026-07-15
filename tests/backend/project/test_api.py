@@ -1,21 +1,19 @@
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from mongomock_motor import AsyncMongoMockClient
 
 from app.dependencies import get_project_service
 from app.main import app
-from app.project.repository import ProjectRepository
-from app.project.service import ProjectService
+from tests.backend.project.fakes import build_project_service
 
 VALID_PAYLOAD = {"name": "Beekeeping", "description": "Hive monitoring"}
 
 
 @pytest.fixture
-def client() -> TestClient:
-    database = AsyncMongoMockClient()["iotops"]
-    service = ProjectService(repository=ProjectRepository(database))
+def client(tmp_path: Path) -> TestClient:
+    service = build_project_service(tmp_path)
     app.dependency_overrides[get_project_service] = lambda: service
     try:
         yield TestClient(app)

@@ -38,26 +38,15 @@ services:
     networks:
       - iotops
 
-  # AMQP broker for the amqp input plugin (see app/plugin/inputs/amqp.py).
-  # Management UI on :15672 (guest/guest) -- useful for inspecting
-  # exchanges/queues directly while testing the amqp Collector input.
-  rabbitmq:
-    image: rabbitmq:3.13-management
-    hostname: rabbitmq
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    networks:
-      - iotops
-
   # Kafka broker for the kafka input plugin (see app/plugin/inputs/kafka.py).
   # Single-node KRaft mode (no Zookeeper). Two listeners: PLAINTEXT for
   # container-to-container traffic (Collector/Automater Telegraf
-  # containers, the data-sources-showcase publisher -- all reach it via
+  # containers, the demo-showcase publisher -- all reach it via
   # "kafka:9092"), HOST for the user's own kafka client tools run directly
   # on the host machine (reach it via "localhost:9094") -- a single
   # listener can't serve both, since Kafka's advertised address must match
-  # whichever hostname the client actually used to connect.
+  # whichever hostname the client actually used to connect. Only
+  # demo-showcase needs it (Manufacturing Line Demo's Kafka input).
   kafka:
     image: apache/kafka:3.7.0
     hostname: kafka
@@ -75,6 +64,8 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     networks:
       - iotops
+    profiles:
+      - demo
 
   backend:
     build:
@@ -154,71 +145,27 @@ services:
     networks:
       - iotops
 
-  # Manual pipeline-verification tool (Milestone 2), not part of the app.
-  # Off by default: `docker compose --profile tools up mqtt-publisher`
-  mqtt-publisher:
+  # Demo showcase -- 3 curated projects (Apiary/MQTT, Solar/HTTP,
+  # Manufacturing/Kafka), the content behind the public read-only demo.
+  # Self-provisioning: idempotent-by-name REST calls against the backend
+  # on startup, then publishes forever. `docker compose --profile demo up -d`
+  demo-showcase:
     build:
-      context: examples/mqtt-publisher
-    depends_on:
-      - mosquitto
-    networks:
-      - iotops
-    profiles:
-      - tools
-
-  # Manual rule-condition verification tool (Milestone 5), not part of the
-  # app. Companion to the "Rule Testing Sandbox" project's Collector (2
-  # mqtt inputs covering tags/numeric/string-field conditions).
-  # Off by default: `docker compose --profile tools up rule-testing-publisher`
-  rule-testing-publisher:
-    build:
-      context: examples/rule-testing-publisher
-    depends_on:
-      - mosquitto
-    networks:
-      - iotops
-    profiles:
-      - tools
-
-  # Beekeeping showcase (Milestone 4) -- first end-to-end platform demo.
-  # One-command demo from a cold stop, since Compose always includes
-  # services with no `profiles:` key regardless of which profile is passed:
-  # `docker compose --profile beekeeping up -d`
-  beekeeping-simulator:
-    build:
-      context: examples/beekeeping-simulator
-    environment:
-      BACKEND_BASE_URL: http://backend:8000
-    restart: unless-stopped
-    depends_on:
-      - backend
-      - mosquitto
-    networks:
-      - iotops
-    profiles:
-      - beekeeping
-
-  # Data Sources Showcase (Kafka/HTTP/AMQP) -- demonstrates the non-MQTT
-  # input plugins end to end: a dedicated Kafka Collector plus a second
-  # Collector with both an http and an amqp input, one Rule per source,
-  # and a Dashboard with a panel per table. Same self-provisioning pattern
-  # as beekeeping-simulator. `docker compose --profile data-sources up -d`
-  data-sources-showcase:
-    build:
-      context: examples/data-sources-showcase
+      context: examples/demo
     environment:
       BACKEND_BASE_URL: http://backend:8000
       KAFKA_BROKER: kafka:9092
-      RABBITMQ_HOST: rabbitmq
+      MQTT_BROKER_HOST: mosquitto
+      PUBLISH_INTERVAL_SECONDS: "20"
     restart: unless-stopped
     depends_on:
       - backend
+      - mosquitto
       - kafka
-      - rabbitmq
     networks:
       - iotops
     profiles:
-      - data-sources
+      - demo
 
 volumes:
   mongo_data:

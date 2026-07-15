@@ -2,14 +2,16 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
-from app.dependencies import get_project_service
+from app.dependencies import block_in_demo_mode, get_project_service
 from app.project.models import Project, ProjectInput
 from app.project.service import ProjectService
 
 router = APIRouter(prefix="/api/project", tags=["project"])
 
 
-@router.post("", response_model=Project, status_code=201)
+@router.post(
+    "", response_model=Project, status_code=201, dependencies=[Depends(block_in_demo_mode())]
+)
 async def create_project(
     payload: ProjectInput,
     service: ProjectService = Depends(get_project_service),
@@ -32,7 +34,9 @@ async def get_project(
     return await service.get(project_id)
 
 
-@router.put("/{project_id}", response_model=Project)
+@router.put(
+    "/{project_id}", response_model=Project, dependencies=[Depends(block_in_demo_mode())]
+)
 async def update_project(
     project_id: UUID,
     payload: ProjectInput,
@@ -41,7 +45,9 @@ async def update_project(
     return await service.update(project_id, payload)
 
 
-@router.delete("/{project_id}", status_code=204)
+@router.delete(
+    "/{project_id}", status_code=204, dependencies=[Depends(block_in_demo_mode())]
+)
 async def delete_project(
     project_id: UUID,
     service: ProjectService = Depends(get_project_service),

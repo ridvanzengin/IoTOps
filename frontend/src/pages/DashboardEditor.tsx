@@ -445,6 +445,12 @@ export function DashboardEditor() {
               layout={layout}
               cols={GRID_COLUMNS}
               rowHeight={ROW_HEIGHT}
+              // react-grid-layout defaults containerPadding to its margin
+              // value ([10, 10]) when not set -- insetting every panel row
+              // from the grid's own edges, which don't line up with the
+              // toolbar's left (title dropdown) and right (Save button)
+              // edges above it. Zero it so panels align flush with both.
+              containerPadding={[0, 0]}
               draggableHandle=".dashboard-panel__header"
               draggableCancel=".dashboard-panel__menu-trigger, .dashboard-menu__list, .rule-multiselect"
               resizeHandles={["se"]}

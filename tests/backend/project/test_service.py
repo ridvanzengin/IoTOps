@@ -1,18 +1,22 @@
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from mongomock_motor import AsyncMongoMockClient
 
+from app.automater.models import Condition, ConditionOperator, Rule
+from app.collector.models import CollectorInput
+from app.dashboard.models import DashboardInput
 from app.project.models import ProjectInput
-from app.project.repository import ProjectRepository
 from app.project.service import ProjectService
+from app.query_rule.models import QueryRuleInput, QueryRuleSchedule
 from app.shared.exceptions import EntityNotFoundError
+from app.shared.models import InputPlugin, OutputPlugin
+from tests.backend.project.fakes import build_project_service
 
 
 @pytest.fixture
-def service() -> ProjectService:
-    database = AsyncMongoMockClient()["iotops"]
-    return ProjectService(repository=ProjectRepository(database))
+def service(tmp_path: Path) -> ProjectService:
+    return build_project_service(tmp_path)
 
 
 def _valid_input(**overrides: object) -> ProjectInput:
@@ -73,5 +77,60 @@ async def test_delete_removes_project(service: ProjectService) -> None:
 
     await service.delete(project.id)
 
+    with pytest.raises(EntityNotFoundError):
+        await service.get(project.id)
+
+
+async def test_delete_cascades_to_everything_the_project_owns(service: ProjectService) -> None:
+    project = await service.create(_valid_input())
+
+    collector = await service._collector_service.create(
+        CollectorInput(
+            project_id=project.id,
+            name="Hive Collector",
+            inputs=[
+                InputPlugin(
+                    plugin_type="mqtt",
+                    name="hive-mqtt",
+                    configuration={"topics": ["hive/+"], "name_override": "hive_metrics"},
+                )
+            ],
+            outputs=[OutputPlugin(plugin_type="timescaledb", configuration={})],
+        )
+    )
+    automater = await service._automater_service.create_rule(
+        project_id=project.id,
+        rule=Rule(
+            name="swarm-alert",
+            table="hive_metrics",
+            conditions=[Condition(column="temperature", operator=ConditionOperator.GT, value=30.0)],
+        ),
+        automater_id=None,
+        automater_name="Apiary Automater",
+        automater_description="",
+        collector_id=collector.id,
+    )
+    dashboard = await service._dashboard_service.create(
+        DashboardInput(project_id=project.id, name="Apiary Overview")
+    )
+    query_rule = await service._query_rule_service.create(
+        QueryRuleInput(
+            project_id=project.id,
+            name="swarm-risk",
+            sql="SELECT hive_id FROM hive_metrics",
+            schedule=QueryRuleSchedule(interval="5m"),
+        )
+    )
+
+    await service.delete(project.id)
+
+    with pytest.raises(EntityNotFoundError):
+        await service._collector_service.get(collector.id)
+    with pytest.raises(EntityNotFoundError):
+        await service._automater_service.get(automater.id)
+    with pytest.raises(EntityNotFoundError):
+        await service._dashboard_service.get(dashboard.id)
+    with pytest.raises(EntityNotFoundError):
+        await service._query_rule_service.get(query_rule.id)
     with pytest.raises(EntityNotFoundError):
         await service.get(project.id)

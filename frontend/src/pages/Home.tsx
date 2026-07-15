@@ -14,7 +14,7 @@ import {
   VisualizerIcon,
 } from "../components/icons";
 import { useEvents } from "../context/EventsContext";
-import { hashColor, initials } from "../utils/color";
+import { colorAtIndex, initials } from "../utils/color";
 import type { Automater } from "../types/automater";
 import type { Collector } from "../types/collector";
 import type { Project } from "../types/project";
@@ -240,11 +240,11 @@ export function Home() {
             need a human decision.
           </p>
           <div className="home-command__actions">
-            <Link className="button button--primary" to="/collectors/new">
-              New Collector
+            <Link className="button button--primary" to="/projects/new">
+              New Project
             </Link>
-            <Link className="button" to="/automaters/new">
-              New Automation
+            <Link className="button" to="/collectors/new">
+              New Collector
             </Link>
           </div>
         </div>
@@ -325,7 +325,7 @@ export function Home() {
               <p className="home-hint">Loading...</p>
             ) : (
               <div className="home-projects">
-                {projects.map((project: Project) => {
+                {projects.map((project: Project, index: number) => {
                   const unresolved = unresolvedCounts[project.id] ?? 0;
                   const resourceCount =
                     (collectorsByProject.get(project.id) ?? 0) +
@@ -335,7 +335,7 @@ export function Home() {
                   return (
                     <div key={project.id} className="home-project-card">
                       <div className="home-project-card__header">
-                        <span className="home-project-card__badge" style={{ background: hashColor(project.id) }}>
+                        <span className="home-project-card__badge" style={{ background: colorAtIndex(index) }}>
                           {initials(project.name)}
                         </span>
                         {unresolved > 0 && (

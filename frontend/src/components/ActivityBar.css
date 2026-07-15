@@ -39,12 +39,12 @@
   outline-offset: 2px;
 }
 
-/* Matches the dashboard toolbar's "save" action color (see
-   .dashboard-toolbar__control--success in Dashboard.css) -- deliberately
+/* The app's own accent purple (var(--accent), index.css) -- deliberately
    not from PALETTE above, so Co-pilot never collides with a project's
-   hashed color and always reads as a different kind of thing. */
+   color and always reads as a different kind of thing, while still
+   matching the rest of the app's theme color. */
 .activity-bar__icon--copilot {
-  background: #4dd4ac;
+  background: var(--accent);
 }
 
 .activity-bar__copilot-icon {

@@ -1,6 +1,17 @@
 from pydantic import Field
 
+from app.config import settings
 from app.plugin.common import CommonOpts, advanced_field
+
+
+def _default_create_templates() -> list[str]:
+    return [
+        "CREATE TABLE {{.table}} ({{.columns}});"
+        " SELECT create_hypertable('{{.table}}', 'time');"
+        " SELECT add_retention_policy('{{.table}}', INTERVAL '"
+        + str(settings.retention_days)
+        + " days', if_not_exists => true);"
+    ]
 
 
 class TimescaleDBOutputConfig(CommonOpts):
@@ -19,14 +30,14 @@ class TimescaleDBOutputConfig(CommonOpts):
     # empty (empty means "disabled", not "use my built-in default"), so we
     # mirror Telegraf's own default templates here rather than [], and turn
     # every auto-created table into a TimescaleDB hypertable in the same
-    # statement. No retention policy by default -- that's a data-lifetime
-    # decision each user should opt into deliberately, not an implicit
-    # default that silently deletes their telemetry.
+    # statement. Also applies a retention policy (settings.retention_days,
+    # 14 days by default) unconditionally -- not tied to demo mode, just a
+    # sane out-of-the-box default so telemetry doesn't grow unbounded. A
+    # user who wants unlimited retention can override this field (it's
+    # advanced/exposed in the Collector/Automater UI) or raise
+    # RETENTION_DAYS.
     create_templates: list[str] = Field(
-        default=[
-            "CREATE TABLE {{.table}} ({{.columns}});"
-            " SELECT create_hypertable('{{.table}}', 'time');"
-        ],
+        default_factory=_default_create_templates,
         json_schema_extra={"advanced": True},
     )
     # Telegraf's postgresql output template context exposes the missing

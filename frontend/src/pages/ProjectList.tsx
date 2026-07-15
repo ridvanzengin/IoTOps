@@ -38,7 +38,13 @@ export function ProjectList() {
     refresh();
   }, []);
 
-  async function handleDelete(id: string) {
+  async function handleDelete(id: string, name: string) {
+    if (
+      !window.confirm(
+        `Delete project "${name}" and everything in it — its collectors, automations, scheduled rules, and dashboards? This cannot be undone.`,
+      )
+    )
+      return;
     setPendingId(id);
     try {
       await deleteProject(id);
@@ -104,7 +110,7 @@ export function ProjectList() {
                             disabled={pendingId === project.id}
                             onClick={() => {
                               setOpenMenu(null);
-                              handleDelete(project.id);
+                              handleDelete(project.id, project.name);
                             }}
                           >
                             Delete

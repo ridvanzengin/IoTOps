@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     # container itself, not the host machine running Ollama.
     ollama_base_url: str = "http://host.docker.internal:11434"
     ollama_model: str = "gemma4:latest"
+    # False by default -- full read/write functionality out of the box for
+    # local dev and self-hosters. The public demo deployment sets DEMO=true
+    # explicitly in its own environment; this is not the repo's default.
+    demo: bool = False
+    # Independent of demo/DEMO -- applied to every new hypertable regardless
+    # of mode. 14 days is a sane out-of-the-box default so telemetry doesn't
+    # grow unbounded by default; override via env for a different window.
+    retention_days: int = 14
 
 
 settings = Settings()
