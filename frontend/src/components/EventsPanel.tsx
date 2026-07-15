@@ -34,7 +34,7 @@ export function EventsPanel() {
     timeRange,
     searchQuery,
     ruleCounts,
-    windowedActiveCount,
+    activeCount,
     projects,
     closePanel,
     setOccurrenceFilter,
@@ -99,7 +99,7 @@ export function EventsPanel() {
 
   const project = projects.find((p) => p.id === projectId);
   const title = activePanel.kind === "copilot" ? "Co-pilot" : (project?.name ?? "Events");
-  const hasAnyFilterChips = ruleCounts.length > 0 || windowedActiveCount > 0;
+  const hasAnyFilterChips = ruleCounts.length > 0 || activeCount > 0;
   const pageStart = occurrencesTotal === 0 ? 0 : occurrencesOffset + 1;
   const pageEnd = Math.min(occurrencesOffset + OCCURRENCES_PAGE_SIZE, occurrencesTotal);
 
@@ -124,6 +124,12 @@ export function EventsPanel() {
               value={timeRange}
               onChange={(event) => setTimeRange(event.target.value)}
               aria-label="Time range"
+              disabled={occurrenceFilter?.kind === "unresolved"}
+              title={
+                occurrenceFilter?.kind === "unresolved"
+                  ? "Active occurrences aren't limited by time range"
+                  : undefined
+              }
             >
               {TIME_RANGES.map((range) => (
                 <option key={range.code} value={range.code}>
@@ -143,7 +149,7 @@ export function EventsPanel() {
 
           {hasAnyFilterChips && (
             <div className="events-panel__filters">
-              {windowedActiveCount > 0 && (
+              {activeCount > 0 && (
                 <button
                   type="button"
                   className={`events-panel__filter-badge events-panel__filter-badge--unresolved ${
@@ -152,7 +158,7 @@ export function EventsPanel() {
                   onClick={toggleUnresolvedFilter}
                 >
                   Active
-                  <span className="events-panel__filter-count">{windowedActiveCount}</span>
+                  <span className="events-panel__filter-count">{activeCount}</span>
                 </button>
               )}
               {ruleCounts.map((rc) => (
