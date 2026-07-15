@@ -3,7 +3,7 @@ from uuid import UUID, uuid4
 
 from urllib.parse import urlsplit
 
-from app.automater.docker import AutomaterDockerManager
+from app.automater.docker import AutomaterDockerManager, automater_container_name
 from app.automater.models import Automater, AutomaterInput, Rule
 from app.automater.repository import AutomaterRepository
 from app.collector.generator import generate_toml
@@ -231,7 +231,7 @@ class AutomaterService:
         """
         if matched_input.plugin_type != _HTTP_INPUT_PLUGIN_TYPE:
             return
-        forward_url = self._http_forward_url(automater.id, matched_input.configuration)
+        forward_url = self._http_forward_url(automater, matched_input.configuration)
         # Keyed on (automater_id, url) rather than automater_id alone: a
         # multi-table Automater can derive two different http tables from
         # the same Collector, each necessarily on its own port (the
@@ -255,19 +255,18 @@ class AutomaterService:
         )
         await self._collector_service.redeploy_if_running(collector)
 
-    def _http_forward_url(self, automater_id: UUID, http_input_configuration: dict[str, Any]) -> str:
-        # Mirrors _container_name's convention in automater/docker.py --
-        # containers reach each other by name on the shared docker network
-        # regardless of published ports. The Automater's own copied
-        # http_listener_v2 input carries an identical service_address/paths
-        # (see _automater_scoped_configuration -- a no-op for http, no
-        # consumer_group/queue to rewrite), so the Collector's own input
-        # configuration this is derived from already reflects where the
-        # Automater will actually be listening.
+    def _http_forward_url(self, automater: Automater, http_input_configuration: dict[str, Any]) -> str:
+        # Uses automater_container_name -- the exact same function
+        # automater/docker.py uses to actually name the container -- so
+        # this can never drift from where the Automater's http_listener_v2
+        # really is reachable on the shared docker network. That name is
+        # derived from automater.name, which can change after this URL is
+        # first computed; see _resync_http_forwarding for how a later
+        # rename gets patched back in.
         service_address = http_input_configuration.get("service_address", "tcp://:8080")
         port = urlsplit(service_address).port or 8080
         path = (http_input_configuration.get("paths") or ["/telegraf"])[0]
-        return f"http://iotops-automater-{automater_id}:{port}{path}"
+        return f"http://{automater_container_name(automater)}:{port}{path}"
 
     async def set_rule_enabled(self, automater_id: UUID, rule_id: UUID, enabled: bool) -> Automater:
         # Deliberately narrower than a full-rule replace: the only rule edit
@@ -307,6 +306,7 @@ class AutomaterService:
                 automater.inputs, processors, automater.outputs, self._registry
             )
             deployed = self._docker_manager.deploy(automater, toml_config)
+            await self._resync_http_forwarding(deployed)
             return await self._repository.update(deployed)
         if automater.docker is not None:
             stopped = self._docker_manager.stop(automater)
@@ -397,7 +397,39 @@ class AutomaterService:
             automater.inputs, processors, automater.outputs, self._registry
         )
         deployed = self._docker_manager.deploy(automater, toml_config)
+        await self._resync_http_forwarding(deployed)
         return await self._repository.update(deployed)
+
+    async def _resync_http_forwarding(self, automater: Automater) -> None:
+        """The container hostname baked into a Collector's http_forward
+        output (see _ensure_http_forwarding) is derived from this
+        Automater's `name` at the time the forwarding relationship was
+        created -- but a rename only actually changes the *running*
+        container's name on the next deploy (update() alone doesn't
+        redeploy). Call this after every deploy so a stale hostname from
+        a rename gets patched to match wherever the container actually
+        ended up, instead of silently pointing at nothing. A no-op
+        (nothing to patch) on every deploy that isn't a post-rename one --
+        cheap enough to call unconditionally rather than tracking whether
+        the name actually changed. Same "scan all collectors" approach as
+        _remove_http_forwarding, for the same reason (source Collector
+        isn't tracked once an input's copied).
+        """
+        new_host = automater_container_name(automater)
+        for collector in await self._collector_service.list():
+            changed = False
+            for output in collector.outputs:
+                if output.automater_id != automater.id or output.plugin_type != _HTTP_FORWARD_PLUGIN_TYPE:
+                    continue
+                old_url = output.configuration.get("url", "")
+                parts = urlsplit(old_url)
+                if parts.hostname == new_host:
+                    continue
+                new_url = f"{parts.scheme}://{new_host}:{parts.port}{parts.path}"
+                output.configuration = {**output.configuration, "url": new_url}
+                changed = True
+            if changed:
+                await self._collector_service.redeploy_if_running(collector)
 
     async def stop(self, automater_id: UUID) -> Automater:
         automater = await self._repository.get(automater_id)

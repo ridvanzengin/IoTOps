@@ -4,8 +4,8 @@ from uuid import uuid4
 import pytest
 from mongomock_motor import AsyncMongoMockClient
 
-from app.automater.docker import AutomaterDockerManager
-from app.automater.models import Condition, Rule
+from app.automater.docker import AutomaterDockerManager, automater_container_name
+from app.automater.models import AutomaterInput, Condition, Rule
 from app.automater.repository import AutomaterRepository
 from app.automater.service import AutomaterService
 from app.collector.docker import CollectorDockerManager
@@ -315,7 +315,73 @@ async def test_create_rule_forwards_http_collector_input_to_new_automater(
     forwards = [o for o in updated_collector.outputs if o.plugin_type == "http_forward"]
     assert len(forwards) == 1
     assert forwards[0].automater_id == automater.id
-    assert forwards[0].configuration["url"] == f"http://iotops-automater-{automater.id}:9090/webhook"
+    assert forwards[0].configuration["url"] == f"http://{automater_container_name(automater)}:9090/webhook"
+
+
+async def test_renaming_automater_resyncs_stale_http_forward_url_on_next_deploy(
+    service: AutomaterService, collector_repository: CollectorRepository
+) -> None:
+    # The container hostname baked into the Collector's http_forward
+    # output is derived from the Automater's name at creation time. update()
+    # alone doesn't redeploy (see AutomaterService.update), so a rename
+    # only actually changes the running container's name -- and therefore
+    # invalidates that baked-in hostname -- on the *next* deploy. Confirms
+    # _resync_http_forwarding patches it up rather than leaving a
+    # forwarding output pointing at a container that no longer exists.
+    project_id = uuid4()
+    collector = Collector(
+        project_id=project_id,
+        name="HTTP Collector",
+        inputs=[
+            InputPlugin(
+                plugin_type="http",
+                name="hive_metrics-input",
+                configuration={
+                    "name_override": "hive_metrics",
+                    "service_address": "tcp://:9090",
+                    "paths": ["/webhook"],
+                },
+            )
+        ],
+        outputs=[OutputPlugin(plugin_type="timescaledb", configuration={})],
+    )
+    collector = await collector_repository.create(collector)
+
+    automater = await service.create_rule(
+        project_id=project_id,
+        rule=_rule(),
+        automater_id=None,
+        automater_name="New Automater",
+        automater_description="",
+        collector_id=collector.id,
+    )
+    stale_hostname = automater_container_name(automater)
+
+    renamed = await service.update(
+        automater.id,
+        AutomaterInput(
+            project_id=automater.project_id,
+            name="Renamed Automater",
+            description=automater.description,
+            enabled=automater.enabled,
+            inputs=automater.inputs,
+            outputs=automater.outputs,
+            rules=automater.rules,
+        ),
+    )
+    # update() alone doesn't touch the Collector's forwarding output --
+    # the stale hostname is still there until a redeploy happens.
+    still_stale = await collector_repository.get(collector.id)
+    [stale_forward] = [o for o in still_stale.outputs if o.plugin_type == "http_forward"]
+    assert stale_hostname in stale_forward.configuration["url"]
+
+    await service.deploy(renamed.id)
+
+    resynced_collector = await collector_repository.get(collector.id)
+    [forward] = [o for o in resynced_collector.outputs if o.plugin_type == "http_forward"]
+    new_hostname = automater_container_name(renamed)
+    assert new_hostname != stale_hostname
+    assert forward.configuration["url"] == f"http://{new_hostname}:9090/webhook"
 
 
 async def test_create_rule_scopes_http_listener_config_for_forwarding(
