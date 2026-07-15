@@ -6,6 +6,8 @@ import {
   ChevronIcon,
   CollectorIcon,
   CopilotIcon,
+  DocumentationIcon,
+  GithubIcon,
   HomeIcon,
   ProjectIcon,
   ScheduleIcon,
@@ -28,10 +30,70 @@ interface NavItem {
   disabled?: boolean;
 }
 
+interface ExternalNavItem {
+  label: string;
+  href: string;
+  icon: ComponentType<SVGProps<SVGSVGElement>>;
+}
+
+// Documentation is a real in-app route (renders inside the same app shell
+// -- Sidebar + ActivityBar/EventsPanel stay visible), so it's a NavLink
+// like the primary nav items, just grouped visually under "Reference".
+const REFERENCE_NAV_ITEMS: NavItem[] = [{ label: "Documentation", to: "/docs", icon: DocumentationIcon }];
+
+// Source Code leaves the app entirely -- a plain external link, not a route.
+const EXTERNAL_LINKS: ExternalNavItem[] = [
+  {
+    label: "Source Code",
+    href: "https://github.com/ridvanzengin/IoTOps",
+    icon: GithubIcon,
+  },
+];
+
 const COLLAPSED_STORAGE_KEY = "iotops:sidebar-collapsed";
 
 function loadStoredCollapsed(): boolean {
   return typeof window !== "undefined" && window.localStorage.getItem(COLLAPSED_STORAGE_KEY) === "1";
+}
+
+function renderNavItem(item: NavItem, collapsed: boolean) {
+  const Icon = item.icon;
+  const title = collapsed ? item.label : undefined;
+  if (item.disabled) {
+    return (
+      <span key={item.label} className="sidebar__link sidebar__link--disabled" title={title}>
+        <Icon className="sidebar__icon" />
+        {!collapsed && item.label}
+        {!collapsed && <span className="sidebar__badge">Soon</span>}
+      </span>
+    );
+  }
+  if (item.onClick) {
+    return (
+      <button
+        key={item.label}
+        type="button"
+        className={`sidebar__link sidebar__link--button${item.active ? " sidebar__link--active" : ""}`}
+        onClick={item.onClick}
+        title={title}
+      >
+        <Icon className="sidebar__icon" />
+        {!collapsed && item.label}
+      </button>
+    );
+  }
+  return (
+    <NavLink
+      key={item.label}
+      to={item.to!}
+      end={item.end}
+      className={({ isActive }) => `sidebar__link${isActive ? " sidebar__link--active" : ""}`}
+      title={title}
+    >
+      <Icon className="sidebar__icon" />
+      {!collapsed && item.label}
+    </NavLink>
+  );
 }
 
 export function Sidebar() {
@@ -75,48 +137,38 @@ export function Sidebar() {
         </button>
       </div>
       <nav className="sidebar__nav">
-        {navItems.map((item) => {
+        {navItems.map((item) => renderNavItem(item, collapsed))}
+
+        {!collapsed && <p className="sidebar__section-label">Reference</p>}
+        {REFERENCE_NAV_ITEMS.map((item) => renderNavItem(item, collapsed))}
+        {EXTERNAL_LINKS.map((item) => {
           const Icon = item.icon;
-          const title = collapsed ? item.label : undefined;
-          if (item.disabled) {
-            return (
-              <span key={item.label} className="sidebar__link sidebar__link--disabled" title={title}>
-                <Icon className="sidebar__icon" />
-                {!collapsed && item.label}
-                {!collapsed && <span className="sidebar__badge">Soon</span>}
-              </span>
-            );
-          }
-          if (item.onClick) {
-            return (
-              <button
-                key={item.label}
-                type="button"
-                className={`sidebar__link sidebar__link--button${item.active ? " sidebar__link--active" : ""}`}
-                onClick={item.onClick}
-                title={title}
-              >
-                <Icon className="sidebar__icon" />
-                {!collapsed && item.label}
-              </button>
-            );
-          }
           return (
-            <NavLink
+            <a
               key={item.label}
-              to={item.to!}
-              end={item.end}
-              className={({ isActive }) =>
-                `sidebar__link${isActive ? " sidebar__link--active" : ""}`
-              }
-              title={title}
+              href={item.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="sidebar__link"
+              title={collapsed ? item.label : undefined}
             >
               <Icon className="sidebar__icon" />
               {!collapsed && item.label}
-            </NavLink>
+            </a>
           );
         })}
       </nav>
+      <div className="sidebar__footer">
+        <a
+          href="https://ridvanzengin.github.io/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="sidebar__attribution"
+          title={collapsed ? "Built by Rıdvan Zengin" : undefined}
+        >
+          {collapsed ? "RZ" : "Built by Rıdvan Zengin"}
+        </a>
+      </div>
     </aside>
   );
 }
