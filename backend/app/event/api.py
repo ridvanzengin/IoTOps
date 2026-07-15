@@ -77,7 +77,13 @@ async def list_occurrences(
     status: OccurrenceStatus | None = Query(default=None),
     service: EventService = Depends(get_event_service),
 ) -> OccurrencePage:
-    since, _ = resolve_time_range(range)
+    # "Active" means still-unresolved, full stop -- an occurrence open for
+    # longer than the panel's time range shouldn't silently drop out of the
+    # Active filter just because it's older than the window. Only bound by
+    # `range` when NOT filtering to active-only, matching
+    # unresolved-counts' own (always-unbounded) semantics -- see that
+    # endpoint below and EventsContext's activeCount comment.
+    since = None if status == OccurrenceStatus.ACTIVE else resolve_time_range(range)[0]
     items, total = await service.list_occurrences(project_id, limit, offset, rule_id, status, since, search)
     return OccurrencePage(items=items, total=total)
 

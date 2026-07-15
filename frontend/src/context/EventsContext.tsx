@@ -64,10 +64,13 @@ interface EventsContextValue {
   // live match/clear SSE event for the open project, so a chip's count
   // never goes stale while the panel is open. See getOccurrenceCounts.
   ruleCounts: EventRuleCount[];
-  // The panel's "Active" filter chip's count, within the same window/
-  // search as ruleCounts -- distinct from unresolvedCounts (the
-  // ActivityBar badge, never windowed). See its state comment.
-  windowedActiveCount: number;
+  // The panel's "Active" filter chip's count -- like unresolvedCounts (the
+  // ActivityBar badge), deliberately NOT time-windowed, so the two can
+  // never structurally disagree just because an occurrence is older than
+  // the panel's current range. Still scoped by `search`, unlike the badge.
+  // See its state comment and the backend's own matching comment on
+  // GET /api/event/occurrences.
+  activeCount: number;
   activeDashboardVariables: ActiveDashboardVariables | null;
   openProjectPanel: (projectId: string) => void;
   openCopilotPanel: () => void;
@@ -115,13 +118,11 @@ export function EventsProvider({ children }: { children: ReactNode }) {
   const [timeRange, setTimeRangeState] = useState(DEFAULT_TIME_RANGE);
   const [searchQuery, setSearchQueryState] = useState("");
   const [ruleCounts, setRuleCounts] = useState<EventRuleCount[]>([]);
-  // The panel's "Active" filter chip needs its own count *within the same
-  // window/search* as ruleCounts and the list -- unresolvedCounts (below)
-  // is deliberately NOT windowed (that's the ActivityBar badge's "still
-  // broken regardless of age" semantic), so reusing it here would put the
-  // chip's number out of sync with what clicking it actually loads, the
-  // exact bug this whole windowing change exists to close.
-  const [windowedActiveCount, setWindowedActiveCount] = useState(0);
+  // Kept as its own fetch (not reused from unresolvedCounts) because it's
+  // scoped by `search`, unlike the badge -- but the backend ignores
+  // `range` for status=active queries specifically, so age never makes
+  // this drift from unresolvedCounts the way it used to.
+  const [activeCount, setActiveCount] = useState(0);
   const [activeDashboardVariables, setActiveDashboardVariables] = useState<ActiveDashboardVariables | null>(null);
   const navigate = useNavigate();
   // Not state -- written by a click, read once by whichever dashboard's
@@ -212,8 +213,8 @@ export function EventsProvider({ children }: { children: ReactNode }) {
     // query the click-through itself issues (status=active, same
     // range/search), so the two can't structurally disagree.
     listOccurrences(projectId, { status: "active", range, search: search || undefined, limit: 0, offset: 0 })
-      .then((page) => setWindowedActiveCount(page.total))
-      .catch(() => setWindowedActiveCount(0));
+      .then((page) => setActiveCount(page.total))
+      .catch(() => setActiveCount(0));
   }
 
   // Stable across renders (created once) -- both debounced wrappers only
@@ -227,6 +228,17 @@ export function EventsProvider({ children }: { children: ReactNode }) {
       fetchCounts(projectId, range, search);
     }, 300),
   ).current;
+
+  // Ground-truth refetch, not a client-side +1/-1 patch -- the old patch
+  // assumed a match always opens exactly one new occurrence and a clear
+  // always resolves exactly the one it paired with, which doesn't
+  // strictly hold (the backend's own _pair_occurrences docstring notes a
+  // duplicate match while one's already open is handled defensively,
+  // i.e. ignored server-side -- a client blindly incrementing on that
+  // same event would drift 1 high until the next SSE reconnect forced a
+  // resync). Debounced so a noisy rule firing repeatedly doesn't trigger
+  // one request per event.
+  const debouncedUnresolvedCountsRefetch = useRef(debounce(refetchUnresolvedCounts, 400)).current;
 
   // A burst of live events (a noisy rule firing repeatedly) shouldn't
   // trigger one refetch per event.
@@ -275,20 +287,11 @@ export function EventsProvider({ children }: { children: ReactNode }) {
     refetchUnresolvedCounts();
 
     const source = subscribeToEvents((event) => {
-      setUnresolvedCounts((prev) => {
-        // A match always starts a *new* occurrence (Go suppresses repeat
-        // matches on an already-firing rule, so this never double-counts
-        // an already-open one) and a clear always resolves exactly the
-        // occurrence it paired with -- so +1/-1 here is cheap and doesn't
-        // need a refetch. This badge is intentionally NOT time-windowed
-        // (unlike the panel's own counts) -- it means "currently
-        // unresolved, regardless of age", so a still-broken issue from
-        // outside the panel's time range doesn't silently disappear from
-        // it.
-        const delta = event.flag === "match" ? 1 : -1;
-        const current = prev[event.project_id] ?? 0;
-        return { ...prev, [event.project_id]: Math.max(0, current + delta) };
-      });
+      // This badge is intentionally NOT time-windowed (unlike the panel's
+      // own counts) -- it means "currently unresolved, regardless of
+      // age", so a still-broken issue from outside the panel's time
+      // range doesn't silently disappear from it.
+      debouncedUnresolvedCountsRefetch();
 
       const panel = activePanelRef.current;
       if (panel && panel.kind === "project" && panel.projectId === event.project_id) {
@@ -426,7 +429,7 @@ export function EventsProvider({ children }: { children: ReactNode }) {
         timeRange,
         searchQuery,
         ruleCounts,
-        windowedActiveCount,
+        activeCount,
         activeDashboardVariables,
         openProjectPanel,
         openCopilotPanel,

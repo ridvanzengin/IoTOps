@@ -145,6 +145,50 @@ async def test_list_occurrences_status_query_param_filters_to_active(client: Tes
     assert occurrence["rule_id"] == str(active_rule)
 
 
+async def test_list_occurrences_status_active_ignores_range_even_when_older_than_max_range(
+    client: TestClient,
+) -> None:
+    # Active means "still unresolved", full stop -- it must surface
+    # regardless of age, the same way GET /api/event/unresolved-counts
+    # (used for the ActivityBar badge) never applies a time bound at all.
+    # 10 days is deliberately past 7d, the widest option the frontend's
+    # own range selector offers (constants/timeRanges.ts) -- there is no
+    # range value a user could pick that would otherwise reach this.
+    project_id = uuid4()
+    now = datetime.now(timezone.utc)
+    old_active = await _seed(client, project_id=project_id, matched_at=now - timedelta(days=10))
+
+    response = client.get(
+        "/api/event/occurrences",
+        params={"project_id": str(project_id), "status": "active", "range": "1h"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == str(old_active.id)
+
+
+async def test_list_occurrences_resolved_status_still_respects_range(client: TestClient) -> None:
+    # The active-ignores-range carve-out shouldn't leak into browsing
+    # history by other statuses -- a resolved occurrence from 10 days ago
+    # should still be excluded by the default/explicit range, same as
+    # before this change.
+    project_id = uuid4()
+    rule_id = uuid4()
+    now = datetime.now(timezone.utc)
+    await _seed(client, project_id=project_id, rule_id=rule_id, flag=EventFlag.MATCH, matched_at=now - timedelta(days=10))
+    await _seed(client, project_id=project_id, rule_id=rule_id, flag=EventFlag.CLEAR, matched_at=now - timedelta(days=10))
+
+    response = client.get(
+        "/api/event/occurrences",
+        params={"project_id": str(project_id), "status": "resolved", "range": "1h"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+
+
 async def test_list_occurrences_rule_id_query_param_scopes_results(client: TestClient) -> None:
     project_id = uuid4()
     wanted_rule = uuid4()
