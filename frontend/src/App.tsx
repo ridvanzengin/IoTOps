@@ -16,6 +16,7 @@ import { DashboardEditor } from "./pages/DashboardEditor";
 import { PanelBuilder } from "./pages/PanelBuilder";
 import { VariableBuilder } from "./pages/VariableBuilder";
 import { VariableList } from "./pages/VariableList";
+import { Docs } from "./pages/Docs";
 import { Sidebar } from "./components/Sidebar";
 import { ActivityBar } from "./components/ActivityBar";
 import { EventsPanel } from "./components/EventsPanel";
@@ -72,6 +73,7 @@ function App() {
                   path="/dashboards/:dashboardId/variables/:variableName/edit"
                   element={<VariableBuilder />}
                 />
+                <Route path="/docs" element={<Docs />} />
               </Routes>
             </div>
             <EventsPanel />
