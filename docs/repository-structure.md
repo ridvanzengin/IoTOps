@@ -467,9 +467,17 @@ Each plugin should have its own README.
 
 examples/
 
-    mqtt-publisher/
+    demo/
 
-        publisher.py
+        seed.py
+
+        apiary_publisher.py
+
+        solar_publisher.py
+
+        manufacturing_publisher.py
+
+        main.py
 
         Dockerfile
 
@@ -478,12 +486,14 @@ examples/
         README.md
 
 Manual verification tools and demos — not part of the application, and
-not started by a plain `docker compose up`. `mqtt-publisher` publishes
-synthetic telemetry to two topics with different payload shapes, used to
-exercise the Collector -> MQTT -> TimescaleDB pipeline end to end. It's
-wired into `docker-compose.yml` behind `profiles: [tools]`:
+not started by a plain `docker compose up`. `demo/` self-provisions 3
+curated projects (one per data source kind: MQTT, HTTP, Kafka) via the
+backend's own REST API, then publishes synthetic telemetry to each
+forever, used to exercise the Collector -> ingestion -> TimescaleDB
+pipeline end to end and to populate the public read-only demo. It's
+wired into `docker-compose.yml` behind `profiles: [demo]`:
 
-    docker compose --profile tools up -d mqtt-publisher
+    docker compose --profile demo up -d
 
 This `profiles` pattern is the general convention for anything that
 should be buildable/runnable via compose but shouldn't come up by
