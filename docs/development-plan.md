@@ -1,6 +1,9 @@
 # Development Plan
 
-Version: 0.2.0 (Phased Roadmap)
+Version: 0.3.0 (Phased Roadmap)
+
+For dated, compressed history of what's already shipped, see
+[CHANGELOG.md](../CHANGELOG.md).
 
 ## Goal
 
@@ -402,21 +405,20 @@ Processor and Celery Output plugins are custom Telegraf (Go) plugins, a
 different toolchain from the rest of the stack. Keeping it out of v1 keeps
 that risk off the critical path for the initial release.
 
-**Status: core engine done (2026-07-10); beekeeping swarm-alert wiring not
-started.** First two acceptance criteria are met and verified live against
-the real stack (not just unit-level): a real MQTT message crossing a rule's
-threshold gets tagged/deduped by `custom-telegraf`'s `processors.rule` and
-enqueued by its `outputs.celery`, consumed by a real Python `celery` worker
-(`app/automater/tasks.py`, new `celery-worker` compose service) within
-milliseconds. The third — wiring an actual swarm-alert rule into the
-beekeeping showcase itself — is **not** done; verification instead used a
+**Status: core engine done and substantially extended beyond the original
+scope (through 2026-07-14).** First two acceptance criteria are met and
+verified live against the real stack (not just unit-level): a real MQTT
+message crossing a rule's threshold gets tagged/deduped by
+`custom-telegraf`'s `processors.rule` and enqueued by its `outputs.celery`,
+consumed by a real Python `celery` worker (`app/automater/tasks.py`, new
+`celery-worker` compose service) within milliseconds. The third — wiring an
+actual swarm-alert rule into the beekeeping showcase itself — was
+deliberately descoped, not just deferred: verification instead used a
 dedicated `examples/rule-testing-publisher` fixture (a "Rule Testing
 Sandbox" project with its own Collector, deliberately covering tags,
 numeric fields, and string fields across two tables) built specifically so
 rule-condition scenarios could be exercised without touching the showcase.
-Full detail — day-by-day, including several bugs found and fixed along the
-way — lives in `iotops-workspace/ROADMAP.md`, not duplicated here; short
-version:
+Full dated history lives in [CHANGELOG.md](../CHANGELOG.md); short version:
 
 - Real Rule/Condition models, `RuleProcessorConfig`/`CeleryOutputConfig`
   registered like any other plugin, `generate_toml` generalized to a shared
@@ -448,15 +450,20 @@ version:
   that had silently broken during the `Pipeline` extraction).
 - New, beyond the original milestone scope: a persisted `Event` model
   (Mongo) and a project-scoped, live-updating (Server-Sent Events) Events
-  sidebar on every Dashboard, plus an Overview-page summary. See
-  `iotops-workspace/ROADMAP.md`'s "Events sidebar" entry.
-- Further extended 2026-07-11 through 2026-07-13: the sidebar was
-  redesigned around a VSCode-style activity bar (one icon per project,
-  unresolved-match badge counts, occurrence card redesign), events now
-  overlay directly on Panel charts within their matched time window, and
-  clicking an occurrence card's identifier sets a matching dashboard
-  variable. See `iotops-workspace/ROADMAP.md`'s "Events sidebar polish"
-  and "Events-as-overlay on Panel charts" entries.
+  sidebar, redesigned 2026-07-11 through 2026-07-13 around a VSCode-style
+  activity bar (one icon per project, unresolved-match badge counts,
+  occurrence card redesign), events overlaying directly on Panel charts,
+  and clicking an occurrence card's identifier setting a matching
+  dashboard variable. Rules also gained a `resolve_mode`
+  (auto-clear/manual-resolve). See CHANGELOG.md's 2026-07-10 through
+  2026-07-13 entries.
+- **Query Rules (2026-07-14), a second major extension beyond the
+  original milestone scope**: scheduled, SQL-based rules for
+  cross-table/cross-metric correlation the real-time per-metric Go
+  pipeline can't express (time-windowed aggregates, arbitrary AND/OR
+  nesting across tables), evaluated via Celery Beat rather than Telegraf.
+  Reuses the entire Events pipeline (pairing, SSE, overlays,
+  manual-resolve) unmodified. See CHANGELOG.md's 2026-07-14 entry.
 
 ---
 
@@ -481,6 +488,131 @@ Generate SQL from natural language.
 - User enters: "Show hive temperature for the last 24 hours."
 - SQL is generated.
 - Chart renders successfully.
+
+**Status: SQL generation shipped early, pulled forward into Milestone 3
+(`POST /api/ai/sql`, Ollama-backed) — see that milestone's status above.
+Everything else below is not started.** The activity bar already reserves
+an always-reachable Co-pilot panel slot (`EventsContext.tsx`'s
+`ActivePanel` has a `{ kind: "copilot" }` case and `openCopilotPanel()`),
+but no content component exists yet — just a placeholder.
+
+**Proposed scope, not yet confirmed with the user** — a persistent
+assistant panel, not just one more SQL box, layered on the Events/Rule/
+Dashboard models that already exist:
+
+1. **Q&A over what's already stored** — chat against the structured
+   Event/Occurrence history and current telemetry schema (e.g. "why did
+   hive-3 alert three times today?"), reusing `AiService`'s existing
+   Ollama connection and read-only-SQL guardrail. Lowest-risk slice,
+   pure reads.
+2. **Rule suggestions** — proposing a new Rule from an observed
+   telemetry pattern, pre-filled into the existing rule-creation form
+   rather than silently auto-created.
+3. **Dashboard/panel suggestions** — same idea, proposing a chart from a
+   schema + usage pattern, landing in the Panel Builder.
+
+**One concrete constraint to keep in mind once suggestion logic (2, 3)
+gets built**: Rule `identifiers` and Dashboard `Variable.value_column`s
+have no enforced relationship, but two shipped features already depend on
+them matching by name (overlay-events time-window filtering, and clicking
+an occurrence card identifier to set a dashboard variable). When the
+co-pilot suggests a new Rule or Dashboard Variable referencing the same
+underlying column, it should keep the identifier key and the
+`value_column` spelled identically — not a schema change, just a
+suggestion-quality constraint to design in from the start rather than
+have suggested rules and dashboards silently fail to interoperate.
+
+---
+
+# Portfolio Demo Deployment
+
+**Requirement**: deploy a public demo without waiting for the rest of the
+roadmap (additional data sources, AI Co-pilot) to land — current state (v1
++ most of Milestone 5) is already demo-worthy. Two decisions already
+confirmed:
+
+- **Hosting: a single small VM running the existing `docker-compose.yml`
+  as-is** (not a managed container platform) — closest to zero
+  re-architecting, matches local dev almost exactly.
+- **Interactivity: read-only showcase, not fully interactive.** The
+  backend spawns real Docker containers per Collector/Automater via the
+  host Docker socket — letting the public internet trigger that with no
+  auth/quotas/cleanup is a real attack surface, so the public demo runs
+  the Beekeeping Showcase (and/or Rule Testing Sandbox) continuously
+  server-side, but doesn't let anonymous visitors create their own
+  Collectors/Automaters.
+
+**Status: not started.** What this needs, concretely:
+
+1. **Server-side read-only enforcement, not just hiding UI buttons.**
+   There is currently no auth of any kind in this backend — every
+   mutating endpoint (`POST`/`PUT`/`DELETE` on `/api/collector`,
+   `/api/automater`, deploy/stop actions, etc.) is wide open. A UI-only
+   "hide the create button" would not stop a visitor from hitting the API
+   directly. Needs a real gate: simplest shape is a `settings.demo_mode:
+   bool` + a FastAPI dependency that 403s any mutating request on
+   Collector/Automater routers when set, wired in only for the deployed
+   instance's env, not touching local dev's behavior at all. (Note:
+   `feature/demo-mode` already has work in flight here — check its
+   status before starting from scratch.)
+2. **Showcase data needs to look alive, not static.** The
+   `beekeeping-simulator`/`mqtt-publisher` compose services need to keep
+   running continuously on the deployed VM (`restart: unless-stopped`,
+   already the pattern spawned Automater/Collector containers use) so
+   dashboards/events aren't a frozen snapshot.
+3. **Reverse proxy + TLS** in front of `backend`(8000)/`frontend`(5173) —
+   nothing in this repo handles this today (`docker-compose.yml` exposes
+   raw ports directly, fine for local dev, not a public host). Likely a
+   `caddy`/`nginx` service in a separate `docker-compose.prod.yml`
+   (or an override file), not a change to the dev compose file itself.
+4. **Needs the user's hands-on involvement**, not something an agent
+   session can do unilaterally: which VM provider/plan, domain name (if
+   any), and who holds the running instance's ops burden (restarts, disk
+   growth from Mongo/Timescale data, image updates when
+   `custom-telegraf`/backend/frontend change). A shared Hetzner VM
+   (nginx/TimescaleDB/Redis) already hosts another of the author's
+   projects (`agritwin`) — worth reusing that same infra pattern rather
+   than standing up something new from scratch.
+
+---
+
+# Known Issues
+
+Real, non-blocking gaps — not prioritized/sequenced beyond what's noted.
+Fix opportunistically, not preemptively.
+
+- **Asymmetric Redis-error handling in `rule.go`.** `trySetFiring` fails
+  *open* on a Redis error (risk: duplicate match). `clearFiring` fails
+  *closed* (risk: a clear silently drops, occurrence looks permanently
+  unresolved until the firing key expires on its own TTL with no
+  explicit clear ever logged). Worth a bounded retry on `clearFiring`, or
+  at minimum loud logging when it happens.
+- **Unexplained ~90-minute MQTT reconnect gap**, recurred more than once.
+  Stock Telegraf `inputs.mqtt_consumer`, not custom code; resolved by a
+  container restart each time, never root-caused. No healthcheck or
+  alerting on "container up but not receiving."
+- **No flapping/hysteresis protection.** A value oscillating right at a
+  threshold fires a match/clear pair on every single crossing.
+- **No server-side validation that Rule `identifiers`/`message`
+  placeholders are actually in the input's `tag_keys`.** Today it's a
+  frontend-only warning (`AutomaterEditor.tsx`) — a column missing from
+  `tag_keys` silently renders empty in the interpolated message
+  (`"Hive  swarm risk"` instead of `"Hive hive1 swarm risk"`), and
+  anyone hitting the API directly gets no protection at all.
+- **No image build/publish pipeline for `custom-telegraf`** —
+  `custom-telegraf:latest` is built by hand locally. Fine for local dev,
+  a real gap before this goes anywhere beyond one machine (relevant to
+  the demo deployment above).
+- **Stale mqtt inputs on multi-table Automaters aren't garbage
+  collected** (deliberate). An Automater that loses its last rule for one
+  of its tables keeps the now-unused mqtt input in its deployed config
+  indefinitely — harmless (wasted subscription, no incorrect behavior),
+  not worth the GC logic unless it becomes an actual operational
+  nuisance.
+- **No runaway-query timeout on interactive Panel queries.** Query Rules'
+  scheduled evaluation has a hard 10s `asyncpg` timeout
+  (`TelemetryRepository.execute_match_query`); the equivalent
+  interactive path (Panel Builder's ad hoc SQL) has none at all.
 
 ---
 
@@ -538,15 +670,16 @@ bespoke code, per the Extensibility principle in the vision doc.
 
 # Internal Pipeline Abstraction
 
-Although the UI exposes **Collector** and **Automater**, the backend should internally use a shared **Pipeline** model.
+Although the UI exposes **Collector** and **Automater**, the backend internally uses a shared **Pipeline** model.
 
-**Not yet factored out.** `collector/models.py` currently has
-`CollectorPluginsBase` (inputs/processors/outputs + the "at least one
-input and one output" validation) playing this role directly on
-`Collector`, rather than a separate reusable `Pipeline` class. This was
-fine with only Collector implemented; when Automater (Milestone 5) is
-built, extract a real `Pipeline` base at that point rather than
-duplicating the inputs/processors/outputs plumbing.
+**Status: done (2026-07-08, as part of Milestone 5 Phase B).**
+`app/shared/models.py` now has `Pipeline`/`InputPlugin`/`ProcessorPlugin`/
+`OutputPlugin`/`DockerConfig`; `CollectorPluginsBase(Pipeline)` adds
+`processors`, `AutomaterPluginsBase(Pipeline)` adds `rules: list[Rule]`.
+`generate_toml(inputs, processors, outputs, registry)` is shared by both
+`CollectorService.deploy()` and `AutomaterService.deploy()`. Collector's
+existing behavior was regression-checked against the extraction and is
+unaffected.
 
 ## Internal Structure
 
@@ -622,15 +755,12 @@ first release.
 
 # Recommendation
 
-Start with **Milestone 0** and **Milestone 1** only.
-
-First validate:
-
-**MQTT → Collector → TimescaleDB**
-
-with Docker lifecycle management.
-
-Once that pipeline works, continue through the rest of v1 (Dashboard,
-Beekeeping showcase) and ship/announce. Automation, AI, and additional
-domain showcases follow as v1.1, v1.2, and beyond — they are fast-follow
-releases, not blockers for the initial launch.
+v1 (Milestones 0–4) and v1.1's core engine (Milestone 5, including the
+Query Rules and Events sidebar extensions beyond its original scope) are
+both done and demo-worthy. Recommended next step: **Portfolio Demo
+Deployment** (above) — server-side read-only enforcement is the one
+genuinely blocking piece (there is no auth of any kind today), everything
+else there is infra work. AI Co-pilot (Milestone 6) and additional domain
+showcases (below) remain fast-follows after the demo ships, not
+blockers — same reasoning that kept Automation/AI off v1's own critical
+path.

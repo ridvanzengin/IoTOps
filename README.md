@@ -16,8 +16,12 @@ hand-writing Telegraf configuration files.
   overlays on charts, and an AI-assisted SQL builder
 - **Events** — every Rule match/clear persisted and streamed live into a
   searchable sidebar available from any page
-- **AI Co-pilot** — natural-language SQL generation/explanation and
-  suggestions, backed by a local LLM (Ollama) — nothing leaves the host
+
+**Planned, not yet built**: an AI Co-pilot panel (natural-language SQL
+generation/explanation and dashboard/rule suggestions, backed by a local
+LLM) — the sidebar entry point and panel shell exist, but no actual AI
+integration is wired up yet. The Dashboard's own AI-assisted SQL builder
+(above) is separate and already works.
 
 ## Tech Stack
 
@@ -53,6 +57,7 @@ docker compose up
 - [CLAUDE.md](CLAUDE.md) — architecture and conventions for contributors
 - [docs/](docs/) — full design docs: vision, architecture, domain
   models, repository structure, and the phased development plan
+- [CHANGELOG.md](CHANGELOG.md) — dated history of what's shipped
 
 ## Testing
 

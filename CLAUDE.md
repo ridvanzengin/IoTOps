@@ -51,8 +51,8 @@ just the first showcase — more domain showcases are planned post-v1. See
    and inherently low-volume (match/clear + TTL dedup already collapses
    it to meaningful transitions, not per-tick data) — Mongo's document
    queries fit it, not TimescaleDB's fixed-hypertable-columns/range-
-   aggregation model. See iotops-workspace/ROADMAP.md's "Events sidebar"
-   note for the full reasoning.
+   aggregation model. See CHANGELOG.md's 2026-07-10 "Events sidebar +
+   persisted event store" entry for the full reasoning.
 
 ## Docs
 
