@@ -87,6 +87,11 @@
   font-size: 13px;
 }
 
+.sidebar__brand-icon {
+  width: 15px;
+  height: 15px;
+}
+
 .sidebar__nav {
   display: flex;
   flex-direction: column;

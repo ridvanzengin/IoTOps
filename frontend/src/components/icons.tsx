@@ -17,6 +17,31 @@ function Icon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// The IoTOps mark: a device (dot) broadcasting telemetry (concentric signal
+// arcs) -- used as both the sidebar brand mark and (as a standalone SVG
+// file, kept in sync by hand) frontend/public/favicon.svg. Mixes a filled
+// dot with stroked arcs, so it doesn't use the shared stroke-only <Icon>
+// wrapper above.
+export function LogoMark(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <circle cx="7" cy="16" r="1.8" fill="currentColor" stroke="none" />
+      <path d="M7 11a5 5 0 0 1 5 5" />
+      <path d="M7 7a9 9 0 0 1 9 9" />
+    </svg>
+  );
+}
+
 export function HomeIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props}>

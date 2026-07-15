@@ -9,6 +9,7 @@ import {
   DocumentationIcon,
   GithubIcon,
   HomeIcon,
+  LogoMark,
   ProjectIcon,
   ScheduleIcon,
   VisualizerIcon,
@@ -124,7 +125,9 @@ export function Sidebar() {
     <aside className={`sidebar${collapsed ? " sidebar--collapsed" : ""}`}>
       <div className="sidebar__header">
         <NavLink to="/" end className="sidebar__brand" title={collapsed ? "IoTOps" : undefined}>
-          <span className="sidebar__brand-mark">I</span>
+          <span className="sidebar__brand-mark">
+            <LogoMark className="sidebar__brand-icon" />
+          </span>
           {!collapsed && <span>IoTOps</span>}
         </NavLink>
         <button
