@@ -78,32 +78,87 @@
   border-color: var(--danger);
 }
 
-.status-card {
+/* Disclosure chevron: collapsed points right, rotates to point down when
+   the section it controls is expanded. Shared across any collapsible
+   section so expand/collapse always reads the same way in this app. */
+.chevron {
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.chevron--expanded {
+  transform: rotate(90deg);
+}
+
+/* Generic small dropdown menu (trigger "..." + list) for CRUD row/card
+   actions -- same visual pattern as the Dashboard panel's "..." menu, kept
+   here as a shared class since it's used across several list pages. */
+.dropdown-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+/* No fixed width/height here on purpose -- the trigger sits in a flex row
+   next to regular .button siblings and stretches (via the parent's default
+   align-items: stretch) to match their height exactly, whatever that is in
+   a given context (header actions vs. compact row actions). aspect-ratio
+   keeps it square once that height is resolved. */
+.dropdown-menu__trigger {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
+  justify-content: center;
+  aspect-ratio: 1;
+  padding: 0;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 6px;
   background: var(--bg);
-  font-size: 14px;
+  color: var(--text-h);
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
 }
 
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--text);
+.dropdown-menu__trigger:hover {
+  background: var(--bg-subtle);
 }
 
-.status-dot--ok {
-  background: var(--success);
+.dropdown-menu__list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 160px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
 }
 
-.status-dot--unreachable {
-  background: var(--danger);
+.dropdown-menu__item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--text-h);
+  cursor: pointer;
 }
 
-.status-dot--checking {
-  background: var(--accent);
+.dropdown-menu__item:hover {
+  background: var(--bg-subtle);
+}
+
+.dropdown-menu__item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dropdown-menu__item--danger {
+  color: var(--danger);
 }

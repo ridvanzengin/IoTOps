@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useEvents } from "../context/EventsContext";
 import { resolveOccurrence } from "../api/event";
 import { ApiError } from "../api/client";
+import { hashColor } from "../utils/color";
 import { AutomaterIcon, ScheduleIcon } from "./icons";
 import type { Occurrence } from "../types/event";
 import "./OccurrenceCard.css";
@@ -100,7 +101,7 @@ export function OccurrenceCard({ occurrence }: { occurrence: Occurrence }) {
   }
 
   return (
-    <li className={`occurrence-card occurrence-card--${occurrence.severity}`}>
+    <li className="occurrence-card" style={{ "--rule-color": hashColor(occurrence.rule_id) } as React.CSSProperties}>
       <div className="occurrence-card__header">
         <span className="occurrence-card__header-left">
           <span className={`occurrence-card__status occurrence-card__status--${occurrence.status}`}>

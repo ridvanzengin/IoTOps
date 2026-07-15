@@ -6,21 +6,49 @@
 
 .automater-list__card {
   padding: 16px 20px;
+  /* .collector-card clips overflow to round its corners around a flush
+     table -- but this card's dropdown menus need to escape those bounds. */
+  overflow: visible;
 }
 
 .automater-list__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+}
+
+.automater-list__header--expanded {
   margin-bottom: 12px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border);
 }
 
-.automater-list__header > div:first-child {
+.automater-list__header-main {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  border: none;
+  background: none;
+  padding: 4px;
+  margin: -4px;
+  border-radius: 6px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.automater-list__header-main:hover {
+  background: var(--bg-subtle);
+}
+
+.automater-list__header-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .automater-list__project {
@@ -28,9 +56,17 @@
   font-size: 13px;
 }
 
+.automater-list__rule-count {
+  color: var(--text);
+  font-size: 13px;
+}
+
 .automater-list__conditions {
   font-family: var(--mono);
   font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .automater-list__rule-status {
@@ -51,4 +87,11 @@
 .automater-list__rule-status--inactive {
   color: var(--text);
   background: var(--bg-subtle);
+}
+
+/* Fixed layout so columns line up the same way across every Automater's
+   table, regardless of how long any one card's content happens to be —
+   plain .collector-table sizes each <table>'s columns independently. */
+.automater-list__rules-table {
+  table-layout: fixed;
 }

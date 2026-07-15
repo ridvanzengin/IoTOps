@@ -76,3 +76,12 @@ export interface ProjectUnresolvedCount {
   project_id: string;
   count: number;
 }
+
+// A page of Occurrences plus the total matching the same filters (time
+// range, rule/status, search) -- both computed from one pairing pass over
+// the same documents server-side, so `total` is guaranteed consistent with
+// what paging through `items` will eventually show.
+export interface OccurrencePage {
+  items: Occurrence[];
+  total: number;
+}

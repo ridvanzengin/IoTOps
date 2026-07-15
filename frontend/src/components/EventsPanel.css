@@ -72,6 +72,41 @@
   padding: 24px 8px;
 }
 
+.events-panel__toolbar {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.events-panel__range {
+  flex-shrink: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
+  font: inherit;
+  font-size: 12px;
+}
+
+.events-panel__search {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
+  font: inherit;
+  font-size: 12px;
+}
+
+.events-panel__search:focus {
+  outline: 2px solid var(--accent-border);
+  outline-offset: 0;
+  border-color: var(--accent);
+}
+
 .events-panel__filters {
   display: flex;
   flex-wrap: wrap;
@@ -117,6 +152,18 @@
   outline-offset: 1px;
 }
 
+/* Matches the same rule's OccurrenceCard left-border color (both hash the
+   same rule_id via utils/color's hashColor) so a chip and its cards read
+   as the same thing at a glance. */
+.events-panel__filter-badge--rule::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--rule-color);
+  flex-shrink: 0;
+}
+
 .events-panel__filter-badge-label {
   max-width: 110px;
   overflow: hidden;
@@ -145,4 +192,38 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.events-panel__pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.events-panel__page-button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  background: var(--bg);
+  color: var(--text-h);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.events-panel__page-button:hover:not(:disabled) {
+  background: var(--bg-subtle);
+}
+
+.events-panel__page-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.events-panel__page-status {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
 }

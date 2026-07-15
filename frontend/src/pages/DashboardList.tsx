@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { deleteDashboard, listDashboards } from "../api/dashboard";
 import { listProjects } from "../api/project";
+import { MoreIcon } from "../components/icons";
 import type { Dashboard } from "../types/dashboard";
 import type { Project } from "../types/project";
 import "./Collector.css";
@@ -13,6 +14,17 @@ export function DashboardList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (!(event.target instanceof Element) || !event.target.closest(".dropdown-menu")) {
+        setOpenMenu(null);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   function projectName(projectId: string): string {
     return projects.find((project) => project.id === projectId)?.name ?? "—";
@@ -90,13 +102,32 @@ export function DashboardList() {
                   <td>{projectName(dashboard.project_id)}</td>
                   <td>{dashboard.panels.length}</td>
                   <td className="collector-table__actions">
-                    <button
-                      className="button button--danger"
-                      disabled={pendingId === dashboard.id}
-                      onClick={() => handleDelete(dashboard.id, dashboard.name)}
-                    >
-                      Delete
-                    </button>
+                    <div className="dropdown-menu">
+                      <button
+                        type="button"
+                        className="dropdown-menu__trigger"
+                        aria-label="Dashboard actions"
+                        aria-expanded={openMenu === dashboard.id}
+                        onClick={() => setOpenMenu((current) => (current === dashboard.id ? null : dashboard.id))}
+                      >
+                        <MoreIcon />
+                      </button>
+                      {openMenu === dashboard.id && (
+                        <div className="dropdown-menu__list">
+                          <button
+                            type="button"
+                            className="dropdown-menu__item dropdown-menu__item--danger"
+                            disabled={pendingId === dashboard.id}
+                            onClick={() => {
+                              setOpenMenu(null);
+                              handleDelete(dashboard.id, dashboard.name);
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

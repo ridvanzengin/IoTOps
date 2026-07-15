@@ -5,6 +5,7 @@ import { generateQueryRuleSql } from "../api/ai";
 import { ApiError } from "../api/client";
 import { createQueryRule, previewQueryRule } from "../api/queryRule";
 import { listProjects } from "../api/project";
+import { ChevronIcon } from "../components/icons";
 import { NlSqlBuilder } from "../components/NlSqlBuilder";
 import { SchemaBrowser } from "../components/SchemaBrowser";
 import type { QueryRuleInput } from "../types/queryRule";
@@ -121,11 +122,6 @@ export function QueryRuleEditor() {
       <div className="collector-page__header">
         <h1>New Scheduled Rule</h1>
       </div>
-      <p style={{ margin: "-16px 0 24px", color: "var(--text)" }}>
-        A SQL query re-run on its own schedule directly against TimescaleDB — for conditions a
-        real-time rule can't express: cross-table joins, time-windowed aggregates (e.g. "last 1h
-        average"). Author it by hand or describe it in plain language on the right.
-      </p>
 
       {loadError && <p className="collector-page__error">{loadError}</p>}
       {submitError && <p className="collector-page__error">{submitError}</p>}
@@ -199,13 +195,6 @@ export function QueryRuleEditor() {
                 </select>
               </label>
             </div>
-            <p className="wizard-panel__hint">
-              Which of the query's selected columns identify one matching entity (e.g. a device or
-              station) — every result row is grouped by these values to tell a new match from a
-              still-open one. Leave empty to treat the whole query as a single system-wide check
-              instead — every matching row then shares one occurrence, same as a real-time Rule
-              with no identifiers.
-            </p>
             {resolveMode === "manual" && (
               <p className="automater-editor__warning" style={{ marginTop: -8 }}>
                 This rule will never auto-clear -- a matching occurrence stays active until someone
@@ -268,16 +257,25 @@ export function QueryRuleEditor() {
           </div>
 
           <div className="panel-builder__column">
-            <div className="wizard-panel">
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <h2 className="wizard-panel__title" style={{ margin: 0 }}>
-                  DB Schema
-                </h2>
-                <button type="button" className="button" onClick={() => setShowSchema((visible) => !visible)}>
-                  {showSchema ? "Hide tables" : "Show tables"}
-                </button>
-              </div>
-              {showSchema && <SchemaBrowser />}
+            <div className="wizard-panel wizard-panel--tight">
+              <button
+                type="button"
+                className="disclosure-header"
+                onClick={() => setShowSchema((visible) => !visible)}
+                aria-expanded={showSchema}
+              >
+                <ChevronIcon
+                  width={16}
+                  height={16}
+                  className={`chevron${showSchema ? " chevron--expanded" : ""}`}
+                />
+                <h2 className="wizard-panel__title">DB Schema</h2>
+              </button>
+              {showSchema && (
+                <div className="disclosure-content">
+                  <SchemaBrowser />
+                </div>
+              )}
             </div>
 
             <div className="wizard-panel">

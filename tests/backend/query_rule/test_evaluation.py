@@ -181,7 +181,7 @@ async def test_evaluate_writes_clear_when_identifier_drops_out() -> None:
 
     events = await event_repository.list(rule_ids=[query_rule.id])
     assert {e.flag for e in events} == {EventFlag.MATCH, EventFlag.CLEAR}
-    occurrences = await event_repository.list_occurrences(rule_ids=[query_rule.id])
+    occurrences, _total = await event_repository.list_occurrences(rule_ids=[query_rule.id])
     assert occurrences[0].status == OccurrenceStatus.RESOLVED
 
 
@@ -203,7 +203,7 @@ async def test_evaluate_manual_resolve_mode_never_auto_clears() -> None:
 
     events = await event_repository.list(rule_ids=[query_rule.id])
     assert all(e.flag == EventFlag.MATCH for e in events)  # no auto-clear written
-    occurrences = await event_repository.list_occurrences(rule_ids=[query_rule.id])
+    occurrences, _total = await event_repository.list_occurrences(rule_ids=[query_rule.id])
     assert occurrences[0].status == OccurrenceStatus.ACTIVE
 
 
@@ -242,7 +242,7 @@ async def test_evaluate_with_zero_identifiers_shares_one_occurrence_group() -> N
     events = await event_repository.list(rule_ids=[query_rule.id])
     assert len(events) == 1
     assert events[0].tags == {}
-    occurrences = await event_repository.list_occurrences(rule_ids=[query_rule.id])
+    occurrences, _total = await event_repository.list_occurrences(rule_ids=[query_rule.id])
     assert occurrences[0].identifiers == {}
 
 
@@ -262,7 +262,7 @@ async def test_evaluate_with_zero_identifiers_clears_when_no_rows_match() -> Non
     fake_telemetry.rows_by_sql[sql] = []
     await service.evaluate(query_rule)
 
-    occurrences = await event_repository.list_occurrences(rule_ids=[query_rule.id])
+    occurrences, _total = await event_repository.list_occurrences(rule_ids=[query_rule.id])
     assert occurrences[0].status == OccurrenceStatus.RESOLVED
 
 

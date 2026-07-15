@@ -126,11 +126,18 @@ class QueryRuleService:
             key = tuple(str(row.get(column, "")) for column in query_rule.identifiers)
             current_by_key[key] = row
 
-        open_occurrences = await self._event_repository.list_occurrences(rule_ids=[query_rule.id])
+        # Unbounded by time/limit deliberately -- this is the evaluation
+        # engine's own bookkeeping (which identifiers are currently open
+        # for this rule), not a UI page. A still-open occurrence from
+        # arbitrarily long ago is exactly what re-arm/clear detection
+        # needs to see; the sidebar's 1h-default windowing is a display
+        # concern for EventsPanel, not this loop.
+        open_occurrences, _total = await self._event_repository.list_occurrences(
+            rule_ids=[query_rule.id], status=OccurrenceStatus.ACTIVE, limit=100_000
+        )
         open_by_key = {
             tuple(occurrence.identifiers.get(column, "") for column in query_rule.identifiers): occurrence
             for occurrence in open_occurrences
-            if occurrence.status == OccurrenceStatus.ACTIVE
         }
 
         now = datetime.now(timezone.utc)

@@ -200,21 +200,122 @@ class EventRepository:
 
     # Also defined before `list` below, same reasoning as counts_by_rule
     # above.
-    async def list_occurrences(
+    async def _query_occurrences(
         self,
-        project_id: UUID | None = None,
-        limit: int = 50,
-        rule_ids: list[UUID] | None = None,
+        project_id: UUID | None,
+        since: datetime | None,
+        rule_ids: list[UUID] | None,
+        status: OccurrenceStatus | None,
+        search: str | None,
     ) -> list[Occurrence]:
+        """Shared by list_occurrences and occurrence_counts_by_rule -- both
+        need "every Occurrence matching these filters", just consumed
+        differently (a sliced page vs. a per-rule tally), and computing it
+        once here is what guarantees a page's `total` and a rule chip's
+        count can never structurally drift apart the way the badge/list
+        mismatch did before filtering was pushed server-side at all.
+
+        `since` bounds the raw Mongo fetch to `matched_at >= since` --
+        deliberately not a `[since, until]` window: "last 1h" means
+        "occurrences whose match happened in the last hour", full stop, so
+        there's never an upper bound to apply (a still-active occurrence's
+        clear, if any, is always in the future relative to its match, and a
+        resolved one's clear is irrelevant to whether the *match* falls in
+        the window). This also bounds the read itself, not just the
+        result -- a narrow window keeps the fetch+pair small regardless of
+        a project's total history size, the same property that makes
+        pagination here viable without a dedicated aggregation pipeline.
+
+        `status` and `search` are both derived/text properties that can't
+        be pushed into the Mongo query dict (see list_occurrences' own
+        prior comment on `status`), so both are applied as a Python filter
+        after pairing.
+        """
         query: dict[str, Any] = {}
         if project_id is not None:
             query["project_id"] = str(project_id)
         if rule_ids:
             query["rule_id"] = {"$in": [str(rule_id) for rule_id in rule_ids]}
+        if since is not None:
+            query["matched_at"] = {"$gte": _serialize_datetime(since)}
         documents = await self._collection.find(query).sort("matched_at", 1).to_list(length=None)
         occurrences = _pair_occurrences([_from_document(document) for document in documents])
-        occurrences.sort(key=lambda o: o.resolved_at or o.matched_at, reverse=True)
-        return occurrences[:limit]
+        if status is not None:
+            occurrences = [o for o in occurrences if o.status == status]
+        needle = search.strip().lower() if search else ""
+        if needle:
+            # rule_name/message/category/event_type alone under-match badly
+            # whenever a rule was authored with placeholder/test names (e.g.
+            # a scratch query rule literally named "sdf") -- the only thing
+            # actually distinguishing one occurrence from another is then
+            # its identifiers (the chips rendered on the card, e.g.
+            # "hive_id: hive-5"), so those have to be searchable too, or
+            # search silently stops working the moment rule naming stops
+            # being descriptive.
+            occurrences = [
+                o
+                for o in occurrences
+                if needle in o.rule_name.lower()
+                or needle in o.message.lower()
+                or needle in o.category.lower()
+                or needle in o.event_type.lower()
+                or any(needle in key.lower() or needle in value.lower() for key, value in o.identifiers.items())
+            ]
+        occurrences.sort(key=lambda o: o.matched_at, reverse=True)
+        return occurrences
+
+    async def list_occurrences(
+        self,
+        project_id: UUID | None = None,
+        limit: int = 20,
+        offset: int = 0,
+        rule_ids: list[UUID] | None = None,
+        status: OccurrenceStatus | None = None,
+        since: datetime | None = None,
+        search: str | None = None,
+    ) -> tuple[list[Occurrence], int]:
+        occurrences = await self._query_occurrences(project_id, since, rule_ids, status, search)
+        return occurrences[offset : offset + limit], len(occurrences)
+
+    async def occurrence_counts_by_rule(
+        self,
+        project_id: UUID,
+        since: datetime | None = None,
+        search: str | None = None,
+    ) -> list[EventRuleCount]:
+        """Same shape as counts_by_rule, but counts paired Occurrences, not
+        raw match-flag documents -- these aren't the same number whenever
+        _pair_occurrences defensively drops a repeat match received while
+        one's already open (stale/duplicate data, or a dedup gap upstream).
+        EventsPanel's rule filter chips need this one: a chip's count has
+        to equal how many cards clicking it actually reveals, which is a
+        count of Occurrences (also time/search-filtered the same way the
+        list is), not Events. counts_by_rule itself is left alone --
+        Home.tsx's "lifetime activity" stat is a legitimate, different
+        question ("how many times has this fired ever"), and answering it
+        as a real Mongo aggregation instead of a full fetch+pair is worth
+        keeping fast for an unscoped, all-projects homepage load.
+
+        Project-scoped only (unlike counts_by_rule, which also serves an
+        all-projects call): status/pairing is a derived, cross-document
+        property with no Mongo-side aggregation here, so answering this
+        without a project_id would repeat a full-collection-scan cost on
+        every call, not just once at home-page load.
+        """
+        occurrences = await self._query_occurrences(project_id, since, None, None, search)
+        counts: dict[UUID, EventRuleCount] = {}
+        for occurrence in occurrences:
+            existing = counts.get(occurrence.rule_id)
+            if existing is None:
+                counts[occurrence.rule_id] = EventRuleCount(
+                    project_id=occurrence.project_id,
+                    rule_id=occurrence.rule_id,
+                    rule_name=occurrence.rule_name,
+                    count=1,
+                )
+            else:
+                existing.count += 1
+        return sorted(counts.values(), key=lambda c: c.count, reverse=True)
 
     async def unresolved_counts_by_project(self) -> list[ProjectUnresolvedCount]:
         # Not project-scoped -- the activity bar needs every project's
