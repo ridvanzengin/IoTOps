@@ -42,6 +42,19 @@ export function hashColor(id: string, palette: readonly string[] = PALETTE): str
   return palette[hash % palette.length];
 }
 
+// Position-based, not hashed -- for a fixed, fully-visible list (Projects,
+// in ActivityBar/Home) rendered together in a stable order, this
+// guarantees every palette color is used once before any repeat. Hashing
+// by id (hashColor) can't promise that even for a handful of items --
+// mod-N collisions happen well before N items are in play (birthday-
+// paradox risk) -- which is what "colors repeat too soon" turned out to
+// be. Keep hashColor for anything (like Rules) that needs the *same*
+// entity to render the *same* color across independent, unrelated
+// components, which only identity-hashing can guarantee.
+export function colorAtIndex(index: number, palette: readonly string[] = PALETTE): string {
+  return palette[index % palette.length];
+}
+
 // Same fallback-avatar pattern as hashColor -- paired with it wherever a
 // name-bearing entity (Project, initially) needs an avatar with no
 // dedicated image.

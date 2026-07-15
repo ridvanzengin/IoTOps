@@ -89,8 +89,14 @@ async def get_telemetry_service() -> TelemetryService:
     return TelemetryService(repository=TelemetryRepository(pool))
 
 
-def get_project_service() -> ProjectService:
-    return ProjectService(repository=ProjectRepository(get_database()))
+async def get_project_service() -> ProjectService:
+    return ProjectService(
+        repository=ProjectRepository(get_database()),
+        collector_service=get_collector_service(),
+        automater_service=get_automater_service(),
+        dashboard_service=await get_dashboard_service(),
+        query_rule_service=await get_query_rule_service(),
+    )
 
 
 async def get_query_rule_service() -> QueryRuleService:

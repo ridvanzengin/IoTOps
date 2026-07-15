@@ -25,6 +25,19 @@ function formatAxisValue(value: unknown): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+// Category axes render one explicit tick per row -- a dense time-series
+// query (e.g. a 1h range at a 20s publish interval is ~180 rows) is far
+// more labels than can fit without overlapping. Thin to a fixed target
+// count instead of relying on ECharts's default "auto" interval, which
+// wasn't skipping enough to stay readable. No-ops for short category
+// lists (e.g. a bar chart's handful of machine/array ids).
+const TARGET_VISIBLE_AXIS_LABELS = 8;
+
+function categoryAxisLabelInterval(pointCount: number): number {
+  if (pointCount <= TARGET_VISIBLE_AXIS_LABELS) return 0;
+  return Math.ceil(pointCount / TARGET_VISIBLE_AXIS_LABELS) - 1;
+}
+
 // connectNulls: false (set below) only creates a visible break where the
 // data array actually has an explicit null -- it does nothing for a gap
 // where a point in time simply has no row at all, which is exactly what
@@ -127,7 +140,13 @@ function buildXyOption(
       grid: { top: chart.legend ? 28 : 12, left: 4, right: 8, bottom: 26, containLabel: true },
       xAxis: {
         type: "time",
-        axisLabel: { formatter: formatAxisValue, fontSize: 11, color: AXIS_LABEL_COLOR },
+        // hideOverlap measures actual rendered label bounding boxes and
+        // hides whichever would visually collide -- adapts to the panel's
+        // real width/font size instead of guessing a fixed tick count,
+        // which a plain "time" axis with no interval control doesn't do
+        // on its own (ECharts still tried to place more ticks than a
+        // narrow half-width panel could legibly fit).
+        axisLabel: { formatter: formatAxisValue, hideOverlap: true, fontSize: 11, color: AXIS_LABEL_COLOR },
       },
       yAxis: {
         type: "value",
@@ -158,7 +177,30 @@ function buildXyOption(
     xAxis: {
       type: "category",
       data: axisValues(rows, chart.x_axis),
-      axisLabel: { formatter: formatAxisValue, fontSize: 11, color: AXIS_LABEL_COLOR },
+      // Only format as a time-of-day string when x_axis really is the
+      // "time" column (the literal-name convention every time-series
+      // panel in this app already uses) -- a plain category column (e.g.
+      // a bar chart's "machine_id") must render its raw label as-is.
+      // formatAxisValue's Date-parsing fallback is dangerously lenient
+      // (`new Date("cnc-01")` silently parses as a real date instead of
+      // failing), so applying it unconditionally here previously mangled
+      // any category value that happened to look date-ish.
+      axisLabel:
+        chart.x_axis === "time"
+          ? {
+              formatter: formatAxisValue,
+              interval: categoryAxisLabelInterval(rows.length),
+              hideOverlap: true,
+              fontSize: 11,
+              color: AXIS_LABEL_COLOR,
+            }
+          : {
+              formatter: (value: unknown) => String(value),
+              interval: categoryAxisLabelInterval(rows.length),
+              hideOverlap: true,
+              fontSize: 11,
+              color: AXIS_LABEL_COLOR,
+            },
     },
     yAxis: usesRightAxis
       ? [

@@ -185,6 +185,55 @@ async def test_evaluate_writes_clear_when_identifier_drops_out() -> None:
     assert occurrences[0].status == OccurrenceStatus.RESOLVED
 
 
+async def test_evaluate_interpolates_message_placeholders_on_match() -> None:
+    # QueryRules never go through custom-telegraf's rule.go (the real-time
+    # path's interpolateMessage) -- this is the Python-side equivalent, so
+    # {column} placeholders in a QueryRule's message must resolve the same
+    # way a real-time Rule's message already does.
+    query_rule = _query_rule(message="Station {station_id} wind: {wind_speed_kmh} km/h")
+    rows = [{"station_id": "wx-01", "wind_speed_kmh": 75.0}]
+    service, _repo, event_repository, _telemetry = await _service(
+        query_rules=[query_rule], rows_by_sql={query_rule.sql: rows}
+    )
+
+    await service.evaluate(query_rule)
+
+    events = await event_repository.list(rule_ids=[query_rule.id])
+    assert events[0].message == "Station wx-01 wind: 75.0 km/h"
+
+
+async def test_evaluate_interpolation_leaves_unresolvable_placeholder_blank() -> None:
+    query_rule = _query_rule(message="Station {station_id}: {unknown_column}")
+    rows = [{"station_id": "wx-01", "wind_speed_kmh": 75.0}]
+    service, _repo, event_repository, _telemetry = await _service(
+        query_rules=[query_rule], rows_by_sql={query_rule.sql: rows}
+    )
+
+    await service.evaluate(query_rule)
+
+    events = await event_repository.list(rule_ids=[query_rule.id])
+    assert events[0].message == "Station wx-01: "
+
+
+async def test_evaluate_interpolates_message_on_clear_from_identifiers() -> None:
+    # No fresh row is available at clear time (the entity dropped out of
+    # the result set) -- only identifiers survive from the original match,
+    # so a clear message can only interpolate identifier columns.
+    query_rule = _query_rule(message="Station {station_id} cleared")
+    sql = query_rule.sql
+    service, _repo, event_repository, fake_telemetry = await _service(
+        query_rules=[query_rule], rows_by_sql={sql: [{"station_id": "wx-01", "wind_speed_kmh": 75.0}]}
+    )
+    await service.evaluate(query_rule)
+
+    fake_telemetry.rows_by_sql[sql] = []
+    await service.evaluate(query_rule)
+
+    events = await event_repository.list(rule_ids=[query_rule.id])
+    clear_event = next(e for e in events if e.flag == EventFlag.CLEAR)
+    assert clear_event.message == "Station wx-01 cleared"
+
+
 async def test_evaluate_manual_resolve_mode_never_auto_clears() -> None:
     query_rule = _query_rule(resolve_mode=ResolveMode.MANUAL)
     sql = query_rule.sql

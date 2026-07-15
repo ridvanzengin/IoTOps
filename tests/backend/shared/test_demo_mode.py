@@ -1,13 +1,13 @@
+from pathlib import Path
+
 import pytest
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
-from mongomock_motor import AsyncMongoMockClient
 
 from app.config import settings
 from app.dependencies import get_project_service
 from app.main import app
-from app.project.repository import ProjectRepository
-from app.project.service import ProjectService
+from tests.backend.project.fakes import build_project_service
 
 # Every route that must be gated by block_in_demo_mode -- kept as an
 # explicit (method, path) set, not derived, so a route added later without
@@ -91,10 +91,9 @@ def test_ai_route_blocked_with_specific_message_in_demo_mode(monkeypatch: pytest
     assert response.json()["detail"] == "AI features are disabled in this demo environment."
 
 
-def test_mutating_route_allowed_when_demo_mode_off(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mutating_route_allowed_when_demo_mode_off(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(settings, "demo", False)
-    database = AsyncMongoMockClient()["iotops"]
-    service = ProjectService(repository=ProjectRepository(database))
+    service = build_project_service(tmp_path)
     app.dependency_overrides[get_project_service] = lambda: service
     try:
         client = TestClient(app)

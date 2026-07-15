@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useEvents } from "../context/EventsContext";
-import { hashColor, initials } from "../utils/color";
+import { colorAtIndex, initials } from "../utils/color";
 import { CopilotIcon } from "./icons";
 import "./ActivityBar.css";
 
@@ -35,7 +35,7 @@ export function ActivityBar() {
 
   return (
     <nav className="activity-bar">
-      {projects.map((project) => {
+      {projects.map((project, index) => {
         const count = unresolvedCounts[project.id] ?? 0;
         const isActive = activePanel?.kind === "project" && activePanel.projectId === project.id;
         return (
@@ -43,7 +43,7 @@ export function ActivityBar() {
             key={project.id}
             type="button"
             className={`activity-bar__icon ${isActive ? "activity-bar__icon--active" : ""}`}
-            style={{ background: hashColor(project.id) }}
+            style={{ background: colorAtIndex(index) }}
             title={project.name}
             onClick={() => handleProjectClick(project.id)}
           >

@@ -1,4 +1,6 @@
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import type { RefObject } from "react";
+import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import { Home } from "./pages/Home";
 import { AutomaterList } from "./pages/AutomaterList";
 import { AutomaterEditor } from "./pages/AutomaterEditor";
@@ -22,14 +24,32 @@ import { DemoModeProvider } from "./context/DemoModeContext";
 import { EventsProvider } from "./context/EventsContext";
 import "./App.css";
 
+// .app-content (not window) is the app's actual scrollable region -- see
+// App.css's .app-shell (fixed height, overflow: hidden). Resets scroll on
+// every route change (e.g. switching which project's dashboard is shown
+// via ActivityBar) since there's no window scroll position for React
+// Router's own <ScrollRestoration> (data-router only, this app uses a
+// plain BrowserRouter) to restore in the first place. Must render inside
+// <BrowserRouter> to call useLocation() -- App()'s own body executes
+// outside the Router context, since App() is what returns <BrowserRouter>.
+function ScrollToTopOnNavigate({ containerRef }: { containerRef: RefObject<HTMLDivElement | null> }) {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    containerRef.current?.scrollTo(0, 0);
+  }, [pathname]);
+  return null;
+}
+
 function App() {
+  const appContentRef = useRef<HTMLDivElement>(null);
   return (
     <BrowserRouter>
       <EventsProvider>
         <DemoModeProvider>
+          <ScrollToTopOnNavigate containerRef={appContentRef} />
           <div className="app-shell">
             <Sidebar />
-            <div className="app-content">
+            <div className="app-content" ref={appContentRef}>
               <Routes>
                 <Route path="/" element={<Home />} />
                 <Route path="/projects" element={<ProjectList />} />

@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
@@ -20,6 +21,25 @@ logger = logging.getLogger(__name__)
 
 _EXECUTION_TIMEOUT_SECONDS = 10.0
 _DURATION_UNITS = {"s": "seconds", "m": "minutes", "h": "hours"}
+
+# Mirrors custom-telegraf/plugins/processors/rule/rule.go's own
+# interpolateMessage: {name} placeholders substituted from the matched
+# row, identifiers taking priority over other columns (same tag-then-
+# field lookup order) -- the real-time path gets this for free from Go
+# (stamped onto the metric before the event ever reaches Python); a
+# QueryRule never goes through Go at all, so it needs the same behavior
+# implemented here. An unresolvable placeholder becomes "".
+_MESSAGE_PLACEHOLDER = re.compile(r"\{([a-zA-Z0-9_]+)\}")
+
+
+def _interpolate_message(template: str, identifiers: dict[str, str], row: dict[str, Any]) -> str:
+    values: dict[str, Any] = {**row, **identifiers}
+
+    def _replace(match: re.Match[str]) -> str:
+        value = values.get(match.group(1))
+        return "" if value is None else str(value)
+
+    return _MESSAGE_PLACEHOLDER.sub(_replace, template)
 
 
 def _parse_duration(value: str) -> timedelta:
@@ -172,7 +192,7 @@ class QueryRuleService:
             category=query_rule.category,
             severity=query_rule.severity,
             event_type=query_rule.event_type,
-            message=query_rule.message,
+            message=_interpolate_message(query_rule.message, identifiers, row),
             flag=flag,
             resolve_mode=query_rule.resolve_mode,
             identifier_keys=query_rule.identifiers,

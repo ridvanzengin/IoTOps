@@ -137,6 +137,7 @@ export function CollectorList() {
                             disabled={pendingId === collector.id}
                             onClick={() => {
                               setOpenMenu(null);
+                              if (!window.confirm(`Delete collector "${collector.name}"? This cannot be undone.`)) return;
                               withPending(collector.id, () => deleteCollector(collector.id));
                             }}
                           >
