@@ -240,11 +240,11 @@ export function Home() {
             need a human decision.
           </p>
           <div className="home-command__actions">
-            <Link className="button button--primary" to="/collectors/new">
-              New Collector
+            <Link className="button button--primary" to="/projects/new">
+              New Project
             </Link>
-            <Link className="button" to="/automaters/new">
-              New Automation
+            <Link className="button" to="/collectors/new">
+              New Collector
             </Link>
           </div>
         </div>
