@@ -8,6 +8,7 @@ from docker.models.containers import Container
 from app.collector.models import Collector
 from app.shared.enums import CollectorStatus
 from app.shared.models import DockerConfig
+from app.shared.naming import slugify
 
 _CONTAINER_STATE_MAP = {
     "created": CollectorStatus.CREATED,
@@ -20,8 +21,13 @@ _CONTAINER_STATE_MAP = {
 }
 
 
-def _container_name(collector: Collector) -> str:
-    return f"iotops-collector-{collector.id}"
+def collector_container_name(collector: Collector) -> str:
+    # Slug of the (mutable, user-facing) name for readability in `docker
+    # ps`/logs, plus a short id suffix -- the id keeps the name unique
+    # even when two Collectors share a name or one is renamed to collide
+    # with another's slug, and stays stable enough to eyeball-match back
+    # to a specific Collector without needing the full UUID.
+    return f"iotops-collector-{slugify(collector.name, fallback='collector')}-{str(collector.id)[:8]}"
 
 
 class CollectorDockerManager:
@@ -41,7 +47,15 @@ class CollectorDockerManager:
 
     def deploy(self, collector: Collector, toml_config: str) -> Collector:
         config_path = self._write_config(collector, toml_config)
-        container_name = _container_name(collector)
+        # The container name is derived from the (mutable) Collector name,
+        # so a rename between deploys changes it -- remove whatever this
+        # Collector was previously deployed as (by its *stored* name), not
+        # just the freshly computed one, or the old container is silently
+        # orphaned (still running, still consuming the same input) instead
+        # of replaced.
+        if collector.docker is not None:
+            self._remove_container(collector.docker.container_name)
+        container_name = collector_container_name(collector)
         self._remove_container(container_name)
 
         container = self._client.containers.run(

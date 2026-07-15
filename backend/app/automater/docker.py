@@ -8,6 +8,7 @@ from docker.models.containers import Container
 from app.automater.models import Automater
 from app.shared.enums import CollectorStatus
 from app.shared.models import DockerConfig
+from app.shared.naming import slugify
 
 _CONTAINER_STATE_MAP = {
     "created": CollectorStatus.CREATED,
@@ -20,8 +21,16 @@ _CONTAINER_STATE_MAP = {
 }
 
 
-def _container_name(automater: Automater) -> str:
-    return f"iotops-automater-{automater.id}"
+def automater_container_name(automater: Automater) -> str:
+    # Slug of the (mutable, user-facing) name for readability in `docker
+    # ps`/logs, plus a short id suffix for uniqueness/stability -- see
+    # collector_container_name's matching comment. Exported (not
+    # underscore-prefixed) because AutomaterService's HTTP fan-out
+    # forwarding also needs to compute this exact hostname (see its
+    # _http_forward_url/_resync_http_forwarding) -- the two must never be
+    # able to drift apart, since a Collector reaches this Automater's
+    # http_listener_v2 by this name on the shared docker network.
+    return f"iotops-automater-{slugify(automater.name, fallback='automater')}-{str(automater.id)[:8]}"
 
 
 class AutomaterDockerManager:
@@ -41,7 +50,16 @@ class AutomaterDockerManager:
 
     def deploy(self, automater: Automater, toml_config: str) -> Automater:
         config_path = self._write_config(automater, toml_config)
-        container_name = _container_name(automater)
+        # See collector_container_name's matching comment in
+        # collector/docker.py -- same rename-orphans-the-old-container
+        # risk applies here, and matters more: a stale-named Automater
+        # container is also unreachable at the hostname any Collector's
+        # http_forward output was pointing at (see
+        # AutomaterService._resync_http_forwarding, which patches those
+        # up after every deploy).
+        if automater.docker is not None:
+            self._remove_container(automater.docker.container_name)
+        container_name = automater_container_name(automater)
         self._remove_container(container_name)
 
         container = self._client.containers.run(

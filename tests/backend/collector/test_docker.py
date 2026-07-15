@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from docker.errors import NotFound
 
-from app.collector.docker import CollectorDockerManager
+from app.collector.docker import CollectorDockerManager, collector_container_name
 from app.collector.models import Collector
 from app.shared.models import InputPlugin, OutputPlugin
 from app.shared.enums import CollectorStatus
@@ -83,7 +83,10 @@ def test_deploy_writes_config_and_starts_container(tmp_path: Path) -> None:
     written = tmp_path / "runtime" / "collectors" / str(collector.id) / "telegraf.conf"
     assert written.read_text() == "toml contents"
     assert collector.docker is not None
-    assert collector.docker.container_name == f"iotops-collector-{collector.id}"
+    assert collector.docker.container_name == collector_container_name(collector)
+    # Human-readable, not just a bare UUID -- the actual bug this naming
+    # scheme exists to fix (see collector_container_name's own comment).
+    assert "hive-collector" in collector.docker.container_name
     assert collector.status == CollectorStatus.RUNNING
 
     [run_call] = client.containers.run_calls
@@ -98,13 +101,34 @@ def test_deploy_removes_pre_existing_container_with_same_name(tmp_path: Path) ->
     client = FakeDockerClient()
     manager = _manager(tmp_path, client)
     collector = _collector()
-    container_name = f"iotops-collector-{collector.id}"
+    container_name = collector_container_name(collector)
     stale = FakeContainer(container_name)
     client.containers.containers[container_name] = stale
 
     manager.deploy(collector, "toml contents")
 
     assert stale.removed is True
+
+
+def test_redeploy_after_rename_removes_the_old_named_container(tmp_path: Path) -> None:
+    # Container names are now derived from the (mutable) Collector name --
+    # a rename between deploys means the previously-deployed container's
+    # name and the freshly-computed one differ. Without removing the old
+    # one by its *stored* name, it would be silently orphaned (still
+    # running, still consuming the same input) instead of replaced.
+    client = FakeDockerClient()
+    manager = _manager(tmp_path, client)
+    collector = _collector()
+    manager.deploy(collector, "toml contents")
+    old_container_name = collector.docker.container_name  # type: ignore[union-attr]
+    old_container = client.containers.containers[old_container_name]
+
+    renamed = collector.model_copy(update={"name": "Renamed Hive Collector"})
+    manager.deploy(renamed, "toml contents")
+
+    assert old_container.removed is True
+    assert renamed.docker.container_name != old_container_name  # type: ignore[union-attr]
+    assert client.containers.containers[renamed.docker.container_name].removed is False  # type: ignore[union-attr]
 
 
 def test_remove_deletes_generated_config_directory(tmp_path: Path) -> None:
