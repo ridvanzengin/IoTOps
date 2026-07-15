@@ -1,14 +1,123 @@
+.home-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.home-command {
+  display: flex;
+  align-items: flex-end;
+  gap: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, rgba(109, 40, 217, 0.11), rgba(77, 212, 172, 0.09)),
+    var(--bg);
+  padding: 28px;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.home-command__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.home-command__promo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  flex-shrink: 0;
+  width: 260px;
+  min-height: 158px;
+  padding: 18px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent-bg) 65%, transparent);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+
+.home-command__promo:hover {
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+
+.home-command__promo-icon {
+  width: 24px;
+  height: 24px;
+  color: var(--accent);
+}
+
+.home-command__promo strong {
+  color: var(--text-h);
+  font-size: 15px;
+}
+
+.home-command__promo span {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.home-command__eyebrow {
+  margin: 0 0 8px;
+  color: var(--accent-h);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.home-command h1 {
+  max-width: 760px;
+  font-size: 34px;
+  line-height: 1.08;
+  margin: 0;
+}
+
+.home-command__copy {
+  max-width: 720px;
+  margin: 12px 0 0;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.home-command__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+}
+
 .home-tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
-  margin: 8px 0 36px;
+}
+
+.home-tile--events {
+  cursor: default;
+}
+
+.home-tile--events .home-tile__icon {
+  color: var(--success);
+}
+
+.home-tile--events-active .home-tile__count,
+.home-tile--events-active .home-tile__icon {
+  color: var(--danger);
 }
 
 .home-tile {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  min-height: 158px;
   padding: 16px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -25,78 +134,311 @@
   transform: translateY(-1px);
 }
 
+.home-tile__topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+}
+
 .home-tile__icon {
-  width: 20px;
-  height: 20px;
+  width: 21px;
+  height: 21px;
   color: var(--accent);
-  margin-bottom: 6px;
+  flex-shrink: 0;
+}
+
+.home-tile__sub {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: right;
+}
+
+.home-tile__main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 16px;
 }
 
 .home-tile__count {
-  font-size: 28px;
-  font-weight: 700;
   color: var(--text-h);
+  font-size: 32px;
+  font-weight: 760;
   line-height: 1;
 }
 
 .home-tile__label {
-  font-size: 13px;
-  font-weight: 600;
   color: var(--text-h);
-  margin-top: 4px;
-}
-
-.home-tile__sub {
-  font-size: 11px;
-  color: var(--success);
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 .home-tile__desc {
-  margin: 6px 0 0;
-  font-size: 12px;
+  margin: auto 0 0;
   color: var(--text);
-  line-height: 1.4;
+  font-size: 12px;
+  line-height: 1.42;
 }
 
-.home-tile--events {
-  cursor: default;
+.home-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
 }
 
-.home-tile--events:hover {
-  border-color: var(--border);
+/* Equal height across System Health / Projects / AI Suggestions, sized
+   to whichever card's content is tallest (grid stretch) rather than a
+   fixed height -- avoids dead space when all three are short, while
+   still keeping them from drifting apart. Capped so a card with a lot
+   of items grows the row only so far before its own list scrolls. */
+.home-overview-grid > .home-panel-card {
+  max-height: 420px;
+}
+
+.home-overview-grid .home-health-list,
+.home-overview-grid .home-projects,
+.home-overview-grid .home-suggestions-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.home-panel-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
-  transform: none;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
-.home-tile--events .home-tile__icon {
+.home-panel-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.home-panel-card__header h2 {
+  font-size: 16px;
+  margin-bottom: 4px;
+}
+
+.home-panel-card__header p {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.home-panel-card__icon {
+  width: 22px;
+  height: 22px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.home-health-summary {
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.home-health-summary--clear {
   color: var(--success);
+  background: var(--success-bg);
 }
 
-.home-tile--events-active .home-tile__count,
-.home-tile--events-active .home-tile__icon {
+.home-health-summary--attention {
   color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.home-panel-card--wide {
+  padding: 16px 18px;
+}
+
+.home-health-list {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.home-health-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-subtle);
+}
+
+.home-health-item__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.home-health-item__label strong {
+  color: var(--text-h);
+  font-size: 13px;
+}
+
+.home-health-item__detail {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.home-health-item__status {
+  color: var(--text);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.home-health-item__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.home-health-item__dot--success {
+  background: var(--success);
+}
+
+.home-health-item__dot--danger {
+  background: var(--danger);
+}
+
+.home-health-item__dot--warning {
+  background: var(--severity-medium);
+}
+
+.home-health-item__dot--muted {
+  background: var(--text);
+}
+
+.home-suggestions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.home-suggestions-list .home-next-action {
+  margin-top: 0;
+}
+
+.home-flow {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr);
+  gap: 20px;
+  align-items: center;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  box-shadow: var(--shadow-sm);
+}
+
+.home-flow__copy h2 {
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+
+.home-flow__copy p:not(.home-command__eyebrow) {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.home-flow__steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.home-flow__step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-height: 118px;
+  padding: 18px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-subtle);
+  color: inherit;
+  text-align: center;
+  text-decoration: none;
+}
+
+.home-flow__step:hover {
+  border-color: var(--accent-border);
+}
+
+.home-flow__step svg {
+  width: 24px;
+  height: 24px;
+  color: var(--accent);
+}
+
+.home-flow__step strong {
+  color: var(--text-h);
+  font-size: 13px;
+}
+
+.home-flow__step span {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.25;
 }
 
 .home-section {
-  margin-bottom: 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .home-section__header {
   display: flex;
-  align-items: baseline;
+  align-items: flex-end;
   justify-content: space-between;
-  margin-bottom: 14px;
+  gap: 16px;
 }
 
 .home-section__header h2 {
   font-size: 16px;
+  margin-bottom: 4px;
+}
+
+.home-section__header p {
+  color: var(--text);
+  font-size: 13px;
 }
 
 .home-section__link {
-  font-size: 13px;
   color: var(--accent-h);
+  font-size: 13px;
+  font-weight: 700;
   text-decoration: none;
+  white-space: nowrap;
 }
 
 .home-section__link:hover {
@@ -108,59 +450,52 @@
   font-size: 13px;
 }
 
-.home-empty {
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
-  padding: 32px 24px;
-  text-align: center;
-  color: var(--text);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 14px;
-}
-
+/* 2 columns so 4 projects form a 2x2 grid -- compact cards, sized to fit
+   comfortably within the same fixed height as System Health/AI Suggestions
+   (see .home-overview-grid > .home-panel-card). */
 .home-projects {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 10px;
 }
 
 .home-project-card {
-  background: var(--bg);
+  background: var(--bg-subtle);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
-  padding: 16px;
+  border-radius: 7px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 4px;
+  min-width: 0;
 }
 
 .home-project-card__header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 6px;
 }
 
 .home-project-card__badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
   color: white;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 10px;
+  font-weight: 800;
   flex-shrink: 0;
 }
 
 .home-project-card__name {
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 12px;
   color: var(--text-h);
   text-decoration: none;
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -175,86 +510,100 @@
   background: var(--danger-bg);
   color: var(--danger);
   border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 11px;
-  font-weight: 700;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 800;
   flex-shrink: 0;
   white-space: nowrap;
 }
 
-.home-project-card__desc {
-  margin: 0;
-  font-size: 13px;
+.home-project-card__meta {
   color: var(--text);
-}
-
-.home-project-card__stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  font-size: 12px;
-  color: var(--text);
+  font-size: 11px;
 }
 
 .home-project-card__footer {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   margin-top: auto;
-  padding-top: 4px;
+  padding-top: 2px;
 }
 
-.home-project-card__footer .button {
-  padding: 5px 12px;
-  font-size: 12px;
+.home-project-card__action {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-h);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.home-project-card__action:hover {
+  text-decoration: underline;
 }
 
 .home-panels {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
 
-.home-panel-card {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
+.home-panel-card--next {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-bg) 58%, transparent), transparent),
+    var(--bg);
 }
 
-.home-panel-card__header {
+.home-next-action {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
+  width: 100%;
+  min-height: 48px;
+  margin-top: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--accent-border);
+  border-radius: 7px;
+  background: var(--accent-bg);
+  color: var(--accent-h);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
 }
 
-.home-panel-card__header h2 {
-  font-size: 16px;
+.home-next-action::after {
+  content: "→";
+}
+
+.home-panel-card__progress,
+.home-badge-soon {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .home-panel-card__progress {
-  font-size: 12px;
-  font-weight: 700;
   color: var(--text);
 }
 
 .home-badge-soon {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   color: var(--accent-h);
   background: var(--accent-bg);
   border-radius: 999px;
   padding: 3px 10px;
+  white-space: nowrap;
 }
 
 .home-copilot {
   display: flex;
-  gap: 16px;
+  gap: 14px;
   align-items: flex-start;
 }
 
@@ -266,20 +615,15 @@
   margin-top: 2px;
 }
 
-.home-copilot__lead {
-  margin: 0 0 10px;
-  font-size: 14px;
-  color: var(--text-h);
+.home-copilot__body {
+  flex: 1;
+  min-width: 0;
 }
 
-.home-copilot__features {
-  margin: 0 0 16px;
-  padding-left: 18px;
-  color: var(--text);
+.home-copilot__lead {
+  margin: 0 0 14px;
   font-size: 13px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  color: var(--text);
 }
 
 .home-getting-started__list {
@@ -334,5 +678,55 @@ a.home-getting-started__row:hover {
   margin: 10px 0 0;
   font-size: 13px;
   color: var(--success);
-  font-weight: 600;
+  font-weight: 700;
+}
+
+@media (max-width: 1180px) {
+  .home-overview-grid,
+  .home-flow {
+    grid-template-columns: 1fr;
+  }
+
+  .home-tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .home-panels {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .home-page {
+    gap: 18px;
+  }
+
+  .home-command {
+    flex-direction: column;
+    padding: 20px;
+  }
+
+  .home-command h1 {
+    font-size: 26px;
+  }
+
+  .home-command__promo {
+    width: auto;
+    min-height: 0;
+  }
+
+  .home-overview-grid > .home-panel-card {
+    max-height: none;
+  }
+
+  .home-tiles,
+  .home-projects,
+  .home-flow__steps {
+    grid-template-columns: 1fr;
+  }
+
+  .home-section__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
