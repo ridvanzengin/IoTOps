@@ -4,12 +4,14 @@ from fastapi import APIRouter, Depends
 
 from app.automater.models import Automater, AutomaterInput, CreateRuleRequest, SetRuleEnabledRequest
 from app.automater.service import AutomaterService
-from app.dependencies import get_automater_service
+from app.dependencies import block_in_demo_mode, get_automater_service
 
 router = APIRouter(prefix="/api/automater", tags=["automater"])
 
 
-@router.post("", response_model=Automater, status_code=201)
+@router.post(
+    "", response_model=Automater, status_code=201, dependencies=[Depends(block_in_demo_mode())]
+)
 async def create_automater(
     payload: AutomaterInput,
     service: AutomaterService = Depends(get_automater_service),
@@ -17,7 +19,9 @@ async def create_automater(
     return await service.create(payload)
 
 
-@router.post("/rules", response_model=Automater, status_code=201)
+@router.post(
+    "/rules", response_model=Automater, status_code=201, dependencies=[Depends(block_in_demo_mode())]
+)
 async def create_rule(
     payload: CreateRuleRequest,
     service: AutomaterService = Depends(get_automater_service),
@@ -32,7 +36,11 @@ async def create_rule(
     )
 
 
-@router.put("/{automater_id}/rules/{rule_id}/enabled", response_model=Automater)
+@router.put(
+    "/{automater_id}/rules/{rule_id}/enabled",
+    response_model=Automater,
+    dependencies=[Depends(block_in_demo_mode())],
+)
 async def set_rule_enabled(
     automater_id: UUID,
     rule_id: UUID,
@@ -42,7 +50,11 @@ async def set_rule_enabled(
     return await service.set_rule_enabled(automater_id, rule_id, payload.enabled)
 
 
-@router.delete("/{automater_id}/rules/{rule_id}", response_model=Automater)
+@router.delete(
+    "/{automater_id}/rules/{rule_id}",
+    response_model=Automater,
+    dependencies=[Depends(block_in_demo_mode())],
+)
 async def delete_rule(
     automater_id: UUID,
     rule_id: UUID,
@@ -66,7 +78,9 @@ async def get_automater(
     return await service.get(automater_id)
 
 
-@router.put("/{automater_id}", response_model=Automater)
+@router.put(
+    "/{automater_id}", response_model=Automater, dependencies=[Depends(block_in_demo_mode())]
+)
 async def update_automater(
     automater_id: UUID,
     payload: AutomaterInput,
@@ -75,7 +89,9 @@ async def update_automater(
     return await service.update(automater_id, payload)
 
 
-@router.delete("/{automater_id}", status_code=204)
+@router.delete(
+    "/{automater_id}", status_code=204, dependencies=[Depends(block_in_demo_mode())]
+)
 async def delete_automater(
     automater_id: UUID,
     service: AutomaterService = Depends(get_automater_service),
@@ -83,7 +99,11 @@ async def delete_automater(
     await service.delete(automater_id)
 
 
-@router.post("/{automater_id}/deployment", response_model=Automater)
+@router.post(
+    "/{automater_id}/deployment",
+    response_model=Automater,
+    dependencies=[Depends(block_in_demo_mode())],
+)
 async def deploy_automater(
     automater_id: UUID,
     service: AutomaterService = Depends(get_automater_service),
@@ -91,7 +111,11 @@ async def deploy_automater(
     return await service.deploy(automater_id)
 
 
-@router.delete("/{automater_id}/deployment", response_model=Automater)
+@router.delete(
+    "/{automater_id}/deployment",
+    response_model=Automater,
+    dependencies=[Depends(block_in_demo_mode())],
+)
 async def stop_automater_deployment(
     automater_id: UUID,
     service: AutomaterService = Depends(get_automater_service),

@@ -13,6 +13,7 @@ from app.project.api import router as project_router
 from app.query_rule.api import router as query_rule_router
 from app.shared.exceptions import (
     AiGenerationError,
+    DemoModeError,
     DuplicateNameError,
     EntityNotFoundError,
     InvalidOperationError,
@@ -81,6 +82,11 @@ async def ai_generation_error_handler(request: Request, exc: AiGenerationError) 
     return JSONResponse(status_code=502, content={"detail": str(exc)})
 
 
+@app.exception_handler(DemoModeError)
+async def demo_mode_error_handler(request: Request, exc: DemoModeError) -> JSONResponse:
+    return JSONResponse(status_code=403, content={"detail": str(exc)})
+
+
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict[str, object]:
+    return {"status": "ok", "demo": settings.demo}

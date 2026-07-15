@@ -22,6 +22,7 @@ from app.project.repository import ProjectRepository
 from app.project.service import ProjectService
 from app.query_rule.repository import QueryRuleRepository
 from app.query_rule.service import QueryRuleService
+from app.shared.exceptions import DemoModeError
 from app.telemetry.repository import TelemetryRepository
 from app.telemetry.service import TelemetryService
 
@@ -153,3 +154,19 @@ def get_firing_redis_client() -> async_redis.Redis:
     if _firing_redis_client is None:
         _firing_redis_client = async_redis.from_url(settings.automater_firing_redis_uri)
     return _firing_redis_client
+
+
+def block_in_demo_mode(
+    reason: str = "This is a read-only demo instance. Create, edit, and delete actions are disabled.",
+):
+    # A dependency factory, not a plain dependency -- lets a route override
+    # the message (see the AI routes, which use a more specific reason)
+    # while every other mutating route just uses the default. Wire via
+    # `dependencies=[Depends(block_in_demo_mode())]` on each mutating route
+    # decorator -- per-route, not router-level, since every router here
+    # mixes GET/read-only-POST routes with mutating ones.
+    def _guard() -> None:
+        if settings.demo:
+            raise DemoModeError(reason)
+
+    return _guard

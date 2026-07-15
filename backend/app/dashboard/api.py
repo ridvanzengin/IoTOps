@@ -14,13 +14,15 @@ from app.dashboard.models import (
     VariableOptionsResult,
 )
 from app.dashboard.service import DashboardService
-from app.dependencies import get_dashboard_service
+from app.dependencies import block_in_demo_mode, get_dashboard_service
 from app.telemetry.models import TelemetrySqlQueryResult
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
-@router.post("", response_model=Dashboard, status_code=201)
+@router.post(
+    "", response_model=Dashboard, status_code=201, dependencies=[Depends(block_in_demo_mode())]
+)
 async def create_dashboard(
     payload: DashboardInput,
     service: DashboardService = Depends(get_dashboard_service),
@@ -43,7 +45,9 @@ async def get_dashboard(
     return await service.get(dashboard_id)
 
 
-@router.put("/{dashboard_id}", response_model=Dashboard)
+@router.put(
+    "/{dashboard_id}", response_model=Dashboard, dependencies=[Depends(block_in_demo_mode())]
+)
 async def update_dashboard(
     dashboard_id: UUID,
     payload: DashboardInput,
@@ -52,7 +56,9 @@ async def update_dashboard(
     return await service.update(dashboard_id, payload)
 
 
-@router.delete("/{dashboard_id}", status_code=204)
+@router.delete(
+    "/{dashboard_id}", status_code=204, dependencies=[Depends(block_in_demo_mode())]
+)
 async def delete_dashboard(
     dashboard_id: UUID,
     service: DashboardService = Depends(get_dashboard_service),
@@ -60,7 +66,12 @@ async def delete_dashboard(
     await service.delete(dashboard_id)
 
 
-@router.post("/{dashboard_id}/panel", response_model=Dashboard, status_code=201)
+@router.post(
+    "/{dashboard_id}/panel",
+    response_model=Dashboard,
+    status_code=201,
+    dependencies=[Depends(block_in_demo_mode())],
+)
 async def add_panel(
     dashboard_id: UUID,
     payload: PanelInput,
@@ -69,7 +80,11 @@ async def add_panel(
     return await service.add_panel(dashboard_id, payload)
 
 
-@router.put("/{dashboard_id}/panel/{panel_id}", response_model=Dashboard)
+@router.put(
+    "/{dashboard_id}/panel/{panel_id}",
+    response_model=Dashboard,
+    dependencies=[Depends(block_in_demo_mode())],
+)
 async def update_panel(
     dashboard_id: UUID,
     panel_id: UUID,
@@ -79,7 +94,11 @@ async def update_panel(
     return await service.update_panel(dashboard_id, panel_id, payload)
 
 
-@router.delete("/{dashboard_id}/panel/{panel_id}", response_model=Dashboard)
+@router.delete(
+    "/{dashboard_id}/panel/{panel_id}",
+    response_model=Dashboard,
+    dependencies=[Depends(block_in_demo_mode())],
+)
 async def remove_panel(
     dashboard_id: UUID,
     panel_id: UUID,
@@ -88,7 +107,9 @@ async def remove_panel(
     return await service.remove_panel(dashboard_id, panel_id)
 
 
-@router.put("/{dashboard_id}/layout", response_model=Dashboard)
+@router.put(
+    "/{dashboard_id}/layout", response_model=Dashboard, dependencies=[Depends(block_in_demo_mode())]
+)
 async def save_layout(
     dashboard_id: UUID,
     payload: DashboardLayoutInput,

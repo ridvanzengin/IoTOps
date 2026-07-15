@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from app.dependencies import get_async_redis_client, get_event_service
+from app.dependencies import block_in_demo_mode, get_async_redis_client, get_event_service
 from app.event.models import Event, EventRuleCount, Occurrence, OccurrencePage, OccurrenceStatus, ProjectUnresolvedCount
 from app.event.service import EventService
 from app.shared.time_range import resolve_time_range
@@ -89,7 +89,11 @@ async def get_unresolved_counts(
     return await service.unresolved_counts_by_project()
 
 
-@router.post("/occurrences/{event_id}/resolve", response_model=Occurrence)
+@router.post(
+    "/occurrences/{event_id}/resolve",
+    response_model=Occurrence,
+    dependencies=[Depends(block_in_demo_mode())],
+)
 async def resolve_occurrence(
     event_id: UUID,
     body: ResolveOccurrenceRequest,
