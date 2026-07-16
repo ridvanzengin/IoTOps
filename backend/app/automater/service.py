@@ -114,7 +114,23 @@ class AutomaterService:
             )
             self._validate_plugin_configurations(automater)
             automater = await self._repository.create(automater)
+            # Deploy before wiring up http forwarding, and roll back the
+            # just-created Automater entirely if deploy fails -- a failed
+            # deploy (e.g. the configured Telegraf image not being
+            # available yet) used to leave an orphaned, never-deployed
+            # Automater behind, and a caller retrying the same "create
+            # new" request (its view of the world hasn't changed, it has
+            # no id to reuse) would pile up another one every attempt
+            # instead of cleanly retrying from scratch. Only this
+            # brand-new-Automater path needs the rollback -- adding a rule
+            # to an already-existing Automater has nothing new to delete.
+            try:
+                automater = await self._redeploy_or_stop(automater)
+            except Exception:
+                await self._repository.delete(automater.id)
+                raise
             await self._ensure_http_forwarding(collector, automater, matched_input)
+            return automater
 
         return await self._redeploy_or_stop(automater)
 
