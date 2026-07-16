@@ -42,7 +42,13 @@ async def _evaluate_due_query_rules() -> None:
     # this scale (same stance already taken elsewhere in this codebase --
     # see the events-pairing-on-every-read comment in ROADMAP.md).
     mongo_client: AsyncIOMotorClient = AsyncIOMotorClient(settings.mongo_uri)
-    timescale_pool = await asyncpg.create_pool(settings.timescale_uri)
+    # Small pool, not asyncpg's default (min_size=10, max_size=10) -- this
+    # opens and closes every 30s alongside the backend's own long-lived
+    # pool (app/database.py) on the same connection-constrained shared
+    # TimescaleDB instance (see the production deployment plan).
+    timescale_pool = await asyncpg.create_pool(
+        settings.timescale_uri, min_size=1, max_size=3
+    )
     redis_client = async_redis.from_url(settings.redis_uri)
     try:
         database = mongo_client.get_default_database()
