@@ -33,6 +33,23 @@
   opacity: 1;
 }
 
+/* Sits above the project icons, with its own bottom divider so it reads
+   as a distinct "app-level" control rather than another project. */
+.activity-bar__icon--theme {
+  background: var(--bg-subtle);
+  color: var(--text);
+  width: 36px;
+  margin-bottom: 8px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+  border-radius: 8px 8px 0 0;
+}
+
+.activity-bar__theme-icon {
+  width: 18px;
+  height: 18px;
+}
+
 .activity-bar__icon--active {
   opacity: 1;
   outline: 2px solid var(--accent);

@@ -1,7 +1,8 @@
 import { useNavigate } from "react-router-dom";
 import { useEvents } from "../context/EventsContext";
+import { useTheme } from "../context/ThemeContext";
 import { colorAtIndex, initials } from "../utils/color";
-import { CopilotIcon } from "./icons";
+import { CopilotIcon, MoonIcon, SunIcon } from "./icons";
 import "./ActivityBar.css";
 
 // Persistent, always-visible icon rail -- one icon per Project plus one
@@ -12,6 +13,7 @@ import "./ActivityBar.css";
 export function ActivityBar() {
   const { projects, dashboardsByProject, unresolvedCounts, activePanel, openProjectPanel, openCopilotPanel, closePanel } =
     useEvents();
+  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
 
   function handleProjectClick(projectId: string) {
@@ -35,6 +37,16 @@ export function ActivityBar() {
 
   return (
     <nav className="activity-bar">
+      <button
+        type="button"
+        className="activity-bar__icon activity-bar__icon--theme"
+        title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+        aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+        aria-pressed={theme === "light"}
+        onClick={toggleTheme}
+      >
+        {theme === "dark" ? <SunIcon className="activity-bar__theme-icon" /> : <MoonIcon className="activity-bar__theme-icon" />}
+      </button>
       {projects.map((project, index) => {
         const count = unresolvedCounts[project.id] ?? 0;
         const isActive = activePanel?.kind === "project" && activePanel.projectId === project.id;

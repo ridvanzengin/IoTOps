@@ -23,6 +23,7 @@ import { EventsPanel } from "./components/EventsPanel";
 import { Toast } from "./components/Toast";
 import { DemoModeProvider } from "./context/DemoModeContext";
 import { EventsProvider } from "./context/EventsContext";
+import { ThemeProvider } from "./context/ThemeContext";
 import "./App.css";
 
 // .app-content (not window) is the app's actual scrollable region -- see
@@ -45,43 +46,45 @@ function App() {
   const appContentRef = useRef<HTMLDivElement>(null);
   return (
     <BrowserRouter>
-      <EventsProvider>
-        <DemoModeProvider>
-          <ScrollToTopOnNavigate containerRef={appContentRef} />
-          <div className="app-shell">
-            <Sidebar />
-            <div className="app-content" ref={appContentRef}>
-              <Routes>
-                <Route path="/" element={<Home />} />
-                <Route path="/projects" element={<ProjectList />} />
-                <Route path="/projects/new" element={<ProjectForm />} />
-                <Route path="/projects/:id/edit" element={<ProjectForm />} />
-                <Route path="/collectors" element={<CollectorList />} />
-                <Route path="/collectors/new" element={<CollectorEditor />} />
-                <Route path="/automaters" element={<AutomaterList />} />
-                <Route path="/automaters/new" element={<AutomaterEditor />} />
-                <Route path="/query-rules" element={<QueryRuleList />} />
-                <Route path="/query-rules/new" element={<QueryRuleEditor />} />
-                <Route path="/dashboards" element={<DashboardList />} />
-                <Route path="/dashboards/new" element={<DashboardForm />} />
-                <Route path="/dashboards/:id" element={<DashboardEditor />} />
-                <Route path="/dashboards/:dashboardId/panels/new" element={<PanelBuilder />} />
-                <Route path="/dashboards/:dashboardId/panels/:panelId/edit" element={<PanelBuilder />} />
-                <Route path="/dashboards/:dashboardId/variables" element={<VariableList />} />
-                <Route path="/dashboards/:dashboardId/variables/new" element={<VariableBuilder />} />
-                <Route
-                  path="/dashboards/:dashboardId/variables/:variableName/edit"
-                  element={<VariableBuilder />}
-                />
-                <Route path="/docs" element={<Docs />} />
-              </Routes>
+      <ThemeProvider>
+        <EventsProvider>
+          <DemoModeProvider>
+            <ScrollToTopOnNavigate containerRef={appContentRef} />
+            <div className="app-shell">
+              <Sidebar />
+              <div className="app-content" ref={appContentRef}>
+                <Routes>
+                  <Route path="/" element={<Home />} />
+                  <Route path="/projects" element={<ProjectList />} />
+                  <Route path="/projects/new" element={<ProjectForm />} />
+                  <Route path="/projects/:id/edit" element={<ProjectForm />} />
+                  <Route path="/collectors" element={<CollectorList />} />
+                  <Route path="/collectors/new" element={<CollectorEditor />} />
+                  <Route path="/automaters" element={<AutomaterList />} />
+                  <Route path="/automaters/new" element={<AutomaterEditor />} />
+                  <Route path="/query-rules" element={<QueryRuleList />} />
+                  <Route path="/query-rules/new" element={<QueryRuleEditor />} />
+                  <Route path="/dashboards" element={<DashboardList />} />
+                  <Route path="/dashboards/new" element={<DashboardForm />} />
+                  <Route path="/dashboards/:id" element={<DashboardEditor />} />
+                  <Route path="/dashboards/:dashboardId/panels/new" element={<PanelBuilder />} />
+                  <Route path="/dashboards/:dashboardId/panels/:panelId/edit" element={<PanelBuilder />} />
+                  <Route path="/dashboards/:dashboardId/variables" element={<VariableList />} />
+                  <Route path="/dashboards/:dashboardId/variables/new" element={<VariableBuilder />} />
+                  <Route
+                    path="/dashboards/:dashboardId/variables/:variableName/edit"
+                    element={<VariableBuilder />}
+                  />
+                  <Route path="/docs" element={<Docs />} />
+                </Routes>
+              </div>
+              <EventsPanel />
+              <ActivityBar />
             </div>
-            <EventsPanel />
-            <ActivityBar />
-          </div>
-          <Toast />
-        </DemoModeProvider>
-      </EventsProvider>
+            <Toast />
+          </DemoModeProvider>
+        </EventsProvider>
+      </ThemeProvider>
     </BrowserRouter>
   );
 }

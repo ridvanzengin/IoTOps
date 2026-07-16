@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import ReactECharts from "echarts-for-react";
 import { buildChartOption, buildEventOverlay } from "../charts/options";
+import { useTheme } from "../context/ThemeContext";
 import type { Chart } from "../types/dashboard";
 import type { Event } from "../types/event";
 
@@ -12,6 +13,13 @@ interface ChartPreviewProps {
 }
 
 export function ChartPreview({ chart, rows, height = 260, events = [] }: ChartPreviewProps) {
+  // buildChartOption/buildEventOverlay read the active theme directly off
+  // the DOM (charts/options.ts) rather than taking it as a parameter --
+  // `theme` itself is otherwise unused here, it only needs to be a
+  // dependency so toggling triggers this recompute instead of the chart
+  // silently keeping its previous theme's colors until something else
+  // (rows/chart/events) happens to change.
+  const { theme } = useTheme();
   const option = useMemo(() => {
     const base = buildChartOption(chart, rows);
     const overlay = buildEventOverlay(chart, rows, events);
@@ -51,7 +59,7 @@ export function ChartPreview({ chart, rows, height = 260, events = [] }: ChartPr
         ...overlay.series.map((series: { name?: unknown }) => ({ ...series, yAxisIndex: eventsYAxisIndex })),
       ],
     };
-  }, [chart, rows, events]);
+  }, [chart, rows, events, theme]);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ReactECharts>(null);

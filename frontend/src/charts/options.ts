@@ -4,15 +4,35 @@ import type { Event } from "../types/event";
 
 type Row = Record<string, unknown>;
 
-// Colorblind-safe categorical palette (Okabe-Ito derived), tuned for the
-// app's dark UI so series stay distinguishable against a dark background.
-export const CHART_COLORS = ["#a78bfa", "#4dd4ac", "#f0a83c", "#5eb1ef", "#f2607d", "#c9a227"];
+// Colorblind-safe categorical palette (Okabe-Ito derived). Two variants,
+// not one -- the dark-tuned hues (light, saturated) that read well against
+// this app's dark background would wash out on a light one, so light mode
+// gets the same hues darkened for contrast instead of reusing them as-is.
+// Read live (not a module-level constant) so a chart rebuilt after a theme
+// toggle -- see ChartPreview.tsx's useMemo, which depends on useTheme()'s
+// theme value precisely so this recomputes -- picks up the current theme.
+const CHART_COLORS_DARK = ["#a78bfa", "#4dd4ac", "#f0a83c", "#5eb1ef", "#f2607d", "#c9a227"];
+const CHART_COLORS_LIGHT = ["#7c3aed", "#0d9488", "#b45309", "#0369a1", "#be123c", "#854d0e"];
 
-// Matches --text's dark-mode value (index.css) so axis labels and gridlines
-// read as one subtle, muted system instead of gridlines standing out more
-// than the labels next to them. Gridlines reuse this at low opacity.
-const AXIS_LABEL_COLOR = "#9ca3af";
-const GRIDLINE_STYLE = { color: AXIS_LABEL_COLOR, opacity: 0.2 };
+function isLightTheme(): boolean {
+  return document.documentElement.dataset.theme === "light";
+}
+
+export function getChartColors(): string[] {
+  return isLightTheme() ? CHART_COLORS_LIGHT : CHART_COLORS_DARK;
+}
+
+// Matches --text's current theme value (index.css) so axis labels and
+// gridlines read as one subtle, muted system instead of gridlines standing
+// out more than the labels next to them. Gridlines reuse this at low
+// opacity.
+function getAxisLabelColor(): string {
+  return isLightTheme() ? "#57606a" : "#9ca3af";
+}
+
+function getGridlineStyle(): { color: string; opacity: number } {
+  return { color: getAxisLabelColor(), opacity: 0.2 };
+}
 
 function axisValues(rows: Row[], field: string): unknown[] {
   return rows.map((row) => row[field]);
@@ -134,7 +154,7 @@ function buildXyOption(
   if (chart.series_by) {
     const series = buildLongFormatSeries(rows, chart.x_axis, chart.y_axis, chart.series_by, defaultType);
     return {
-      color: CHART_COLORS,
+      color: getChartColors(),
       tooltip: chart.tooltip ? { trigger: "axis" } : undefined,
       legend: chart.legend ? { top: 0, right: 0, textStyle: { fontSize: 11 } } : undefined,
       grid: { top: chart.legend ? 28 : 12, left: 4, right: 8, bottom: 26, containLabel: true },
@@ -146,12 +166,12 @@ function buildXyOption(
         // which a plain "time" axis with no interval control doesn't do
         // on its own (ECharts still tried to place more ticks than a
         // narrow half-width panel could legibly fit).
-        axisLabel: { formatter: formatAxisValue, hideOverlap: true, fontSize: 11, color: AXIS_LABEL_COLOR },
+        axisLabel: { formatter: formatAxisValue, hideOverlap: true, fontSize: 11, color: getAxisLabelColor() },
       },
       yAxis: {
         type: "value",
-        axisLabel: { fontSize: 11, color: AXIS_LABEL_COLOR },
-        splitLine: { lineStyle: GRIDLINE_STYLE },
+        axisLabel: { fontSize: 11, color: getAxisLabelColor() },
+        splitLine: { lineStyle: getGridlineStyle() },
       },
       series,
     };
@@ -164,7 +184,7 @@ function buildXyOption(
   const usesRightAxis = allSeries.some((series) => series.axis === "right");
 
   return {
-    color: CHART_COLORS,
+    color: getChartColors(),
     tooltip: chart.tooltip ? { trigger: "axis" } : undefined,
     legend: chart.legend ? { top: 0, right: 0, textStyle: { fontSize: 11 } } : undefined,
     grid: {
@@ -192,34 +212,34 @@ function buildXyOption(
               interval: categoryAxisLabelInterval(rows.length),
               hideOverlap: true,
               fontSize: 11,
-              color: AXIS_LABEL_COLOR,
+              color: getAxisLabelColor(),
             }
           : {
               formatter: (value: unknown) => String(value),
               interval: categoryAxisLabelInterval(rows.length),
               hideOverlap: true,
               fontSize: 11,
-              color: AXIS_LABEL_COLOR,
+              color: getAxisLabelColor(),
             },
     },
     yAxis: usesRightAxis
       ? [
           {
             type: "value",
-            axisLabel: { fontSize: 11, color: AXIS_LABEL_COLOR },
-            splitLine: { lineStyle: GRIDLINE_STYLE },
+            axisLabel: { fontSize: 11, color: getAxisLabelColor() },
+            splitLine: { lineStyle: getGridlineStyle() },
           },
           {
             type: "value",
-            axisLabel: { fontSize: 11, color: AXIS_LABEL_COLOR },
+            axisLabel: { fontSize: 11, color: getAxisLabelColor() },
             position: "right",
             splitLine: { show: false },
           },
         ]
       : {
           type: "value",
-          axisLabel: { fontSize: 11, color: AXIS_LABEL_COLOR },
-          splitLine: { lineStyle: GRIDLINE_STYLE },
+          axisLabel: { fontSize: 11, color: getAxisLabelColor() },
+          splitLine: { lineStyle: getGridlineStyle() },
         },
     series: allSeries.map((series) => {
       const type = series.type ?? defaultType;
@@ -341,7 +361,7 @@ export function buildChartOption(chart: Chart, rows: Row[]): EChartsOption {
       return buildXyOption(chart, "scatter", rows);
     case "pie":
       return {
-        color: CHART_COLORS,
+        color: getChartColors(),
         tooltip: chart.tooltip ? { trigger: "item" } : undefined,
         legend: chart.legend ? { top: 0, right: 0, textStyle: { fontSize: 11 } } : undefined,
         series: [
@@ -367,7 +387,7 @@ export function buildChartOption(chart: Chart, rows: Row[]): EChartsOption {
             progress: { show: true, width: 10 },
             axisLine: { lineStyle: { width: 10 } },
             pointer: { show: false },
-            itemStyle: { color: CHART_COLORS[0] },
+            itemStyle: { color: getChartColors()[0] },
             data: [{ value }],
           },
         ],
