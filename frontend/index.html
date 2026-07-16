@@ -4,7 +4,22 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
     <title>IoTOps</title>
+    <!-- Sets data-theme before first paint (no flash of the wrong theme)
+         -- dark unless the visitor explicitly switched to light before.
+         Previously this app followed prefers-color-scheme only, so it
+         silently mirrored whatever the OS/browser reported with no way
+         to override it -- this plus the color-scheme meta tag above is
+         what makes dark the actual default rather than "whatever this
+         device happens to prefer," and stops some mobile browsers from
+         auto-inverting a page that doesn't declare one. -->
+    <script>
+      (function () {
+        var stored = localStorage.getItem('iotops-theme');
+        document.documentElement.setAttribute('data-theme', stored === 'light' ? 'light' : 'dark');
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

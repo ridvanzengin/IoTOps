@@ -33,6 +33,23 @@
   opacity: 1;
 }
 
+/* Same 36x36 square as the project/co-pilot icons below it -- an outlined
+   button rather than a solid-color-filled one (it has no natural "color"
+   the way a project does), with a real border so it reads as a button
+   against the activity bar's own background in both themes, not just a
+   loose icon. */
+.activity-bar__icon--theme {
+  background: var(--bg-subtle);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.activity-bar__theme-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
 .activity-bar__icon--active {
   opacity: 1;
   outline: 2px solid var(--accent);
