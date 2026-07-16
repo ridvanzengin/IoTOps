@@ -39,14 +39,17 @@ export function ChartPreview({ chart, rows, height = 260, events = [] }: ChartPr
             ...base.legend,
             data: baseSeries
               .map((series: { name?: unknown }) => (typeof series.name === "string" ? series.name : undefined))
-              .filter((name): name is string => Boolean(name)),
+              .filter((name: string | undefined): name is string => Boolean(name)),
           }
         : base.legend;
     return {
       ...base,
       legend,
       yAxis: [...existingYAxis, overlay.yAxis],
-      series: [...baseSeries, ...overlay.series.map((series) => ({ ...series, yAxisIndex: eventsYAxisIndex }))],
+      series: [
+        ...baseSeries,
+        ...overlay.series.map((series: { name?: unknown }) => ({ ...series, yAxisIndex: eventsYAxisIndex })),
+      ],
     };
   }, [chart, rows, events]);
 
