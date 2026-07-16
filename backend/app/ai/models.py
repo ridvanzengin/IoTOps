@@ -42,5 +42,15 @@ class CopilotQuestionRequest(BaseModel):
     history: list[CopilotMessage] = Field(default_factory=list)
 
 
+class NeedsContext(BaseModel):
+    column: str
+    reason: str
+
+
 class CopilotAnswerResponse(BaseModel):
     answer: str
+    # Set when the model called flag_missing_context during this turn --
+    # lets the frontend render an inline "add context" nudge under the
+    # answer instead of a generic always-on icon. See app/ai/tools.py's
+    # run_flag_missing_context and AiService.answer_copilot_question.
+    needs_context: NeedsContext | None = None

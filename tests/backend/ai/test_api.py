@@ -13,7 +13,7 @@ from app.event.service import EventService
 from app.main import app
 from app.telemetry.repository import TelemetryRepository
 from app.telemetry.service import TelemetryService
-from tests.backend.ai.fakes import FakeAnthropicClient, message, text_block
+from tests.backend.ai.fakes import FakeAnthropicClient, FakeProjectService, message, text_block, tool_use_block
 from tests.backend.telemetry.fakes import FakePool
 
 
@@ -33,6 +33,7 @@ def _client_with_handler(handler, anthropic_responses: list | None = None) -> Te
         base_url="http://ollama",
         model="gemma4:latest",
         event_service=_event_service(),
+        project_service=FakeProjectService(),
         anthropic_client=FakeAnthropicClient(anthropic_responses or []),
         anthropic_model="claude-haiku-4-5",
     )
@@ -166,6 +167,25 @@ def test_copilot_returns_200_with_answer() -> None:
 
     assert response.status_code == 200
     assert response.json()["answer"] == "No occurrences in the last 24 hours."
+    assert response.json()["needs_context"] is None
+
+
+def test_copilot_returns_needs_context_when_flagged() -> None:
+    client = _client_with_handler(
+        _unused_ollama_handler,
+        anthropic_responses=[
+            message(tool_use_block("flag_missing_context", {"column": "val1", "reason": "no unit given"})),
+            message(text_block("I'm not sure what val1 represents.")),
+        ],
+    )
+
+    response = client.post(
+        "/api/ai/copilot",
+        json={"project_id": "11111111-1111-1111-1111-111111111111", "question": "what does val1 mean?"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["needs_context"] == {"column": "val1", "reason": "no unit given"}
 
 
 def test_copilot_returns_502_on_anthropic_failure() -> None:

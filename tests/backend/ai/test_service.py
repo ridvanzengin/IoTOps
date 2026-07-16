@@ -15,7 +15,7 @@ from app.event.service import EventService
 from app.shared.exceptions import AiGenerationError
 from app.telemetry.repository import TelemetryRepository
 from app.telemetry.service import TelemetryService
-from tests.backend.ai.fakes import FakeAnthropicClient, message, text_block, tool_use_block
+from tests.backend.ai.fakes import FakeAnthropicClient, FakeProjectService, message, text_block, tool_use_block
 from tests.backend.telemetry.fakes import FakePool
 
 
@@ -64,6 +64,7 @@ def _service(
     anthropic_responses: list | None = None,
     event_service: EventService | None = None,
     anthropic_client=None,
+    ai_context: str = "",
 ) -> AiService:
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     return AiService(
@@ -72,6 +73,7 @@ def _service(
         base_url="http://ollama",
         model="gemma4:latest",
         event_service=event_service or _event_service(),
+        project_service=FakeProjectService(ai_context),
         anthropic_client=anthropic_client or FakeAnthropicClient(anthropic_responses or []),
         anthropic_model="claude-haiku-4-5",
     )
@@ -207,11 +209,12 @@ async def test_generate_query_rule_sql_forwards_identifiers_hint_into_prompt() -
 async def test_answer_copilot_question_returns_final_text_with_no_tool_calls() -> None:
     responses = [message(text_block("There have been no alerts today."))]
 
-    answer = await _service(
+    answer, needs_context = await _service(
         _unused_ollama_handler, anthropic_responses=responses
     ).answer_copilot_question(uuid4(), "any alerts today?", [])
 
     assert answer == "There have been no alerts today."
+    assert needs_context is None
 
 
 async def test_answer_copilot_question_executes_tool_call_then_returns_final_answer() -> None:
@@ -224,11 +227,12 @@ async def test_answer_copilot_question_executes_tool_call_then_returns_final_ans
         ]
     )
 
-    answer = await _service(
+    answer, needs_context = await _service(
         _unused_ollama_handler, event_service=event_service, anthropic_client=fake_client
     ).answer_copilot_question(project_id, "why did swarm-alert fire?", [])
 
     assert answer == "swarm-alert fired once today."
+    assert needs_context is None
     # Second round-trip's messages must carry the tool_result from the first.
     second_call_messages = fake_client.messages.calls[1]["messages"]
     tool_result_messages = [
@@ -268,3 +272,32 @@ async def test_answer_copilot_question_raises_on_empty_final_answer() -> None:
         await _service(
             _unused_ollama_handler, anthropic_responses=responses
         ).answer_copilot_question(uuid4(), "anything", [])
+
+
+async def test_answer_copilot_question_surfaces_flag_missing_context() -> None:
+    responses = [
+        message(tool_use_block("flag_missing_context", {"column": "val1", "reason": "no unit given"})),
+        message(text_block("I'm not sure what val1 represents.")),
+    ]
+
+    answer, needs_context = await _service(
+        _unused_ollama_handler, anthropic_responses=responses
+    ).answer_copilot_question(uuid4(), "what does val1 mean?", [])
+
+    assert answer == "I'm not sure what val1 represents."
+    assert needs_context is not None
+    assert needs_context.column == "val1"
+    assert needs_context.reason == "no unit given"
+
+
+async def test_answer_copilot_question_forwards_ai_context_into_system_prompt() -> None:
+    fake_client = FakeAnthropicClient([message(text_block("Answer."))])
+
+    await _service(
+        _unused_ollama_handler,
+        anthropic_client=fake_client,
+        ai_context="val1 is coolant temperature in Celsius",
+    ).answer_copilot_question(uuid4(), "what is val1?", [])
+
+    system_prompt = fake_client.messages.calls[0]["system"]
+    assert "val1 is coolant temperature in Celsius" in system_prompt

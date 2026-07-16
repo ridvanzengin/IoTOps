@@ -776,9 +776,9 @@ fail to interoperate.
 
 ---
 
-# Future — Project-Level AI Context Helper
+# Project-Level AI Context Helper
 
-**Decided (2026-07-17), not yet built.** Every AI feature so far grounds
+**Status: shipped 2026-07-17.** Every AI feature before this grounded
 itself in the telemetry schema alone (table/column names + types) — this
 works well for the demo showcases (`temperature`, `hive_id`, `weight` are
 self-explanatory) but doesn't generalize to real-world telemetry, where
@@ -786,6 +786,20 @@ column names are often opaque (`val1`, `sensor_a`, coded status enums) and
 no amount of statistics-querying (see the suggestion tools above) fixes a
 name the model can't interpret in the first place. IoTOps is meant to be
 domain-agnostic, so this gap matters beyond the showcases.
+
+Built and shipped together: the `Project.ai_context` field itself, its
+`ProjectForm.tsx` textarea (with character counter and `focusField`
+support), injection into `build_copilot_system_prompt`, and the **smart
+nudge** — a new `flag_missing_context` tool the model calls (instead of
+guessing) when a column's meaning is genuinely unclear, surfaced as
+`CopilotAnswerResponse.needs_context` and rendered as an inline "add
+context" link in `CopilotChat.tsx`. The static-icon discoverability idea
+described below was **not** built — the smart nudge alone was judged
+sufficient for a first version, since it only appears when actually
+relevant rather than nagging on every project regardless of whether its
+schema is already clear. Still not built: extending `ai_context` to the
+Ollama-backed `build_sql_prompt`/`build_query_rule_sql_prompt`, and the
+related pre-existing schema-scoping gap noted below.
 
 **Design**: a new `Project.ai_context: str = ""` field, capped at
 **1000 characters** (`Field(max_length=1000)` server-side, `maxLength` +
@@ -815,35 +829,35 @@ is coolant temperature in °C, `sensor_a` tracks primary shaft vibration."
 Optional and empty by default; an escape hatch for unclear schemas, not a
 required step.
 
-**Discoverability — a static icon plus a smarter, model-driven nudge**:
-- Static: a small (i) icon near the project picker / "How can I help you
-  with X?" line in `CopilotChat.tsx`, always visible once a project is
-  chosen — "Get better answers — add context for this project," linking
-  to `navigate("/projects/{id}/edit", { state: { focusField: "ai_context" } })`.
-  Reuses the exact React Router `state`-carrying navigation mechanism
-  already decided for prefilling suggestion builders, not a new one.
-- Smarter: give the model a lightweight tool, `flag_missing_context(column,
-  reason)`, callable when it judges a column's meaning is genuinely
-  unclear and no `ai_context` covers it — rather than trying to detect
+**Discoverability — shipped: the smarter, model-driven nudge. Not built: the static icon.**
+- **Shipped**: `flag_missing_context(column, reason)` — a lightweight tool
+  the model calls when it judges a column's meaning is genuinely unclear
+  and no `ai_context` covers it, rather than guessing or trying to detect
   this by string-matching its prose answer (fragile). `CopilotAnswerResponse`
-  gains an optional `needs_context: {column, reason} | null` field
-  alongside `answer` (the same "structured field next to the prose
-  answer" pattern already decided for `suggestion`), and the frontend
-  renders an inline nudge under that specific answer ("I wasn't sure what
-  `val1` means — add context →") instead of a generic icon nagging on
-  every project regardless of whether its schema is already clear (like
-  the demo showcases, where this should basically never fire). Nice-to-have,
-  not required to ship the field itself — the static icon alone is enough
-  for a first version.
+  gains `needs_context: {column, reason} | null` alongside `answer` (the
+  same "structured field next to the prose answer" pattern used for the
+  future `suggestion` field), and `CopilotChat.tsx` renders an inline nudge
+  under that specific answer ("I wasn't sure what `val1` means — add
+  context →") linking to
+  `navigate("/projects/{id}/edit", { state: { focusField: "ai_context" } })`
+  — `ProjectForm.tsx` reads `location.state.focusField` and focuses/scrolls
+  to the textarea. This alone was judged sufficient for a first version:
+  it only appears when actually relevant, unlike a generic icon that would
+  nag on every project regardless of whether its schema is already clear
+  (like the demo showcases, where this should basically never fire).
+- **Not built**: the static (i) icon near the project picker, always
+  visible once a project is chosen regardless of whether the model has
+  ever struggled. Would reuse the same `state`-carrying navigation as
+  above — cheap to add later if the model-driven nudge alone proves too
+  rare/easy to miss in practice.
 
-**Where it's used**: appended to the schema block in every AI prompt that
-already renders it — `build_copilot_system_prompt` (Q&A slice, shipped)
-and the future `suggest_*` tools, framed explicitly as user-provided
-domain context to trust over guessing from column names alone. Worth
-extending to the existing Ollama-backed `build_sql_prompt`/
-`build_query_rule_sql_prompt` too, for consistency — the same
-ambiguous-column-name problem applies there, though that's a smaller,
-separable addition once the field exists.
+**Where it's used**: appended to the schema block in `build_copilot_system_prompt`
+(Q&A slice) and, once built, the future `suggest_*` tools — framed
+explicitly as user-provided domain context to trust over guessing from
+column names alone. Still not extended to the existing Ollama-backed
+`build_sql_prompt`/`build_query_rule_sql_prompt` — the same
+ambiguous-column-name problem applies there, but that's a separate,
+smaller addition not yet done.
 
 **Trust model**: no new security concern — this is free text supplied by
 the project's own owner (same trust level as a Rule's message template or

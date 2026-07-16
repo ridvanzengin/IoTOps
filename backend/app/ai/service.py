@@ -5,10 +5,16 @@ from uuid import UUID
 import anthropic
 import httpx
 
-from app.ai.models import AiVariableHint, CopilotMessage
+from app.ai.models import AiVariableHint, CopilotMessage, NeedsContext
 from app.ai.prompts import build_copilot_system_prompt, build_query_rule_sql_prompt, build_sql_prompt
-from app.ai.tools import COPILOT_TOOLS, run_query_occurrences, run_query_telemetry
+from app.ai.tools import (
+    COPILOT_TOOLS,
+    run_flag_missing_context,
+    run_query_occurrences,
+    run_query_telemetry,
+)
 from app.event.service import EventService
+from app.project.service import ProjectService
 from app.shared.exceptions import AiGenerationError, InvalidQueryError
 from app.shared.validators import validate_select_only_sql
 from app.telemetry.service import TelemetryService
@@ -30,6 +36,7 @@ class AiService:
         base_url: str,
         model: str,
         event_service: EventService,
+        project_service: ProjectService,
         anthropic_client: anthropic.AsyncAnthropic,
         anthropic_model: str,
     ) -> None:
@@ -41,6 +48,7 @@ class AiService:
         # backend from the Ollama-backed SQL generation above, which stays
         # untouched. See answer_copilot_question.
         self._event_service = event_service
+        self._project_service = project_service
         self._anthropic_client = anthropic_client
         self._anthropic_model = anthropic_model
 
@@ -87,13 +95,15 @@ class AiService:
 
     async def answer_copilot_question(
         self, project_id: UUID, question: str, history: list[CopilotMessage]
-    ) -> str:
+    ) -> tuple[str, NeedsContext | None]:
         schema = await self._telemetry_service.get_schema()
+        project = await self._project_service.get(project_id)
         now = datetime.now(timezone.utc)
-        system = build_copilot_system_prompt(schema, now=now)
+        system = build_copilot_system_prompt(schema, now=now, ai_context=project.ai_context)
         messages: list[dict] = [
             {"role": h.role, "content": h.content} for h in history[-8:]
         ] + [{"role": "user", "content": question}]
+        needs_context: NeedsContext | None = None
 
         for _ in range(MAX_COPILOT_ITERATIONS):
             try:
@@ -119,10 +129,19 @@ class AiService:
                     raise AiGenerationError(
                         "The AI didn't return an answer -- try rephrasing the question."
                     )
-                return answer
+                return answer, needs_context
 
             tool_results = []
             for tool_use in tool_uses:
+                if tool_use.name == "flag_missing_context":
+                    # Keeps the most recent flag if called more than once in
+                    # one turn -- a structural signal, not a data source (see
+                    # run_flag_missing_context), surfaced on the response
+                    # alongside the prose answer.
+                    needs_context = NeedsContext(
+                        column=tool_use.input.get("column", ""),
+                        reason=tool_use.input.get("reason", ""),
+                    )
                 result_text = await self._execute_copilot_tool(
                     tool_use.name, tool_use.input, project_id
                 )
@@ -141,4 +160,6 @@ class AiService:
             return await run_query_occurrences(self._event_service, project_id, input_)
         if name == "query_telemetry":
             return await run_query_telemetry(self._telemetry_service, input_)
+        if name == "flag_missing_context":
+            return run_flag_missing_context(input_)
         return f"Unknown tool: {name}"

@@ -59,7 +59,25 @@ QUERY_TELEMETRY_TOOL = {
     },
 }
 
-COPILOT_TOOLS = [QUERY_OCCURRENCES_TOOL, QUERY_TELEMETRY_TOOL]
+FLAG_MISSING_CONTEXT_TOOL = {
+    "name": "flag_missing_context",
+    "description": (
+        "Call this instead of guessing when a telemetry column's meaning is "
+        "genuinely ambiguous and no project context explains it (e.g. `val1`, "
+        "`sensor_a`, a coded status enum). Do not call this for columns whose "
+        "meaning is reasonably clear from the name."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "column": {"type": "string", "description": "The ambiguous column name (and table, if useful, e.g. 'machine_telemetry.val1')."},
+            "reason": {"type": "string", "description": "Briefly, why its meaning is unclear."},
+        },
+        "required": ["column", "reason"],
+    },
+}
+
+COPILOT_TOOLS = [QUERY_OCCURRENCES_TOOL, QUERY_TELEMETRY_TOOL, FLAG_MISSING_CONTEXT_TOOL]
 
 _MAX_OCCURRENCES_LIMIT = 100
 _TELEMETRY_ROW_LIMIT = 50
@@ -102,6 +120,15 @@ async def run_query_occurrences(
             f"identifiers={{{identifiers}}}  message=\"{occ.message}\""
         )
     return "\n".join(lines)
+
+
+def run_flag_missing_context(input_: dict[str, Any]) -> str:
+    # No lookup needed -- this tool is purely a structural signal (see
+    # AiService.answer_copilot_question, which captures the args and
+    # surfaces them as CopilotAnswerResponse.needs_context) rather than a
+    # data source. The model still needs a tool_result to continue the
+    # loop and produce its final prose answer, hence the short ack.
+    return "Noted -- mention in your answer that this column's meaning is unclear."
 
 
 async def run_query_telemetry(telemetry_service: TelemetryService, input_: dict[str, Any]) -> str:

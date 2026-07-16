@@ -40,5 +40,7 @@ async def answer_copilot_question(
     payload: CopilotQuestionRequest,
     service: AiService = Depends(get_ai_service),
 ) -> CopilotAnswerResponse:
-    answer = await service.answer_copilot_question(payload.project_id, payload.question, payload.history)
-    return CopilotAnswerResponse(answer=answer)
+    answer, needs_context = await service.answer_copilot_question(
+        payload.project_id, payload.question, payload.history
+    )
+    return CopilotAnswerResponse(answer=answer, needs_context=needs_context)

@@ -39,6 +39,7 @@ class ProjectService:
             update={
                 "name": payload.name,
                 "description": payload.description,
+                "ai_context": payload.ai_context,
                 "default_dashboard_id": payload.default_dashboard_id,
             }
         )
