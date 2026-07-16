@@ -787,15 +787,54 @@ no amount of statistics-querying (see the suggestion tools above) fixes a
 name the model can't interpret in the first place. IoTOps is meant to be
 domain-agnostic, so this gap matters beyond the showcases.
 
-**Design**: a new `Project.ai_context: str = ""` field (deliberately
-**not** reusing the existing `Project.description` — that's a short
-human-facing blurb shown in project lists/cards; this is a longer,
-AI-only domain glossary, and conflating the two would mean editing one
-silently changes the other's behavior). Edited via a new textarea in
-`ProjectForm.tsx`, framed as e.g. "Optional — help the AI understand your
-data" with placeholder text like "e.g. `val1` is coolant temperature in
-°C, `sensor_a` tracks primary shaft vibration." Optional and empty by
-default; an escape hatch for unclear schemas, not a required step.
+**Design**: a new `Project.ai_context: str = ""` field, capped at
+**1000 characters** (`Field(max_length=1000)` server-side, `maxLength` +
+a running character counter client-side) — it's injected into every AI
+prompt for that project, so it needs a hard cost/context-bloat cap, not
+just a soft suggestion; 1000 chars is plenty for several column-meaning
+notes without becoming a pasted-in runbook. Deliberately **not** reusing
+the existing `Project.description` — that's a short human-facing blurb
+shown in project lists/cards; this is a longer, AI-only domain glossary,
+and conflating the two would mean editing one silently changes the
+other's behavior.
+
+**Lives on the Project, not the Collector.** A Collector is an
+infrastructure object (topic/table/field-mapping wiring); putting a
+domain-knowledge field there would leak an AI concern into a form whose
+job is Telegraf pipeline config. A Project is already the "what this
+deployment is about" object, and in practice one project maps to one
+coherent domain (per the existing showcases) — even where a project's
+several Collectors write to genuinely different tables, the free-text
+field can just say so inline ("`machine_telemetry.val1` = vibration;
+`env_readings.val1` = humidity") rather than needing a field per
+Collector. One place to look, one place to edit.
+
+Edited via a new textarea in `ProjectForm.tsx`, framed as e.g. "Optional —
+help the AI understand your data" with placeholder text like "e.g. `val1`
+is coolant temperature in °C, `sensor_a` tracks primary shaft vibration."
+Optional and empty by default; an escape hatch for unclear schemas, not a
+required step.
+
+**Discoverability — a static icon plus a smarter, model-driven nudge**:
+- Static: a small (i) icon near the project picker / "How can I help you
+  with X?" line in `CopilotChat.tsx`, always visible once a project is
+  chosen — "Get better answers — add context for this project," linking
+  to `navigate("/projects/{id}/edit", { state: { focusField: "ai_context" } })`.
+  Reuses the exact React Router `state`-carrying navigation mechanism
+  already decided for prefilling suggestion builders, not a new one.
+- Smarter: give the model a lightweight tool, `flag_missing_context(column,
+  reason)`, callable when it judges a column's meaning is genuinely
+  unclear and no `ai_context` covers it — rather than trying to detect
+  this by string-matching its prose answer (fragile). `CopilotAnswerResponse`
+  gains an optional `needs_context: {column, reason} | null` field
+  alongside `answer` (the same "structured field next to the prose
+  answer" pattern already decided for `suggestion`), and the frontend
+  renders an inline nudge under that specific answer ("I wasn't sure what
+  `val1` means — add context →") instead of a generic icon nagging on
+  every project regardless of whether its schema is already clear (like
+  the demo showcases, where this should basically never fire). Nice-to-have,
+  not required to ship the field itself — the static icon alone is enough
+  for a first version.
 
 **Where it's used**: appended to the schema block in every AI prompt that
 already renders it — `build_copilot_system_prompt` (Q&A slice, shipped)
