@@ -1,0 +1,144 @@
+# IoTOps -- production Docker Compose
+# Run from the repo root:
+#   docker compose -p iotops -f deploy/iotops/docker-compose.prod.yml --env-file deploy/iotops/.env.prod <command>
+#
+# Requires the "infra" compose project (from the agritwin repo) to already
+# be running -- it provides infra-db-1 (TimescaleDB), infra-redis-1, and
+# infra-nginx-1 plus the infra_proxy network. See ../nginx/iotops.conf and
+# SERVER_SETUP.md.
+#
+# Every service below joins infra_proxy as its only network -- including
+# the dynamically-spawned per-Collector/per-Automater Telegraf sidecars,
+# via DOCKER_NETWORK. No service publishes a host port; only infra-nginx-1
+# (not part of this compose project) touches 80/443.
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - /opt/iotops-data/mongo:/data/db
+    networks:
+      - infra_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    volumes:
+      - ../../docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - /opt/iotops-data/mosquitto:/mosquitto/data
+    networks:
+      - infra_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: docker/backend/Dockerfile
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      TIMESCALE_URI: "postgresql://iotops:${IOTOPS_DB_PASSWORD}@infra-db-1:5432/iotops"
+      REDIS_URI: "redis://infra-redis-1:6379/1"
+      AUTOMATER_FIRING_REDIS_URI: "redis://infra-redis-1:6379/0"
+      DOCKER_NETWORK: infra_proxy
+      HOST_RUNTIME_DIR: /opt/iotops-data/runtime
+    volumes:
+      # Docker-outside-of-Docker: lets the backend manage sibling Telegraf
+      # containers on the host's Docker daemon. See "Known, accepted risk"
+      # in the deployment plan -- this gives the backend container
+      # root-equivalent control of the whole host daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/iotops-data/runtime:/app/runtime
+    networks:
+      - infra_proxy
+    depends_on:
+      - mongo
+      - mosquitto
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+  celery-worker:
+    build:
+      context: ../..
+      dockerfile: docker/backend/Dockerfile
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      TIMESCALE_URI: "postgresql://iotops:${IOTOPS_DB_PASSWORD}@infra-db-1:5432/iotops"
+      REDIS_URI: "redis://infra-redis-1:6379/1"
+      AUTOMATER_FIRING_REDIS_URI: "redis://infra-redis-1:6379/0"
+    command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info"]
+    networks:
+      - infra_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  celery-beat:
+    build:
+      context: ../..
+      dockerfile: docker/backend/Dockerfile
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      REDIS_URI: "redis://infra-redis-1:6379/1"
+    command: ["celery", "-A", "app.celery_app", "beat", "--loglevel=info"]
+    networks:
+      - infra_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: docker/frontend/Dockerfile.prod
+      args:
+        VITE_API_BASE_URL: ""
+    restart: unless-stopped
+    networks:
+      - infra_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 32M
+
+  # Demo showcase -- Apiary/MQTT and Solar/HTTP scenarios launch immediately;
+  # Manufacturing/Kafka is omitted at launch (see deployment plan §4) --
+  # its sidecar just can't resolve "kafka" and retries quietly, the other
+  # two scenarios are unaffected. Add a kafka service back here later to
+  # enable it, no other change needed.
+  demo-showcase:
+    build:
+      context: ../../examples/demo
+    restart: unless-stopped
+    environment:
+      BACKEND_BASE_URL: http://iotops-backend-1:8000
+      MQTT_BROKER_HOST: iotops-mosquitto-1
+      PUBLISH_INTERVAL_SECONDS: "20"
+    networks:
+      - infra_proxy
+    depends_on:
+      - backend
+      - mosquitto
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+networks:
+  infra_proxy:
+    external: true
+    name: infra_proxy
