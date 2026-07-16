@@ -542,52 +542,48 @@ confirmed:
   server-side, but doesn't let anonymous visitors create their own
   Collectors/Automaters.
 
-**Status: read-only enforcement and showcase content done (via
-`feature/demo-mode`, merged); reverse proxy/TLS and actual hosting still
-open.**
+**Status: DONE. Live at https://iotops.online as of 2026-07-16.** All 3
+demo scenarios (Apiary/MQTT, Solar/HTTP, Manufacturing/Kafka) work end to
+end. See CHANGELOG.md's 2026-07-16 entry for the full list of real bugs
+this surfaced, `deploy/SERVER_SETUP.md` for the numbered setup playbook,
+and the `/deploy` skill (`.claude/skills/deploy/SKILL.md`) for the
+routine-update flow and troubleshooting.
 
 1. ~~Server-side read-only enforcement~~ **Done.** `Settings.demo: bool`
    (`backend/app/config.py`) + `block_in_demo_mode()`
    (`backend/app/dependencies.py`) — a dependency factory raising
    `DemoModeError`, wired per-route via
    `dependencies=[Depends(block_in_demo_mode())]` on every mutating
-   Collector/Automater/AI route, not just hidden client-side.
+   Collector/Automater/AI route, not just hidden client-side. A scoped
+   `X-Demo-Seed-Token` bypass lets `examples/demo/seed.py`'s own
+   provisioning through on just the specific create/update routes it
+   calls — every delete/stop route and everything outside
+   Project/Collector/Automater/QueryRule/Dashboard stays hard-blocked
+   regardless of the token.
 2. ~~Showcase data needs to look alive, not static~~ **Done.** A
-   dedicated `demo-showcase` compose service (`examples/demo/`,
-   `--profile demo`, `restart: unless-stopped`) seeds its own
-   Manufacturing Line/Kafka-based showcase content and publishes
-   continuously, same self-provisioning pattern as
-   `beekeeping-simulator`.
-3. **Reverse proxy + TLS — not a fresh setup, reuse the shared VM's
-   existing infra.** IoTOps will be deployed on the same Hetzner VM
-   ("ringo") already running `agritwin`, which has a shared `infra`
-   Compose project (`~/personal/agritwin/deploy/infra/docker-compose.yml`,
-   run as `-p infra`) built specifically to support a second app:
-   `infra-nginx-1` (the only service touching host ports 80/443),
-   `infra-db-1` (TimescaleDB), `infra-redis-1` — none of which IoTOps
-   should duplicate. Concretely:
-   - Clone `deploy/infra/nginx/conf.d/app2.conf.example` into an IoTOps
-     vhost (HTTP→HTTPS redirect + certbot challenge already templated;
-     just point the HTTPS block's `proxy_pass` at IoTOps's own
-     frontend/backend container names).
-   - Reuse `infra-db-1` for TimescaleDB (`CREATE DATABASE iotops`, own
-     user, `CREATE EXTENSION timescaledb` on it) instead of running a
-     second Postgres container.
-   - Reuse `infra-redis-1` with a new logical DB index — agritwin already
-     owns index `0`.
-   - Mongo/Mosquitto/Kafka (no agritwin equivalent) stay in IoTOps's own
-     Compose project, joining the shared `infra_proxy` network only where
-     they need to reach nginx or the shared DB/Redis, with no host ports
-     published.
-   - `docker-compose.yml`'s frontend service currently runs Vite's *dev*
-     server (`npm run dev --host 0.0.0.0`) — needs a production build
-     (`vite build` + static serving) for this deployment, not the dev
-     server directly behind nginx.
-4. **Still needs the user's hands-on involvement**: a domain name has not
-   been purchased yet (the actual blocker on starting §3), VM access/SSH
-   confirmation, and who holds the running instance's ops burden
-   (restarts, disk growth from Mongo/Timescale data, image updates when
-   `custom-telegraf`/backend/frontend change).
+   dedicated `demo-showcase` compose service (`examples/demo/`) seeds its
+   own Apiary/Solar/Manufacturing showcase content and publishes
+   continuously.
+3. ~~Reverse proxy + TLS~~ **Done.** Reused the shared VM's existing
+   `infra` Compose project exactly as planned below — `infra-nginx-1`
+   (nginx vhost at `deploy/nginx/iotops.conf`), `infra-db-1` (a real
+   `iotops` database/user on the shared TimescaleDB instance),
+   `infra-redis-1` (own logical DB indices). A valid Let's Encrypt cert
+   auto-renews via the VM's existing cron (one `certbot renew` line
+   already covers every cert on the box, not just AgriTwin's). Mongo/
+   Mosquitto/Kafka run in IoTOps's own Compose project on the shared
+   `infra_proxy` network, no host ports published. The frontend runs a
+   real production build (`docker/frontend/Dockerfile.prod`, multi-stage
+   with nginx serving static output) rather than Vite's dev server.
+4. ~~Needs the user's hands-on involvement~~ **Done.** Domain purchased
+   and pointed at the VM, VM access confirmed, systemd
+   (`iotops-app.service`) auto-starts the stack on reboot.
+
+Everything above lives on branch `deploy/production-setup` (not yet
+merged into `main` as of 2026-07-16) — 15 commits: the infra scaffolding,
+several real bugs found only by actually running the deployment (not
+just planning it), Kafka enablement, and a `/deploy` skill capturing the
+whole playbook for next time.
 
 ---
 
@@ -615,9 +611,12 @@ Fix opportunistically, not preemptively.
   (`"Hive  swarm risk"` instead of `"Hive hive1 swarm risk"`), and
   anyone hitting the API directly gets no protection at all.
 - **No image build/publish pipeline for `custom-telegraf`** —
-  `custom-telegraf:latest` is built by hand locally. Fine for local dev,
-  a real gap before this goes anywhere beyond one machine (relevant to
-  the demo deployment above).
+  `custom-telegraf:latest` is built by hand, now on the production VM too
+  (documented as its own step in `deploy/SERVER_SETUP.md`, after the very
+  first deployment ran without it and every Automater deploy 404'd). A
+  real CI/CD pipeline (build + push to a registry, pull by tag) is still
+  the actual gap; hand-building on each host it needs to run on on is a
+  workaround, not a fix.
 - **Stale mqtt inputs on multi-table Automaters aren't garbage
   collected** (deliberate). An Automater that loses its last rule for one
   of its tables keeps the now-unused mqtt input in its deployed config

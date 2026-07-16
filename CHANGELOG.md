@@ -10,6 +10,62 @@ Newest first. Each entry is a compressed summary, not a full narrative —
 where a bug fix taught something worth remembering (a real footgun, not
 just "fixed a typo"), that's kept; blow-by-blow debugging steps aren't.
 
+## 2026-07-16
+
+**IoTOps is live at https://iotops.online.** Deployed on the shared
+Hetzner VM ("ringo") alongside AgriTwin, reusing its `infra` project
+(nginx/TimescaleDB/Redis) rather than standing up new infrastructure —
+see `deploy/SERVER_SETUP.md`. `DEMO=true` (read-only); all 3 demo
+scenarios (Apiary/MQTT, Solar/HTTP, Manufacturing/Kafka) work end to end,
+Kafka included from the start of this entry (it was launched without it
+first, added once the rest of the stack had run stably for a while).
+
+Standing this up for real (not just planning it) surfaced real bugs no
+amount of re-reading the plan would have caught:
+- `timescaledb.py`'s hardcoded connection host doesn't resolve on the
+  shared VM; `npm run build` had never actually been run before (no CI)
+  and had real `tsc` errors.
+- The shared `infra-nginx-1` can silently stop listening on 80/443
+  (workers alive, nothing bound) after several containers join its
+  network in quick succession — needs a plain restart, `nginx -s reload`
+  doesn't fix it. Also: a bare `proxy_pass http://host:port` caches the
+  target's IP at nginx startup/reload *indefinitely* — only the `set
+  $upstream ...; proxy_pass $upstream;` form actually respects a
+  `resolver ... valid=30s` directive, so every redeploy that recreates a
+  container needs that form or it silently 502s until someone manually
+  reloads nginx.
+- `infra-db-1`'s `max_connections=25`, shared with AgriTwin, couldn't fit
+  asyncpg's own default pool size (min=10/max=10) — capped explicitly.
+- `examples/demo/seed.py`'s one-time provisioning got 403'd by its own
+  `DEMO=true` from first boot; fixed with a narrowly-scoped
+  `X-Demo-Seed-Token` bypass on just the create/update routes it touches,
+  not a manual "flip DEMO off, reseed, flip back on" dance.
+- `custom-telegraf` was never built on the VM at all (undocumented until
+  now); combined with the seed-token fix's retry loop, a failed Automater
+  deploy left an orphaned Mongo record and a stale Collector
+  `http_forward` output on every retry instead of erroring cleanly —
+  `AutomaterService.create_rule()` now defers that side effect until
+  deploy actually succeeds, and rolls back a just-created Automater if it
+  doesn't.
+- `seed.py`'s Solar HTTP target-URL builder used the wrong container
+  hostname convention (`iotops-collector-{full-uuid}` instead of
+  `iotops-{collector,automater}-{name-slug}-{short-id}`) — the Solar demo
+  scenario had never actually reached its targets, in any environment,
+  before this was caught.
+- `deploy.sh` hardcoded `git pull origin main` instead of pulling
+  whatever branch is actually checked out — silently no-op'd on a
+  deploy, which cascaded into duplicate seeded projects/dashboards from
+  stale code before it was caught and cleaned up.
+
+Also: `examples/demo/seed.py`'s project names and dashboard panels now
+match hand-edits made in the local dev environment (renamed
+projects, alert overlays consolidated onto the real data panels instead
+of separate "(with Alerts)" duplicates, two new panels surfacing metrics
+the publishers already produced but never showed). Added a `/deploy`
+skill (`.claude/skills/deploy/SKILL.md`) capturing the routine-update
+flow and all of the above as a troubleshooting playbook, so the next
+session starts from this instead of rediscovering it.
+
 ## 2026-07-14
 
 **Events sidebar: consistent counts, time range, search, pagination.**
