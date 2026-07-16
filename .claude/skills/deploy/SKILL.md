@@ -99,6 +99,25 @@ curl -sI https://agritwin.online/    # confirm AgriTwin recovered too -- this af
 This is a shared-infra action — get explicit confirmation before running
 `docker restart infra-nginx-1`, naming it exactly, every time.
 
+**502 after any deploy that recreates `backend`/`frontend`**: check
+`deploy/nginx/iotops.conf`'s `proxy_pass` targets are the `set $upstream
+http://...; proxy_pass $upstream;` form, never a bare static `proxy_pass
+http://host:port;`. A static hostname is resolved once at nginx
+startup/reload and cached indefinitely — the `resolver ... valid=30s`
+directive only actually takes effect through the variable form. Every
+`docker compose up` that recreates a container gives it a new IP, so a
+bare `proxy_pass` silently 502s until the next manual `nginx -s reload`.
+This bit the very deploy that added Kafka (recreated `frontend`).
+Diagnose with:
+```bash
+docker logs infra-nginx-1 --tail 20 | grep error   # shows the stale IP nginx is stuck on
+docker inspect iotops-frontend-1 --format '{{.NetworkSettings.Networks.infra_proxy.IPAddress}}'  # actual current IP
+```
+If they differ and the vhost still uses bare `proxy_pass`, fix
+`iotops.conf` (should already be fixed as of 2026-07-16) rather than just
+reloading nginx as a one-off patch — a reload masks this deploy's
+symptom but the config would still break on the *next* one.
+
 **`infra-db-1` connection exhaustion** (`TooManyConnectionsError:
 remaining connection slots are reserved for roles with the SUPERUSER
 attribute`). `max_connections=25` total, shared with AgriTwin (~13 in
