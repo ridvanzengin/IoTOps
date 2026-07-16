@@ -542,37 +542,52 @@ confirmed:
   server-side, but doesn't let anonymous visitors create their own
   Collectors/Automaters.
 
-**Status: not started.** What this needs, concretely:
+**Status: read-only enforcement and showcase content done (via
+`feature/demo-mode`, merged); reverse proxy/TLS and actual hosting still
+open.**
 
-1. **Server-side read-only enforcement, not just hiding UI buttons.**
-   There is currently no auth of any kind in this backend — every
-   mutating endpoint (`POST`/`PUT`/`DELETE` on `/api/collector`,
-   `/api/automater`, deploy/stop actions, etc.) is wide open. A UI-only
-   "hide the create button" would not stop a visitor from hitting the API
-   directly. Needs a real gate: simplest shape is a `settings.demo_mode:
-   bool` + a FastAPI dependency that 403s any mutating request on
-   Collector/Automater routers when set, wired in only for the deployed
-   instance's env, not touching local dev's behavior at all. (Note:
-   `feature/demo-mode` already has work in flight here — check its
-   status before starting from scratch.)
-2. **Showcase data needs to look alive, not static.** The
-   `beekeeping-simulator`/`mqtt-publisher` compose services need to keep
-   running continuously on the deployed VM (`restart: unless-stopped`,
-   already the pattern spawned Automater/Collector containers use) so
-   dashboards/events aren't a frozen snapshot.
-3. **Reverse proxy + TLS** in front of `backend`(8000)/`frontend`(5173) —
-   nothing in this repo handles this today (`docker-compose.yml` exposes
-   raw ports directly, fine for local dev, not a public host). Likely a
-   `caddy`/`nginx` service in a separate `docker-compose.prod.yml`
-   (or an override file), not a change to the dev compose file itself.
-4. **Needs the user's hands-on involvement**, not something an agent
-   session can do unilaterally: which VM provider/plan, domain name (if
-   any), and who holds the running instance's ops burden (restarts, disk
-   growth from Mongo/Timescale data, image updates when
-   `custom-telegraf`/backend/frontend change). A shared Hetzner VM
-   (nginx/TimescaleDB/Redis) already hosts another of the author's
-   projects (`agritwin`) — worth reusing that same infra pattern rather
-   than standing up something new from scratch.
+1. ~~Server-side read-only enforcement~~ **Done.** `Settings.demo: bool`
+   (`backend/app/config.py`) + `block_in_demo_mode()`
+   (`backend/app/dependencies.py`) — a dependency factory raising
+   `DemoModeError`, wired per-route via
+   `dependencies=[Depends(block_in_demo_mode())]` on every mutating
+   Collector/Automater/AI route, not just hidden client-side.
+2. ~~Showcase data needs to look alive, not static~~ **Done.** A
+   dedicated `demo-showcase` compose service (`examples/demo/`,
+   `--profile demo`, `restart: unless-stopped`) seeds its own
+   Manufacturing Line/Kafka-based showcase content and publishes
+   continuously, same self-provisioning pattern as
+   `beekeeping-simulator`.
+3. **Reverse proxy + TLS — not a fresh setup, reuse the shared VM's
+   existing infra.** IoTOps will be deployed on the same Hetzner VM
+   ("ringo") already running `agritwin`, which has a shared `infra`
+   Compose project (`~/personal/agritwin/deploy/infra/docker-compose.yml`,
+   run as `-p infra`) built specifically to support a second app:
+   `infra-nginx-1` (the only service touching host ports 80/443),
+   `infra-db-1` (TimescaleDB), `infra-redis-1` — none of which IoTOps
+   should duplicate. Concretely:
+   - Clone `deploy/infra/nginx/conf.d/app2.conf.example` into an IoTOps
+     vhost (HTTP→HTTPS redirect + certbot challenge already templated;
+     just point the HTTPS block's `proxy_pass` at IoTOps's own
+     frontend/backend container names).
+   - Reuse `infra-db-1` for TimescaleDB (`CREATE DATABASE iotops`, own
+     user, `CREATE EXTENSION timescaledb` on it) instead of running a
+     second Postgres container.
+   - Reuse `infra-redis-1` with a new logical DB index — agritwin already
+     owns index `0`.
+   - Mongo/Mosquitto/Kafka (no agritwin equivalent) stay in IoTOps's own
+     Compose project, joining the shared `infra_proxy` network only where
+     they need to reach nginx or the shared DB/Redis, with no host ports
+     published.
+   - `docker-compose.yml`'s frontend service currently runs Vite's *dev*
+     server (`npm run dev --host 0.0.0.0`) — needs a production build
+     (`vite build` + static serving) for this deployment, not the dev
+     server directly behind nginx.
+4. **Still needs the user's hands-on involvement**: a domain name has not
+   been purchased yet (the actual blocker on starting §3), VM access/SSH
+   confirmation, and who holds the running instance's ops burden
+   (restarts, disk growth from Mongo/Timescale data, image updates when
+   `custom-telegraf`/backend/frontend change).
 
 ---
 
