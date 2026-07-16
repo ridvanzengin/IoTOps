@@ -529,16 +529,14 @@ user**:
 3. **Dashboard/panel suggestions** — same idea, proposing a chart from a
    schema + usage pattern, landing in the Panel Builder.
 
-**One concrete constraint to keep in mind once suggestion logic (2, 3)
-gets built**: Rule `identifiers` and Dashboard `Variable.value_column`s
-have no enforced relationship, but two shipped features already depend on
-them matching by name (overlay-events time-window filtering, and clicking
-an occurrence card identifier to set a dashboard variable). When the
-co-pilot suggests a new Rule or Dashboard Variable referencing the same
-underlying column, it should keep the identifier key and the
-`value_column` spelled identically — not a schema change, just a
-suggestion-quality constraint to design in from the start rather than
-have suggested rules and dashboards silently fail to interoperate.
+Design for both is settled (2026-07-17), superseding the standalone-endpoint
+sketch previously in "Future — Suggested Dashboards & Automations" below —
+see that section for the full architecture (including the identifier/
+value_column interoperability constraint to keep in mind once this gets
+built): **all three "Suggest..." entry points route through the Co-pilot
+chat** (not separate prefilled-form buttons), reusing the tool-calling
+loop and structured-output pattern already built for slice 1. Not yet
+built — planning only.
 
 ---
 
@@ -649,30 +647,102 @@ Fix opportunistically, not preemptively.
 
 # Future — Suggested Dashboards & Automations
 
-Ship **after both Milestone 3 (Dashboard) and Milestone 5 (Automater) are
-complete** — a "Suggest a dashboard" button pairs with a "Suggest an
-automation" button, and both need their respective target module to exist
-first.
+Milestone 6's remaining two slices (rule suggestions, panel/dashboard
+suggestions). **Design decided 2026-07-17, not yet built** — this
+supersedes the standalone-single-shot-endpoint sketch this section
+previously had (`POST /api/ai/dashboard` / `POST /api/ai/automation` as
+plain generation endpoints, a model-selection dropdown). Both ideas are
+superseded by routing everything through the Co-pilot chat instead — see
+below for why.
 
-### Tasks
+## Decided: all three "Suggest..." entry points open the Co-pilot, not a separate prefilled-form flow
 
-- A model-selection dropdown in a new Settings/config nav area: lists the
-  local Ollama model (default) plus any configured hosted models (e.g.
-  Claude via the Anthropic API) as opt-in alternatives. Persists the user's
-  choice; every "Suggest..." action uses whichever model is selected there.
-- `POST /api/ai/dashboard`: given a project's telemetry schema, propose a
-  starter set of panels (chart type, query, layout) as a reviewable draft —
-  never auto-saved. See `docs/architecture.md`'s AI Integration section,
-  which already anticipates this endpoint.
-- `POST /api/ai/automation` (new, not yet documented anywhere): given a
-  project's telemetry schema, propose starter Automater rules/conditions as
-  a reviewable draft.
-- Both endpoints share a provider abstraction (local Ollama vs. a hosted
-  model like Claude) so the model-selection dropdown controls a real
-  pluggable backend, not just Ollama.
-- Self-correction loop: generated panel/rule queries and conditions should
-  be validated (e.g. run through `/api/telemetry/query`) before being shown
-  to the user, retrying once on failure rather than surfacing broken output.
+"Suggest an automation" (on the Automaters/Query Rules list pages),
+"Suggest a dashboard" (on the Dashboards page), and "Suggest a panel" (a
+new option in an existing dashboard's `+` dropdown) all call
+`openCopilotPanel()` with an **intent** (`suggest-automation` /
+`suggest-dashboard` / `suggest-panel`), rather than navigating straight to
+a prefilled form. Reasoning: the interesting part of "suggest an
+automation" isn't generation, it's the back-and-forth ("do you have
+something in mind, or should I suggest one?", "should this be an overview
+dashboard or should I create variables?") — a real conversation handles
+arbitrary answers (including a fully-specified request arriving in one
+message) far better than a hardcoded decision tree of scripted UI prompts.
+
+- `ActivePanel`'s `{ kind: "copilot" }` case gains an optional intent field
+  (and, for the panel-suggestion entry point specifically, the
+  already-known `dashboardId`/`projectId` — no "which project?" step needed
+  there, since it's opened from inside an already-open dashboard).
+- The existing scripted greeting/project-picker (`CopilotChat.tsx`) stays
+  exactly as shipped for the other two intents — free, deterministic, no
+  model call. Once a project is picked, `CopilotChat` switches to a
+  per-intent system prompt that instructs the model what to ask and when
+  to stop asking and call the suggestion tool. The branching logic lives in
+  the prompt, not in frontend code.
+- Three new tools alongside `query_occurrences`/`query_telemetry`:
+  `suggest_automation`, `suggest_panel`, `suggest_dashboard`. Each does its
+  own read-only introspection before proposing anything:
+  - **What already exists** — a new read tool over current Rules/
+    Automaters (for `suggest_automation`) or Panels/Variables (for
+    `suggest_panel`/`suggest_dashboard`), so the model doesn't propose a
+    duplicate and can spot actual coverage gaps.
+  - **Real telemetry statistics, not just column names** — reuses the
+    `query_telemetry`-style bounded read-only SQL tool to run its own
+    `min`/`max`/`avg`/`percentile_cont` queries before proposing a
+    threshold or chart. This is what turns "temperature > 30" (useless —
+    always true against real hive data, which runs 33-40°C) into "> 38"
+    (the actual inflection point, matching what the live demo's real rules
+    already use) — without this, a threshold suggestion is just a guess.
+  - **Domain knowledge** — Claude's own general knowledge (e.g. "elevated
+    hive temperature indicates colony stress"), calibrated against the two
+    ingredients above rather than fed in separately.
+- Response shape changes: `CopilotAnswerResponse` gains an optional
+  `suggestion` field (a discriminated union on `kind`) alongside `answer`,
+  populated whenever the tool-calling loop's last executed tool was a
+  `suggest_*` tool — e.g. `{kind: "panel", label: "...", navigateTo:
+  "/dashboards/{id}", state: {...}}`. The frontend renders this as a link
+  card in the chat transcript (not just prose), navigating via React
+  Router `state` (same mechanism a plain "Suggest an automation" button
+  would have used) into the relevant builder, pre-filled — never
+  auto-created, same reviewable-draft principle as before.
+
+## The one part that's a bigger lift: "Suggest a dashboard"
+
+"Suggest a panel" and "Suggest an automation" both land in an *existing*
+form (Panel Builder / Rule creation form) via the same prefill mechanism.
+"Suggest a dashboard" doesn't have an existing form to prefill — it needs
+a new **in-memory draft dashboard** state in the Dashboard Editor (name +
+variables + panels, nothing persisted until an explicit Save), since
+today's editor always operates on an already-persisted dashboard. Also
+worth deciding as part of that flow: whether the dashboard should be a
+flat "overview" (no variables) or use chained variables (e.g. Apiary →
+Hive, mirroring the existing Beekeeping showcase pattern) — per the
+"decided" section above, this should be asked conversationally, not
+hardcoded as a toggle.
+
+## Recommended build order (not yet started)
+
+1. **Rule suggestions** — smallest complete vertical slice (intent-routed
+   panel open → conversational clarification → `suggest_automation` tool
+   → suggestion card → prefilled `/automaters/new` or `/query-rules/new`).
+   Proves the whole pattern end to end.
+2. **Panel suggestions** — reuses the same pattern; smaller lift since it
+   plugs into the existing Panel Builder prefill flow (already used by the
+   NL-to-SQL button), just model-initiated instead of user-typed.
+3. **Dashboard suggestions** — last, since it needs the new draft-editor
+   capability above.
+
+## One concrete constraint to keep in mind once suggestion logic gets built
+
+Rule `identifiers` and Dashboard `Variable.value_column`s have no enforced
+relationship, but two shipped features already depend on them matching by
+name (overlay-events time-window filtering, and clicking an occurrence
+card identifier to set a dashboard variable). When a suggestion proposes a
+new Rule or Dashboard Variable referencing the same underlying column, it
+should keep the identifier key and the `value_column` spelled identically
+— not a schema change, just a suggestion-quality constraint to design in
+from the start rather than have suggested rules and dashboards silently
+fail to interoperate.
 
 ---
 

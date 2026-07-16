@@ -605,35 +605,32 @@ Only JSON datasets.
 
 # AI Integration
 
-The local LLM is an assistant.
+Two separate model backends, deliberately not unified behind one
+provider-selection setting:
 
-The backend exposes
+- **`POST /api/ai/sql`** and **`POST /api/ai/query-rule-sql`** — implemented,
+  Ollama-backed. Ground the prompt with the live telemetry schema and
+  enforce that the response is a single read-only SELECT statement before
+  returning it to the caller.
+- **`POST /api/ai/copilot`** — implemented, Anthropic-backed (`claude-haiku-4-5`,
+  the user's own API key). A real tool-calling conversation (`AiService.
+  answer_copilot_question`), not a single-shot prompt: the model calls
+  `query_occurrences`/`query_telemetry` on demand rather than having
+  context pre-fetched, and answers only from tool results.
 
-POST
-
-/api/ai/sql
-
-`/api/ai/sql` is implemented — it calls a local Ollama model, grounding the
-prompt with the live telemetry schema, and enforces that the response is a
-single read-only SELECT statement before returning it to the caller.
-
-Not yet implemented (still future work, per the AI Assistant milestone)
-
-POST /api/ai/explain
-
-/api/ai/dashboard
-
-/api/ai/automation
-
-/api/ai/collector
-
-`/api/ai/dashboard` and `/api/ai/automation` ("suggest a dashboard" /
-"suggest an automation") ship together, after both the Dashboard and
-Automater modules exist — see
-[development-plan.md](development-plan.md#future--suggested-dashboards--automations).
-They will call whichever model the user selects in a model-selection
-setting (local Ollama by default, hosted models like Claude as an opt-in
-alternative) rather than being hardcoded to Ollama.
+Not yet implemented (still future work, per the AI Assistant milestone —
+see
+[development-plan.md](development-plan.md#future--suggested-dashboards--automations)
+for the full design, decided 2026-07-17): **rule and panel/dashboard
+suggestions extend the Co-pilot's tool-calling loop** with three new
+tools (`suggest_automation`, `suggest_panel`, `suggest_dashboard`) rather
+than being separate `POST /api/ai/dashboard`/`POST /api/ai/automation`
+endpoints as originally sketched here. All three "Suggest..." entry
+points open the Co-pilot chat (with an intent) instead of navigating
+straight to a prefilled form, since the interesting part is the
+conversational back-and-forth ("do you have something in mind, or should
+I suggest one?"), not generation itself. `POST /api/ai/explain` and
+`POST /api/ai/collector` remain unplanned beyond being named here.
 
 AI never directly modifies stored objects.
 
