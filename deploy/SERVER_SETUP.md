@@ -102,7 +102,7 @@ and the warning at the bottom of this file).
 
 ---
 
-## 7 — Build and start the app (HTTP only, no Kafka)
+## 7 — Build and start the app
 
 ```bash
 cd /opt/iotops
@@ -114,10 +114,14 @@ docker compose -p iotops --env-file deploy/iotops/.env.prod \
   -f deploy/iotops/docker-compose.prod.yml up -d
 ```
 
-Kafka/the Manufacturing Line demo scenario is intentionally omitted at
-launch — see the deployment plan's rationale. Apiary (MQTT) and Solar
-(HTTP) scenarios work immediately; add a `kafka` service to
-`docker-compose.prod.yml` later to enable the third.
+`docker-compose.prod.yml` includes a `kafka` service (single-node KRaft
+mode, no host port published) — all three demo scenarios (Apiary/MQTT,
+Solar/HTTP, Manufacturing/Kafka) work from first boot. It was originally
+deferred on the very first deployment (see the deployment plan's
+rationale for why) and added back once the rest of the stack had run
+stably for a while; if standing this up fresh and want the same
+staged rollout, comment out the `kafka` service and demo-showcase's
+`KAFKA_BROKER`/`depends_on: kafka` entries, and add them back later.
 
 ---
 
