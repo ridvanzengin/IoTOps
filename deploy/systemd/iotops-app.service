@@ -1,0 +1,15 @@
+[Unit]
+Description=IoTOps Application (FastAPI + Celery + Frontend)
+After=docker.service agritwin-infra.service
+Requires=docker.service agritwin-infra.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/iotops
+ExecStart=docker compose -p iotops --env-file deploy/iotops/.env.prod -f deploy/iotops/docker-compose.prod.yml up -d
+ExecStop=docker compose -p iotops --env-file deploy/iotops/.env.prod -f deploy/iotops/docker-compose.prod.yml down
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

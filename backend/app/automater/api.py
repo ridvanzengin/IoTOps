@@ -10,7 +10,10 @@ router = APIRouter(prefix="/api/automater", tags=["automater"])
 
 
 @router.post(
-    "", response_model=Automater, status_code=201, dependencies=[Depends(block_in_demo_mode())]
+    "",
+    response_model=Automater,
+    status_code=201,
+    dependencies=[Depends(block_in_demo_mode(allow_seed_token=True))],
 )
 async def create_automater(
     payload: AutomaterInput,
@@ -20,7 +23,10 @@ async def create_automater(
 
 
 @router.post(
-    "/rules", response_model=Automater, status_code=201, dependencies=[Depends(block_in_demo_mode())]
+    "/rules",
+    response_model=Automater,
+    status_code=201,
+    dependencies=[Depends(block_in_demo_mode(allow_seed_token=True))],
 )
 async def create_rule(
     payload: CreateRuleRequest,
@@ -79,7 +85,9 @@ async def get_automater(
 
 
 @router.put(
-    "/{automater_id}", response_model=Automater, dependencies=[Depends(block_in_demo_mode())]
+    "/{automater_id}",
+    response_model=Automater,
+    dependencies=[Depends(block_in_demo_mode(allow_seed_token=True))],
 )
 async def update_automater(
     automater_id: UUID,

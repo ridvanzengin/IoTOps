@@ -3,6 +3,7 @@ from pathlib import Path
 import docker
 import httpx
 import redis.asyncio as async_redis
+from fastapi import Request
 
 from app.ai.service import AiService
 from app.automater.docker import AutomaterDockerManager
@@ -164,6 +165,8 @@ def get_firing_redis_client() -> async_redis.Redis:
 
 def block_in_demo_mode(
     reason: str = "This is a read-only demo instance. Create, edit, and delete actions are disabled.",
+    *,
+    allow_seed_token: bool = False,
 ):
     # A dependency factory, not a plain dependency -- lets a route override
     # the message (see the AI routes, which use a more specific reason)
@@ -171,8 +174,29 @@ def block_in_demo_mode(
     # `dependencies=[Depends(block_in_demo_mode())]` on each mutating route
     # decorator -- per-route, not router-level, since every router here
     # mixes GET/read-only-POST routes with mutating ones.
-    def _guard() -> None:
-        if settings.demo:
-            raise DemoModeError(reason)
+    #
+    # allow_seed_token=True opts a specific route into the demo-showcase
+    # seed-token bypass below -- only set on the create/update routes
+    # examples/demo/seed.py's idempotent-by-name provisioning actually
+    # calls (or would plausibly call as it grows: more projects, updates to
+    # existing ones). Every delete/stop-deployment route and everything
+    # outside project/collector/automater/query_rule/dashboard (AI routes,
+    # event resolution) deliberately leaves this False, so a leaked token
+    # still can't delete or stop anything, demo mode or not.
+    def _guard(request: Request) -> None:
+        if not settings.demo:
+            return
+        # Empty by default (settings.demo_seed_token), so this check is a
+        # no-op everywhere except a production deployment that explicitly
+        # sets DEMO_SEED_TOKEN. The token only ever travels over the
+        # internal Docker network between demo-showcase and backend --
+        # nginx never proxies it.
+        if (
+            allow_seed_token
+            and settings.demo_seed_token
+            and request.headers.get("x-demo-seed-token") == settings.demo_seed_token
+        ):
+            return
+        raise DemoModeError(reason)
 
     return _guard

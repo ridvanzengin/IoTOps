@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     # local dev and self-hosters. The public demo deployment sets DEMO=true
     # explicitly in its own environment; this is not the repo's default.
     demo: bool = False
+    # Lets examples/demo/seed.py's own provisioning requests through
+    # block_in_demo_mode() (app/dependencies.py) without weakening the
+    # public-facing gate itself. Empty by default -- only a production
+    # deployment sets this (matching the value it also passes to
+    # demo-showcase's DEMO_SEED_TOKEN env var).
+    demo_seed_token: str = ""
     # Independent of demo/DEMO -- applied to every new hypertable regardless
     # of mode. 14 days is a sane out-of-the-box default so telemetry doesn't
     # grow unbounded by default; override via env for a different window.

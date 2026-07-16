@@ -10,7 +10,10 @@ router = APIRouter(prefix="/api/collector", tags=["collector"])
 
 
 @router.post(
-    "", response_model=Collector, status_code=201, dependencies=[Depends(block_in_demo_mode())]
+    "",
+    response_model=Collector,
+    status_code=201,
+    dependencies=[Depends(block_in_demo_mode(allow_seed_token=True))],
 )
 async def create_collector(
     payload: CollectorInput,
@@ -35,7 +38,9 @@ async def get_collector(
 
 
 @router.put(
-    "/{collector_id}", response_model=Collector, dependencies=[Depends(block_in_demo_mode())]
+    "/{collector_id}",
+    response_model=Collector,
+    dependencies=[Depends(block_in_demo_mode(allow_seed_token=True))],
 )
 async def update_collector(
     collector_id: UUID,
@@ -58,7 +63,7 @@ async def delete_collector(
 @router.post(
     "/{collector_id}/deployment",
     response_model=Collector,
-    dependencies=[Depends(block_in_demo_mode())],
+    dependencies=[Depends(block_in_demo_mode(allow_seed_token=True))],
 )
 async def deploy_collector(
     collector_id: UUID,

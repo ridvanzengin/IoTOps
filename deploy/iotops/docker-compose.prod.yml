@@ -1,0 +1,171 @@
+# IoTOps -- production Docker Compose
+# Run from the repo root:
+#   docker compose -p iotops -f deploy/iotops/docker-compose.prod.yml --env-file deploy/iotops/.env.prod <command>
+#
+# Requires the "infra" compose project (from the agritwin repo) to already
+# be running -- it provides infra-db-1 (TimescaleDB), infra-redis-1, and
+# infra-nginx-1 plus the infra_proxy network. See ../nginx/iotops.conf and
+# SERVER_SETUP.md.
+#
+# Every service below joins infra_proxy as its only network -- including
+# the dynamically-spawned per-Collector/per-Automater Telegraf sidecars,
+# via DOCKER_NETWORK. No service publishes a host port; only infra-nginx-1
+# (not part of this compose project) touches 80/443.
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - /opt/iotops-data/mongo:/data/db
+    networks:
+      - infra_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    volumes:
+      - ../../docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - /opt/iotops-data/mosquitto:/mosquitto/data
+    networks:
+      - infra_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: docker/backend/Dockerfile
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      TIMESCALE_URI: "postgresql://iotops:${IOTOPS_DB_PASSWORD}@infra-db-1:5432/iotops"
+      REDIS_URI: "redis://infra-redis-1:6379/1"
+      AUTOMATER_FIRING_REDIS_URI: "redis://infra-redis-1:6379/0"
+      DOCKER_NETWORK: infra_proxy
+      HOST_RUNTIME_DIR: /opt/iotops-data/runtime
+    volumes:
+      # Docker-outside-of-Docker: lets the backend manage sibling Telegraf
+      # containers on the host's Docker daemon. See "Known, accepted risk"
+      # in the deployment plan -- this gives the backend container
+      # root-equivalent control of the whole host daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/iotops-data/runtime:/app/runtime
+    networks:
+      - infra_proxy
+    depends_on:
+      - mongo
+      - mosquitto
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+  celery-worker:
+    build:
+      context: ../..
+      dockerfile: docker/backend/Dockerfile
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      TIMESCALE_URI: "postgresql://iotops:${IOTOPS_DB_PASSWORD}@infra-db-1:5432/iotops"
+      REDIS_URI: "redis://infra-redis-1:6379/1"
+      AUTOMATER_FIRING_REDIS_URI: "redis://infra-redis-1:6379/0"
+    command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info"]
+    networks:
+      - infra_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  celery-beat:
+    build:
+      context: ../..
+      dockerfile: docker/backend/Dockerfile
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      REDIS_URI: "redis://infra-redis-1:6379/1"
+    command: ["celery", "-A", "app.celery_app", "beat", "--loglevel=info"]
+    networks:
+      - infra_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: docker/frontend/Dockerfile.prod
+      args:
+        VITE_API_BASE_URL: ""
+    restart: unless-stopped
+    networks:
+      - infra_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 32M
+
+  # Kafka broker for the Manufacturing Line demo scenario -- omitted at
+  # initial launch (see deployment plan §4), added once the rest of the
+  # stack had been running stably for a while. Single-node KRaft mode, no
+  # host port published (nothing outside this VM needs to reach it
+  # directly) -- `hostname: kafka` (not container_name) registers "kafka"
+  # as resolvable on infra_proxy, matching the hostname already baked
+  # into the Manufacturing Collector's existing Telegraf config
+  # (KAFKA_BROKER's default, "kafka:9092") from when it was first seeded.
+  kafka:
+    image: apache/kafka:3.7.0
+    hostname: kafka
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - infra_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+  demo-showcase:
+    build:
+      context: ../../examples/demo
+    restart: unless-stopped
+    environment:
+      BACKEND_BASE_URL: http://iotops-backend-1:8000
+      MQTT_BROKER_HOST: iotops-mosquitto-1
+      KAFKA_BROKER: kafka:9092
+      PUBLISH_INTERVAL_SECONDS: "20"
+      DEMO_SEED_TOKEN: "${DEMO_SEED_TOKEN}"
+    networks:
+      - infra_proxy
+    depends_on:
+      - backend
+      - mosquitto
+      - kafka
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+networks:
+  infra_proxy:
+    external: true
+    name: infra_proxy

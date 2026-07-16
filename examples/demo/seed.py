@@ -9,15 +9,35 @@ application itself -- see examples/demo/README.md.
 
 import logging
 import os
+import re
 import time
 from typing import Any
 
 import requests
 
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _slugify(value: str, max_length: int = 40, fallback: str = "unnamed") -> str:
+    """Mirrors backend/app/shared/naming.py's slugify() exactly -- this
+    script has no import path to the backend package (examples/demo is a
+    standalone container), but needs to derive the same container
+    hostname Collector/AutomaterDockerManager actually create
+    (`iotops-{collector,automater}-{slug}-{short_id}`), not just guess at
+    it from the raw name/id."""
+    slug = _NON_ALNUM_RE.sub("-", value.strip().lower()).strip("-")
+    return slug[:max_length].strip("-") or fallback
+
 logger = logging.getLogger("demo_seed")
 
 BACKEND_BASE_URL = os.environ.get("BACKEND_BASE_URL", "http://backend:8000")
 KAFKA_BROKER = os.environ.get("KAFKA_BROKER", "kafka:9092")
+# Lets this idempotent-by-name provisioning step run against a demo
+# instance that already has DEMO=true set from first boot -- see
+# block_in_demo_mode() in backend/app/dependencies.py. Empty in local dev
+# (no-op there; DEMO defaults false anyway), set by docker-compose.prod.yml
+# in production.
+DEMO_SEED_TOKEN = os.environ.get("DEMO_SEED_TOKEN", "")
 
 RETRY_DELAY_SECONDS = 3
 MAX_ATTEMPTS = 40  # ~2 minutes of retrying while Mongo/Timescale/backend warm up
@@ -25,10 +45,11 @@ MAX_ATTEMPTS = 40  # ~2 minutes of retrying while Mongo/Timescale/backend warm u
 
 def _request(method: str, path: str, **kwargs: Any) -> Any:
     url = f"{BACKEND_BASE_URL}{path}"
+    headers = {"X-Demo-Seed-Token": DEMO_SEED_TOKEN} if DEMO_SEED_TOKEN else {}
     last_error: Exception | None = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            response = requests.request(method, url, timeout=10, **kwargs)
+            response = requests.request(method, url, timeout=10, headers=headers, **kwargs)
             response.raise_for_status()
             return response.json() if response.content else None
         except requests.RequestException as exc:
@@ -158,7 +179,7 @@ def _time_filtered_query(table: str, select_clause: str, where: str = "") -> str
 # 1. Apiary Monitoring Demo -- MQTT, two topics/tables on one Collector
 # ---------------------------------------------------------------------------
 
-APIARY_PROJECT_NAME = "Apiary Monitoring Demo"
+APIARY_PROJECT_NAME = "BeeKeping Monitoring"
 APIARY_COLLECTOR_NAME = "Apiary MQTT Collector"
 APIARY_AUTOMATER_NAME = "Apiary Automater"
 APIARY_DASHBOARD_NAME = "Apiary Monitoring"
@@ -166,12 +187,22 @@ ENV_TABLE = "hive_environment"
 WEIGHT_TABLE = "hive_weight"
 
 
-def _line_panel(table: str, title: str, y_axis: str, x: int, y: int, series_by: str, width: int = 6) -> dict:
+def _line_panel(
+    table: str, title: str, y_axis: str, x: int, y: int, series_by: str, variable: str, width: int = 6
+) -> dict:
+    # Filtered to the dashboard's own selected variable (e.g. hive_id =
+    # $hive), not just split by series_by -- narrows each panel to
+    # whichever single entity is currently selected, rather than showing
+    # every hive/array/machine at once. series_by is kept on the chart
+    # config anyway since a future multi-select variable would make it
+    # meaningful again; today it just means one line per query result.
     chart = {"type": "line", "title": title, "x_axis": "time", "y_axis": y_axis, "series_by": series_by}
     return {
         "title": title,
         "chart": chart,
-        "query": {"sql": _time_filtered_query(table, f"time, {series_by}, {y_axis}")},
+        "query": {
+            "sql": _time_filtered_query(table, f"time, {series_by}, {y_axis}", f"{series_by} = ${variable}")
+        },
         "time_range": "1h",
         "position": {"x": x, "y": y, "width": width, "height": 8},
     }
@@ -226,7 +257,7 @@ def ensure_apiary_demo() -> None:
         collector_id,
     )
 
-    ensure_query_rule(
+    swarm_risk_rule_id = ensure_query_rule(
         project_id,
         "swarm-risk",
         {
@@ -258,9 +289,12 @@ def ensure_apiary_demo() -> None:
         "Environment and weight telemetry across 6 hives, two MQTT-sourced tables.",
         [{"name": "hive", "label": "Hive", "table": ENV_TABLE, "value_column": "hive_id"}],
         [
-            _line_panel(ENV_TABLE, "Hive Temperature", "temperature", 0, 0, "hive_id"),
-            _line_panel(ENV_TABLE, "Hive Humidity", "humidity", 6, 0, "hive_id"),
-            _line_panel(ENV_TABLE, "Hive CO2", "co2_ppm", 0, 8, "hive_id"),
+            {
+                **_line_panel(ENV_TABLE, "Hive Temperature", "temperature", 0, 0, "hive_id", "hive"),
+                "event_rule_ids": [temperature_rule_id, swarm_risk_rule_id],
+            },
+            _line_panel(ENV_TABLE, "Hive Humidity", "humidity", 6, 0, "hive_id", "hive"),
+            _line_panel(ENV_TABLE, "Hive CO2", "co2_ppm", 0, 8, "hive_id", "hive"),
             {
                 "title": "Latest Hive Sound Level",
                 "chart": {"type": "bar", "title": "Latest Hive Sound Level", "x_axis": "hive_id", "y_axis": "sound_level_db"},
@@ -274,8 +308,8 @@ def ensure_apiary_demo() -> None:
                 "position": {"x": 6, "y": 8, "width": 6, "height": 8},
             },
             {
-                "title": "Current Hive Weight",
-                "chart": {"type": "gauge", "title": "Current Hive Weight", "value_field": "weight_kg", "min": 0, "max": 50},
+                "title": "Hive Weight",
+                "chart": {"type": "gauge", "title": "Hive Weight", "value_field": "weight_kg", "min": 0, "max": 50},
                 "query": {"sql": "SELECT weight_kg FROM hive_weight WHERE hive_id = $hive ORDER BY time DESC LIMIT 1"},
                 "time_range": "1h",
                 "position": {"x": 0, "y": 16, "width": 4, "height": 8},
@@ -295,14 +329,6 @@ def ensure_apiary_demo() -> None:
                 "time_range": "1h",
                 "position": {"x": 4, "y": 16, "width": 8, "height": 8},
             },
-            {
-                "title": "Hive Temperature (with Alerts)",
-                "chart": {"type": "line", "title": "Hive Temperature (with Alerts)", "x_axis": "time", "y_axis": "temperature"},
-                "query": {"sql": _time_filtered_query(ENV_TABLE, "time, temperature", "hive_id = $hive")},
-                "time_range": "1h",
-                "position": {"x": 0, "y": 24, "width": 12, "height": 8},
-                "event_rule_ids": [temperature_rule_id],
-            },
         ],
     )
     logger.info("Apiary Monitoring Demo provisioned.")
@@ -312,7 +338,7 @@ def ensure_apiary_demo() -> None:
 # 2. Solar Farm Demo -- HTTP push (no broker, needs multi-target push)
 # ---------------------------------------------------------------------------
 
-SOLAR_PROJECT_NAME = "Solar Farm Demo"
+SOLAR_PROJECT_NAME = "Solar Farm"
 SOLAR_COLLECTOR_NAME = "Solar HTTP Collector"
 SOLAR_AUTOMATER_NAME = "Solar Automater"
 SOLAR_DASHBOARD_NAME = "Solar Farm Monitoring"
@@ -363,7 +389,7 @@ def ensure_solar_demo() -> tuple[str, str]:
         collector_id,
     )
 
-    ensure_query_rule(
+    underperformance_rule_id = ensure_query_rule(
         project_id,
         "underperformance",
         {
@@ -387,8 +413,14 @@ def ensure_solar_demo() -> tuple[str, str]:
         "Output, irradiance, and inverter telemetry across 3 solar arrays, HTTP-sourced.",
         [{"name": "array", "label": "Array", "table": SOLAR_TABLE, "value_column": "panel_array_id"}],
         [
-            _line_panel(SOLAR_TABLE, "Power Output", "power_output_kw", 0, 0, "panel_array_id"),
-            _line_panel(SOLAR_TABLE, "Irradiance", "irradiance_w_m2", 6, 0, "panel_array_id"),
+            {
+                **_line_panel(SOLAR_TABLE, "Power Output", "power_output_kw", 0, 0, "panel_array_id", "array"),
+                "event_rule_ids": [overheating_rule_id, underperformance_rule_id],
+            },
+            {
+                **_line_panel(SOLAR_TABLE, "Irradiance", "irradiance_w_m2", 6, 0, "panel_array_id", "array"),
+                "event_rule_ids": [overheating_rule_id, underperformance_rule_id],
+            },
             {
                 "title": "Latest Power Output by Array",
                 "chart": {"type": "bar", "title": "Latest Power Output by Array", "x_axis": "panel_array_id", "y_axis": "power_output_kw"},
@@ -429,15 +461,16 @@ def ensure_solar_demo() -> tuple[str, str]:
                     "sql": _time_filtered_query(SOLAR_TABLE, "time, power_output_kw, irradiance_w_m2", "panel_array_id = $array")
                 },
                 "time_range": "1h",
-                "position": {"x": 0, "y": 16, "width": 12, "height": 8},
+                "position": {"x": 0, "y": 16, "width": 6, "height": 9},
+                "event_rule_ids": [overheating_rule_id, underperformance_rule_id],
             },
             {
-                "title": "Panel Temperature (with Alerts)",
-                "chart": {"type": "line", "title": "Panel Temperature (with Alerts)", "x_axis": "time", "y_axis": "panel_temp_c"},
+                "title": "Panel Temperature",
+                "chart": {"type": "line", "title": "Panel Temperature", "x_axis": "time", "y_axis": "panel_temp_c"},
                 "query": {"sql": _time_filtered_query(SOLAR_TABLE, "time, panel_temp_c", "panel_array_id = $array")},
                 "time_range": "1h",
-                "position": {"x": 0, "y": 24, "width": 12, "height": 8},
-                "event_rule_ids": [overheating_rule_id],
+                "position": {"x": 6, "y": 16, "width": 6, "height": 9},
+                "event_rule_ids": [overheating_rule_id, underperformance_rule_id],
             },
         ],
     )
@@ -449,11 +482,25 @@ def _solar_http_target_urls(collector_id: str) -> list[str]:
     """http_listener_v2 has no broker -- see solar_publisher.py's own
     docstring. Returns the Collector's own target plus every Automater
     currently covering SOLAR_TABLE (today just SOLAR_AUTOMATER_NAME, but
-    looked up rather than assumed)."""
-    urls = [f"http://iotops-collector-{collector_id}:{SOLAR_HTTP_PORT}{SOLAR_HTTP_PATH}"]
+    looked up rather than assumed).
+
+    Container hostnames are `iotops-{collector,automater}-{name-slug}-
+    {short_id}` (see collector_container_name/automater_container_name in
+    the backend), not just the bare id -- building the bare-id form here
+    silently pushed to a hostname that never existed, in every
+    environment this has ever run in.
+    """
+    collector_slug = _slugify(SOLAR_COLLECTOR_NAME, fallback="collector")
+    urls = [
+        f"http://iotops-collector-{collector_slug}-{collector_id[:8]}:{SOLAR_HTTP_PORT}{SOLAR_HTTP_PATH}"
+    ]
     for automater in _request("GET", "/api/automater"):
         if any(i["configuration"].get("name_override") == SOLAR_TABLE for i in automater["inputs"]):
-            urls.append(f"http://iotops-automater-{automater['id']}:{SOLAR_HTTP_PORT}{SOLAR_HTTP_PATH}")
+            automater_slug = _slugify(automater["name"], fallback="automater")
+            urls.append(
+                f"http://iotops-automater-{automater_slug}-{automater['id'][:8]}:"
+                f"{SOLAR_HTTP_PORT}{SOLAR_HTTP_PATH}"
+            )
     return urls
 
 
@@ -461,7 +508,7 @@ def _solar_http_target_urls(collector_id: str) -> list[str]:
 # 3. Manufacturing Line Demo -- Kafka
 # ---------------------------------------------------------------------------
 
-MANUFACTURING_PROJECT_NAME = "Manufacturing Line Demo"
+MANUFACTURING_PROJECT_NAME = "Manufacturing Line"
 MANUFACTURING_COLLECTOR_NAME = "Manufacturing Kafka Collector"
 MANUFACTURING_AUTOMATER_NAME = "Manufacturing Automater"
 MANUFACTURING_DASHBOARD_NAME = "Manufacturing Line Monitoring"
@@ -509,7 +556,7 @@ def ensure_manufacturing_demo() -> None:
         collector_id,
     )
 
-    ensure_query_rule(
+    rpm_drift_rule_id = ensure_query_rule(
         project_id,
         "rpm-drift",
         {
@@ -533,8 +580,14 @@ def ensure_manufacturing_demo() -> None:
         "Vibration, RPM, and motor telemetry across 3 machines, Kafka-sourced.",
         [{"name": "machine", "label": "Machine", "table": MACHINE_TABLE, "value_column": "machine_id"}],
         [
-            _line_panel(MACHINE_TABLE, "Machine Vibration", "vibration_rms", 0, 0, "machine_id"),
-            _line_panel(MACHINE_TABLE, "Motor Temperature", "motor_temp_c", 6, 0, "machine_id"),
+            {
+                **_line_panel(MACHINE_TABLE, "Machine Vibration", "vibration_rms", 0, 0, "machine_id", "machine"),
+                "event_rule_ids": [vibration_rule_id, rpm_drift_rule_id],
+            },
+            {
+                **_line_panel(MACHINE_TABLE, "Motor Temperature", "motor_temp_c", 6, 0, "machine_id", "machine"),
+                "event_rule_ids": [vibration_rule_id, rpm_drift_rule_id],
+            },
             {
                 "title": "Latest Current Draw by Machine",
                 "chart": {"type": "bar", "title": "Latest Current Draw by Machine", "x_axis": "machine_id", "y_axis": "current_draw_amps"},
@@ -567,15 +620,24 @@ def ensure_manufacturing_demo() -> None:
                     "sql": _time_filtered_query(MACHINE_TABLE, "time, rpm, motor_temp_c", "machine_id = $machine")
                 },
                 "time_range": "1h",
-                "position": {"x": 0, "y": 16, "width": 12, "height": 8},
+                "position": {"x": 0, "y": 16, "width": 6, "height": 8},
+                "event_rule_ids": [vibration_rule_id, rpm_drift_rule_id],
             },
             {
-                "title": "Vibration (with Alerts)",
-                "chart": {"type": "line", "title": "Vibration (with Alerts)", "x_axis": "time", "y_axis": "vibration_rms"},
-                "query": {"sql": _time_filtered_query(MACHINE_TABLE, "time, vibration_rms", "machine_id = $machine")},
+                "title": "Oil Pressure PSI",
+                "chart": {
+                    "type": "line",
+                    "title": "Oil Pressure PSI",
+                    "x_axis": "time",
+                    "y_axis": "oil_pressure_psi",
+                    "series_by": "machine_id",
+                },
+                "query": {
+                    "sql": _time_filtered_query(MACHINE_TABLE, "time, machine_id, oil_pressure_psi", "machine_id = $machine")
+                },
                 "time_range": "1h",
-                "position": {"x": 0, "y": 24, "width": 12, "height": 8},
-                "event_rule_ids": [vibration_rule_id],
+                "position": {"x": 6, "y": 16, "width": 6, "height": 8},
+                "event_rule_ids": [vibration_rule_id, rpm_drift_rule_id],
             },
         ],
     )

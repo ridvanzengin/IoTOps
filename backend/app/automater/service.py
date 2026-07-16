@@ -61,6 +61,7 @@ class AutomaterService:
             # evaluates a rule against metrics whose name equals its
             # table). Already-covered tables need no collector_id at all --
             # existing behavior, unchanged.
+            pending_forwarding: tuple[Collector, InputPlugin] | None = None
             if not self._has_input_for_table(automater, rule.table):
                 if collector_id is None:
                     raise InvalidOperationError(
@@ -77,8 +78,18 @@ class AutomaterService:
                         configuration=self._automater_scoped_configuration(matched_input.configuration),
                     )
                 )
-                await self._ensure_http_forwarding(collector, automater, matched_input)
+                # Deferred until after a successful deploy below -- see the
+                # matching comment on the brand-new-Automater branch. A
+                # failed deploy here shouldn't leave the Collector with a
+                # forwarding output aimed at a table this Automater never
+                # actually started serving.
+                pending_forwarding = (collector, matched_input)
             automater.rules.append(rule)
+            deployed = await self._redeploy_or_stop(automater)
+            if pending_forwarding is not None:
+                collector, matched_input = pending_forwarding
+                await self._ensure_http_forwarding(collector, deployed, matched_input)
+            return deployed
         else:
             if not automater_name:
                 raise InvalidOperationError(
@@ -114,9 +125,23 @@ class AutomaterService:
             )
             self._validate_plugin_configurations(automater)
             automater = await self._repository.create(automater)
+            # Deploy before wiring up http forwarding, and roll back the
+            # just-created Automater entirely if deploy fails -- a failed
+            # deploy (e.g. the configured Telegraf image not being
+            # available yet) used to leave an orphaned, never-deployed
+            # Automater behind, and a caller retrying the same "create
+            # new" request (its view of the world hasn't changed, it has
+            # no id to reuse) would pile up another one every attempt
+            # instead of cleanly retrying from scratch. Only this
+            # brand-new-Automater path needs the rollback -- adding a rule
+            # to an already-existing Automater has nothing new to delete.
+            try:
+                automater = await self._redeploy_or_stop(automater)
+            except Exception:
+                await self._repository.delete(automater.id)
+                raise
             await self._ensure_http_forwarding(collector, automater, matched_input)
-
-        return await self._redeploy_or_stop(automater)
+            return automater
 
     def _has_input_for_table(self, automater: Automater, table: str) -> bool:
         # Not scoped to any particular plugin_type -- an Automater's input

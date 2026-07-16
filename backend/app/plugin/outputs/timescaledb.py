@@ -15,7 +15,7 @@ def _default_create_templates() -> list[str]:
 
 
 class TimescaleDBOutputConfig(CommonOpts):
-    connection: str = "postgresql://iotops:iotops@timescaledb:5432/iotops"
+    connection: str = Field(default_factory=lambda: settings.timescale_uri)
 
     pgr_schema: str = advanced_field(default="public", alias="schema")
     tags_as_foreign_keys: bool = advanced_field(default=False)
