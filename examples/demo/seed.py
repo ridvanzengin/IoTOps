@@ -18,6 +18,12 @@ logger = logging.getLogger("demo_seed")
 
 BACKEND_BASE_URL = os.environ.get("BACKEND_BASE_URL", "http://backend:8000")
 KAFKA_BROKER = os.environ.get("KAFKA_BROKER", "kafka:9092")
+# Lets this idempotent-by-name provisioning step run against a demo
+# instance that already has DEMO=true set from first boot -- see
+# block_in_demo_mode() in backend/app/dependencies.py. Empty in local dev
+# (no-op there; DEMO defaults false anyway), set by docker-compose.prod.yml
+# in production.
+DEMO_SEED_TOKEN = os.environ.get("DEMO_SEED_TOKEN", "")
 
 RETRY_DELAY_SECONDS = 3
 MAX_ATTEMPTS = 40  # ~2 minutes of retrying while Mongo/Timescale/backend warm up
@@ -25,10 +31,11 @@ MAX_ATTEMPTS = 40  # ~2 minutes of retrying while Mongo/Timescale/backend warm u
 
 def _request(method: str, path: str, **kwargs: Any) -> Any:
     url = f"{BACKEND_BASE_URL}{path}"
+    headers = {"X-Demo-Seed-Token": DEMO_SEED_TOKEN} if DEMO_SEED_TOKEN else {}
     last_error: Exception | None = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            response = requests.request(method, url, timeout=10, **kwargs)
+            response = requests.request(method, url, timeout=10, headers=headers, **kwargs)
             response.raise_for_status()
             return response.json() if response.content else None
         except requests.RequestException as exc:

@@ -128,6 +128,7 @@ services:
       BACKEND_BASE_URL: http://iotops-backend-1:8000
       MQTT_BROKER_HOST: iotops-mosquitto-1
       PUBLISH_INTERVAL_SECONDS: "20"
+      DEMO_SEED_TOKEN: "${DEMO_SEED_TOKEN}"
     networks:
       - infra_proxy
     depends_on:

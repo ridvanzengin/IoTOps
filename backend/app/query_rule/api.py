@@ -11,7 +11,10 @@ router = APIRouter(prefix="/api/query-rule", tags=["query-rule"])
 
 
 @router.post(
-    "", response_model=QueryRule, status_code=201, dependencies=[Depends(block_in_demo_mode())]
+    "",
+    response_model=QueryRule,
+    status_code=201,
+    dependencies=[Depends(block_in_demo_mode(allow_seed_token=True))],
 )
 async def create_query_rule(
     payload: QueryRuleInput,
@@ -48,7 +51,9 @@ async def get_query_rule(
 
 
 @router.put(
-    "/{query_rule_id}", response_model=QueryRule, dependencies=[Depends(block_in_demo_mode())]
+    "/{query_rule_id}",
+    response_model=QueryRule,
+    dependencies=[Depends(block_in_demo_mode(allow_seed_token=True))],
 )
 async def update_query_rule(
     query_rule_id: UUID,

@@ -10,7 +10,10 @@ router = APIRouter(prefix="/api/project", tags=["project"])
 
 
 @router.post(
-    "", response_model=Project, status_code=201, dependencies=[Depends(block_in_demo_mode())]
+    "",
+    response_model=Project,
+    status_code=201,
+    dependencies=[Depends(block_in_demo_mode(allow_seed_token=True))],
 )
 async def create_project(
     payload: ProjectInput,
@@ -35,7 +38,9 @@ async def get_project(
 
 
 @router.put(
-    "/{project_id}", response_model=Project, dependencies=[Depends(block_in_demo_mode())]
+    "/{project_id}",
+    response_model=Project,
+    dependencies=[Depends(block_in_demo_mode(allow_seed_token=True))],
 )
 async def update_project(
     project_id: UUID,

@@ -21,7 +21,10 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
 @router.post(
-    "", response_model=Dashboard, status_code=201, dependencies=[Depends(block_in_demo_mode())]
+    "",
+    response_model=Dashboard,
+    status_code=201,
+    dependencies=[Depends(block_in_demo_mode(allow_seed_token=True))],
 )
 async def create_dashboard(
     payload: DashboardInput,
@@ -46,7 +49,9 @@ async def get_dashboard(
 
 
 @router.put(
-    "/{dashboard_id}", response_model=Dashboard, dependencies=[Depends(block_in_demo_mode())]
+    "/{dashboard_id}",
+    response_model=Dashboard,
+    dependencies=[Depends(block_in_demo_mode(allow_seed_token=True))],
 )
 async def update_dashboard(
     dashboard_id: UUID,
