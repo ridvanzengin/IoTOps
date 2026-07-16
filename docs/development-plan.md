@@ -529,16 +529,14 @@ user**:
 3. **Dashboard/panel suggestions** — same idea, proposing a chart from a
    schema + usage pattern, landing in the Panel Builder.
 
-**One concrete constraint to keep in mind once suggestion logic (2, 3)
-gets built**: Rule `identifiers` and Dashboard `Variable.value_column`s
-have no enforced relationship, but two shipped features already depend on
-them matching by name (overlay-events time-window filtering, and clicking
-an occurrence card identifier to set a dashboard variable). When the
-co-pilot suggests a new Rule or Dashboard Variable referencing the same
-underlying column, it should keep the identifier key and the
-`value_column` spelled identically — not a schema change, just a
-suggestion-quality constraint to design in from the start rather than
-have suggested rules and dashboards silently fail to interoperate.
+Design for both is settled (2026-07-17), superseding the standalone-endpoint
+sketch previously in "Future — Suggested Dashboards & Automations" below —
+see that section for the full architecture (including the identifier/
+value_column interoperability constraint to keep in mind once this gets
+built): **all three "Suggest..." entry points route through the Co-pilot
+chat** (not separate prefilled-form buttons), reusing the tool-calling
+loop and structured-output pattern already built for slice 1. Not yet
+built — planning only.
 
 ---
 
@@ -649,30 +647,235 @@ Fix opportunistically, not preemptively.
 
 # Future — Suggested Dashboards & Automations
 
-Ship **after both Milestone 3 (Dashboard) and Milestone 5 (Automater) are
-complete** — a "Suggest a dashboard" button pairs with a "Suggest an
-automation" button, and both need their respective target module to exist
-first.
+Milestone 6's remaining two slices (rule suggestions, panel/dashboard
+suggestions). **Design decided 2026-07-17, not yet built** — this
+supersedes the standalone-single-shot-endpoint sketch this section
+previously had (`POST /api/ai/dashboard` / `POST /api/ai/automation` as
+plain generation endpoints, a model-selection dropdown). Both ideas are
+superseded by routing everything through the Co-pilot chat instead — see
+below for why.
 
-### Tasks
+## Decided: all three "Suggest..." entry points open the Co-pilot, not a separate prefilled-form flow
 
-- A model-selection dropdown in a new Settings/config nav area: lists the
-  local Ollama model (default) plus any configured hosted models (e.g.
-  Claude via the Anthropic API) as opt-in alternatives. Persists the user's
-  choice; every "Suggest..." action uses whichever model is selected there.
-- `POST /api/ai/dashboard`: given a project's telemetry schema, propose a
-  starter set of panels (chart type, query, layout) as a reviewable draft —
-  never auto-saved. See `docs/architecture.md`'s AI Integration section,
-  which already anticipates this endpoint.
-- `POST /api/ai/automation` (new, not yet documented anywhere): given a
-  project's telemetry schema, propose starter Automater rules/conditions as
-  a reviewable draft.
-- Both endpoints share a provider abstraction (local Ollama vs. a hosted
-  model like Claude) so the model-selection dropdown controls a real
-  pluggable backend, not just Ollama.
-- Self-correction loop: generated panel/rule queries and conditions should
-  be validated (e.g. run through `/api/telemetry/query`) before being shown
-  to the user, retrying once on failure rather than surfacing broken output.
+"Suggest an automation" (on the Automaters/Query Rules list pages),
+"Suggest a dashboard" (on the Dashboards page), and "Suggest a panel" (a
+new option in an existing dashboard's `+` dropdown) all call
+`openCopilotPanel()` with an **intent** (`suggest-automation` /
+`suggest-dashboard` / `suggest-panel`), rather than navigating straight to
+a prefilled form. Reasoning: the interesting part of "suggest an
+automation" isn't generation, it's the back-and-forth ("do you have
+something in mind, or should I suggest one?", "should this be an overview
+dashboard or should I create variables?") — a real conversation handles
+arbitrary answers (including a fully-specified request arriving in one
+message) far better than a hardcoded decision tree of scripted UI prompts.
+
+- `ActivePanel`'s `{ kind: "copilot" }` case gains an optional intent field
+  (and, for the panel-suggestion entry point specifically, the
+  already-known `dashboardId`/`projectId` — no "which project?" step needed
+  there, since it's opened from inside an already-open dashboard).
+- The existing scripted greeting/project-picker (`CopilotChat.tsx`) stays
+  exactly as shipped for the other two intents — free, deterministic, no
+  model call. Once a project is picked, `CopilotChat` switches to a
+  per-intent system prompt that instructs the model what to ask and when
+  to stop asking and call the suggestion tool. The branching logic lives in
+  the prompt, not in frontend code.
+- Three new tools alongside `query_occurrences`/`query_telemetry`:
+  `suggest_automation`, `suggest_panel`, `suggest_dashboard`. Each does its
+  own read-only introspection before proposing anything:
+  - **What already exists** — a new read tool over current Rules/
+    Automaters (for `suggest_automation`) or Panels/Variables (for
+    `suggest_panel`/`suggest_dashboard`), so the model doesn't propose a
+    duplicate and can spot actual coverage gaps.
+  - **Real telemetry statistics, not just column names** — reuses the
+    `query_telemetry`-style bounded read-only SQL tool to run its own
+    `min`/`max`/`avg`/`percentile_cont` queries before proposing a
+    threshold or chart. This is what turns "temperature > 30" (useless —
+    always true against real hive data, which runs 33-40°C) into "> 38"
+    (the actual inflection point, matching what the live demo's real rules
+    already use) — without this, a threshold suggestion is just a guess.
+  - **Domain knowledge** — Claude's own general knowledge (e.g. "elevated
+    hive temperature indicates colony stress"), calibrated against the two
+    ingredients above rather than fed in separately.
+- Response shape changes: `CopilotAnswerResponse` gains an optional
+  `suggestion` field (a discriminated union on `kind`) alongside `answer`,
+  populated whenever the tool-calling loop's last executed tool was a
+  `suggest_*` tool — e.g. `{kind: "panel", label: "...", navigateTo:
+  "/dashboards/{id}", state: {...}}`. The frontend renders this as a link
+  card in the chat transcript (not just prose), navigating via React
+  Router `state` (same mechanism a plain "Suggest an automation" button
+  would have used) into the relevant builder, pre-filled — never
+  auto-created, same reviewable-draft principle as before.
+
+## Decided: refinement is continued conversation, not a new mechanism
+
+After a `suggestion` card is presented, the conversation doesn't end —
+a follow-up like "use max instead of average" or "split by apiary instead
+of hive" is a refinement request, not a new question, and the per-intent
+system prompt should tell the model to treat it that way: call the same
+`suggest_*` tool again with the adjustment and present an updated card.
+No new backend mechanism needed — this falls out of the tool-calling loop
+already built, just prompted to expect iteration.
+
+**Where the line sits**: chat refinement is for adjusting the *shape* of a
+proposal before committing to it (chart type, aggregation, grouping,
+threshold) — not a replacement for editing in the builder. Once the user
+clicks through, the Panel Builder / Rule form is already a fully editable
+surface; there's no reason to duplicate that inside the chat.
+
+**One real technical gotcha to design in from the start**: the Q&A
+slice's stateless-history design means only the *prose* of a past turn
+round-trips back to the model on the next request — never the literal
+structured `suggestion` payload (the actual SQL/conditions/chart config),
+since tool-use messages are internal to one request (see slice 1's
+"Multi-turn history" decision above). If a refinement turn only has the
+model's own vague recollection of what it suggested, "use max instead"
+risks silently regenerating the whole proposal instead of changing one
+field. Fix: whenever a `suggestion` is present, append a compact
+machine-readable recap to the assistant message's stored `content` (the
+text that actually round-trips as history) — not just the friendly prose
+shown in the bubble — so a refinement request is grounded on the exact
+prior SQL/conditions, not a paraphrase.
+
+## The one part that's a bigger lift: "Suggest a dashboard"
+
+"Suggest a panel" and "Suggest an automation" both land in an *existing*
+form (Panel Builder / Rule creation form) via the same prefill mechanism.
+"Suggest a dashboard" doesn't have an existing form to prefill — it needs
+a new **in-memory draft dashboard** state in the Dashboard Editor (name +
+variables + panels, nothing persisted until an explicit Save), since
+today's editor always operates on an already-persisted dashboard. Also
+worth deciding as part of that flow: whether the dashboard should be a
+flat "overview" (no variables) or use chained variables (e.g. Apiary →
+Hive, mirroring the existing Beekeeping showcase pattern) — per the
+"decided" section above, this should be asked conversationally, not
+hardcoded as a toggle.
+
+## Recommended build order (not yet started)
+
+1. **Rule suggestions** — smallest complete vertical slice (intent-routed
+   panel open → conversational clarification → `suggest_automation` tool
+   → suggestion card → prefilled `/automaters/new` or `/query-rules/new`).
+   Proves the whole pattern end to end.
+2. **Panel suggestions** — reuses the same pattern; smaller lift since it
+   plugs into the existing Panel Builder prefill flow (already used by the
+   NL-to-SQL button), just model-initiated instead of user-typed.
+3. **Dashboard suggestions** — last, since it needs the new draft-editor
+   capability above.
+
+## One concrete constraint to keep in mind once suggestion logic gets built
+
+Rule `identifiers` and Dashboard `Variable.value_column`s have no enforced
+relationship, but two shipped features already depend on them matching by
+name (overlay-events time-window filtering, and clicking an occurrence
+card identifier to set a dashboard variable). When a suggestion proposes a
+new Rule or Dashboard Variable referencing the same underlying column, it
+should keep the identifier key and the `value_column` spelled identically
+— not a schema change, just a suggestion-quality constraint to design in
+from the start rather than have suggested rules and dashboards silently
+fail to interoperate.
+
+---
+
+# Project-Level AI Context Helper
+
+**Status: shipped 2026-07-17.** Every AI feature before this grounded
+itself in the telemetry schema alone (table/column names + types) — this
+works well for the demo showcases (`temperature`, `hive_id`, `weight` are
+self-explanatory) but doesn't generalize to real-world telemetry, where
+column names are often opaque (`val1`, `sensor_a`, coded status enums) and
+no amount of statistics-querying (see the suggestion tools above) fixes a
+name the model can't interpret in the first place. IoTOps is meant to be
+domain-agnostic, so this gap matters beyond the showcases.
+
+Built and shipped together: the `Project.ai_context` field itself, its
+`ProjectForm.tsx` textarea (with character counter and `focusField`
+support), injection into `build_copilot_system_prompt`, and the **smart
+nudge** — a new `flag_missing_context` tool the model calls (instead of
+guessing) when a column's meaning is genuinely unclear, surfaced as
+`CopilotAnswerResponse.needs_context` and rendered as an inline "add
+context" link in `CopilotChat.tsx`. The static-icon discoverability idea
+described below was **not** built — the smart nudge alone was judged
+sufficient for a first version, since it only appears when actually
+relevant rather than nagging on every project regardless of whether its
+schema is already clear. Still not built: extending `ai_context` to the
+Ollama-backed `build_sql_prompt`/`build_query_rule_sql_prompt`, and the
+related pre-existing schema-scoping gap noted below.
+
+**Design**: a new `Project.ai_context: str = ""` field, capped at
+**1000 characters** (`Field(max_length=1000)` server-side, `maxLength` +
+a running character counter client-side) — it's injected into every AI
+prompt for that project, so it needs a hard cost/context-bloat cap, not
+just a soft suggestion; 1000 chars is plenty for several column-meaning
+notes without becoming a pasted-in runbook. Deliberately **not** reusing
+the existing `Project.description` — that's a short human-facing blurb
+shown in project lists/cards; this is a longer, AI-only domain glossary,
+and conflating the two would mean editing one silently changes the
+other's behavior.
+
+**Lives on the Project, not the Collector.** A Collector is an
+infrastructure object (topic/table/field-mapping wiring); putting a
+domain-knowledge field there would leak an AI concern into a form whose
+job is Telegraf pipeline config. A Project is already the "what this
+deployment is about" object, and in practice one project maps to one
+coherent domain (per the existing showcases) — even where a project's
+several Collectors write to genuinely different tables, the free-text
+field can just say so inline ("`machine_telemetry.val1` = vibration;
+`env_readings.val1` = humidity") rather than needing a field per
+Collector. One place to look, one place to edit.
+
+Edited via a new textarea in `ProjectForm.tsx`, framed as e.g. "Optional —
+help the AI understand your data" with placeholder text like "e.g. `val1`
+is coolant temperature in °C, `sensor_a` tracks primary shaft vibration."
+Optional and empty by default; an escape hatch for unclear schemas, not a
+required step.
+
+**Discoverability — shipped: the smarter, model-driven nudge. Not built: the static icon.**
+- **Shipped**: `flag_missing_context(column, reason)` — a lightweight tool
+  the model calls when it judges a column's meaning is genuinely unclear
+  and no `ai_context` covers it, rather than guessing or trying to detect
+  this by string-matching its prose answer (fragile). `CopilotAnswerResponse`
+  gains `needs_context: {column, reason} | null` alongside `answer` (the
+  same "structured field next to the prose answer" pattern used for the
+  future `suggestion` field), and `CopilotChat.tsx` renders an inline nudge
+  under that specific answer ("I wasn't sure what `val1` means — add
+  context →") linking to
+  `navigate("/projects/{id}/edit", { state: { focusField: "ai_context" } })`
+  — `ProjectForm.tsx` reads `location.state.focusField` and focuses/scrolls
+  to the textarea. This alone was judged sufficient for a first version:
+  it only appears when actually relevant, unlike a generic icon that would
+  nag on every project regardless of whether its schema is already clear
+  (like the demo showcases, where this should basically never fire).
+- **Not built**: the static (i) icon near the project picker, always
+  visible once a project is chosen regardless of whether the model has
+  ever struggled. Would reuse the same `state`-carrying navigation as
+  above — cheap to add later if the model-driven nudge alone proves too
+  rare/easy to miss in practice.
+
+**Where it's used**: appended to the schema block in `build_copilot_system_prompt`
+(Q&A slice) and, once built, the future `suggest_*` tools — framed
+explicitly as user-provided domain context to trust over guessing from
+column names alone. Still not extended to the existing Ollama-backed
+`build_sql_prompt`/`build_query_rule_sql_prompt` — the same
+ambiguous-column-name problem applies there, but that's a separate,
+smaller addition not yet done.
+
+**Trust model**: no new security concern — this is free text supplied by
+the project's own owner (same trust level as a Rule's message template or
+a Dashboard's name, both already user-authored and already fed into
+prompts/UI), not untrusted input from an anonymous/public-demo user. The
+existing demo-mode gate already blocks every mutating/AI route for
+anonymous visitors regardless.
+
+**Related, pre-existing gap worth noting** (not required to build this,
+but relevant context): `TelemetryService.get_schema()` returns *every*
+hypertable across *all* projects, not scoped to the querying project's own
+Collectors — so today's schema block in every AI prompt already includes
+tables that have nothing to do with the project being asked about. Adding
+per-project context text doesn't fix this by itself; scoping the schema
+block to only the tables a project's own Collectors actually write to
+(derivable from each Collector's TimescaleDB output config) would be a
+natural companion improvement, but is a separate, un-scoped decision — not
+bundled into this one.
 
 ---
 

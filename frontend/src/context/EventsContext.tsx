@@ -376,6 +376,7 @@ export function EventsProvider({ children }: { children: ReactNode }) {
     const updated = await updateProject(projectId, {
       name: project.name,
       description: project.description,
+      ai_context: project.ai_context,
       default_dashboard_id: dashboardId,
     });
     setProjects((prev) => prev.map((p) => (p.id === projectId ? updated : p)));

@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { askCopilot } from "../api/ai";
 import { ApiError } from "../api/client";
 import { useEvents } from "../context/EventsContext";
 import type { Project } from "../types/project";
-import type { CopilotMessage } from "../types/ai";
+import type { CopilotMessage, NeedsContext } from "../types/ai";
 import "./CopilotChat.css";
 
 const ASSISTANT_NAME = "ARIA";
@@ -48,10 +49,14 @@ function TypedLine({ text, onDone }: { text: string; onDone?: () => void }) {
 // scripted, client-only sequence, never sent to the backend as history.
 export function CopilotChat() {
   const { projects } = useEvents();
+  const navigate = useNavigate();
   const [greetingDone, setGreetingDone] = useState(false);
   const [project, setProject] = useState<Project | null>(null);
   const [ackDone, setAckDone] = useState(false);
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
+  // Keyed by index into `messages` -- rendering-only, never sent as part of
+  // the history payload (CopilotMessage itself stays {role, content}).
+  const [needsContextByIndex, setNeedsContextByIndex] = useState<Record<number, NeedsContext>>({});
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +72,7 @@ export function CopilotChat() {
     setProject(next);
     setAckDone(false);
     setMessages([]);
+    setNeedsContextByIndex({});
     setError(null);
   }
 
@@ -79,13 +85,22 @@ export function CopilotChat() {
     setSending(true);
     setError(null);
     try {
-      const { answer } = await askCopilot(project.id, question, nextMessages.slice(-8));
+      const { answer, needs_context } = await askCopilot(project.id, question, nextMessages.slice(-8));
+      const answerIndex = nextMessages.length;
       setMessages((prev) => [...prev, { role: "assistant", content: answer }]);
+      if (needs_context) {
+        setNeedsContextByIndex((prev) => ({ ...prev, [answerIndex]: needs_context }));
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to get an answer.");
     } finally {
       setSending(false);
     }
+  }
+
+  function handleAddContext() {
+    if (!project) return;
+    navigate(`/projects/${project.id}/edit`, { state: { focusField: "ai_context" } });
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -134,9 +149,16 @@ export function CopilotChat() {
         )}
 
         {messages.map((message, index) => (
-          <div key={index} className={`copilot-chat__message copilot-chat__message--${message.role}`}>
-            {message.content}
-          </div>
+          <Fragment key={index}>
+            <div className={`copilot-chat__message copilot-chat__message--${message.role}`}>
+              {message.content}
+            </div>
+            {needsContextByIndex[index] && (
+              <button type="button" className="copilot-chat__context-nudge" onClick={handleAddContext}>
+                I wasn't sure what <code>{needsContextByIndex[index].column}</code> means — add context →
+              </button>
+            )}
+          </Fragment>
         ))}
         {sending && <div className="copilot-chat__message copilot-chat__message--assistant">Thinking...</div>}
       </div>

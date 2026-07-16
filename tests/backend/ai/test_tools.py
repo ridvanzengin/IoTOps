@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from mongomock_motor import AsyncMongoMockClient
 
-from app.ai.tools import run_query_occurrences, run_query_telemetry
+from app.ai.tools import run_flag_missing_context, run_query_occurrences, run_query_telemetry
 from app.event.models import Event, EventFlag, OccurrenceStatus
 from app.event.repository import EventRepository, to_document
 from app.event.service import EventService
@@ -139,3 +139,13 @@ async def test_query_telemetry_reports_timeout() -> None:
     result = await run_query_telemetry(service, {"sql": sql})
 
     assert "Query failed" in result
+
+
+def test_flag_missing_context_returns_an_ack() -> None:
+    # Purely a structural signal (see AiService.answer_copilot_question,
+    # which reads the tool_use's own input, not this return value) -- the
+    # model still needs a tool_result to continue the loop.
+    result = run_flag_missing_context({"column": "val1", "reason": "no unit given"})
+
+    assert isinstance(result, str)
+    assert result

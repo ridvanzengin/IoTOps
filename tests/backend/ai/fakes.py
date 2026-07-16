@@ -37,3 +37,17 @@ class FakeMessages:
 class FakeAnthropicClient:
     def __init__(self, responses: list[Any]) -> None:
         self.messages = FakeMessages(responses)
+
+
+class FakeProjectService:
+    """Stands in for ProjectService -- AiService only ever calls .get() to
+    read a project's ai_context, so a full ProjectService (which pulls in
+    real Collector/Automater/Dashboard/QueryRule services just to support
+    its own delete() cascade) is unnecessary machinery for AI-module
+    tests."""
+
+    def __init__(self, ai_context: str = "") -> None:
+        self._ai_context = ai_context
+
+    async def get(self, project_id: Any) -> Any:
+        return SimpleNamespace(ai_context=self._ai_context)

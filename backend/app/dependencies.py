@@ -132,6 +132,7 @@ async def get_ai_service() -> AiService:
         base_url=settings.ollama_base_url,
         model=settings.ollama_model,
         event_service=get_event_service(),
+        project_service=await get_project_service(),
         anthropic_client=get_anthropic_client(),
         anthropic_model=settings.anthropic_model,
     )

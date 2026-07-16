@@ -128,12 +128,21 @@ def build_query_rule_sql_prompt(
     )
 
 
-def build_copilot_system_prompt(schema: list[TelemetryTableSchema], *, now: datetime) -> str:
+def build_copilot_system_prompt(
+    schema: list[TelemetryTableSchema], *, now: datetime, ai_context: str = ""
+) -> str:
     # Unlike the two SQL-generation prompts above, this is a *system* prompt
     # for a multi-turn tool-calling conversation, not a one-shot "write SQL"
     # instruction -- occurrences/telemetry values are fetched on demand via
     # tools (see app/ai/tools.py), not pre-fetched into the prompt itself.
     schema_block = _render_schema_block(schema)
+    context_block = ""
+    if ai_context:
+        context_block = (
+            "The project owner has also provided this context about their "
+            "data -- trust it over guessing from column names alone:\n"
+            f"{ai_context}\n\n"
+        )
     return (
         f"The current time is {now.isoformat()}. You have no other sense of "
         "time, so use this to resolve relative references like 'today' or "
@@ -145,7 +154,8 @@ def build_copilot_system_prompt(schema: list[TelemetryTableSchema], *, now: date
         "see actual readings through this list alone, only table/column "
         "names and types):\n"
         f"{schema_block}\n\n"
-        "You have two tools:\n"
+        f"{context_block}"
+        "You have three tools:\n"
         "- query_occurrences: look up Rule match/clear occurrences (alerts) "
         "-- use this for questions about firings, counts, timing, or "
         "resolution status.\n"
@@ -153,7 +163,13 @@ def build_copilot_system_prompt(schema: list[TelemetryTableSchema], *, now: date
         "tables above -- use this for questions about actual sensor "
         "readings/values. The query must be a single SELECT statement with "
         "no semicolon; use explicit ISO timestamp bounds for time "
-        "filtering, since there is no dashboard time range here.\n\n"
+        "filtering, since there is no dashboard time range here.\n"
+        "- flag_missing_context: call this instead of guessing if a "
+        "column's name is genuinely ambiguous and the context above (if "
+        "any) doesn't explain it -- e.g. a column like `val1` or "
+        "`sensor_a` with no indication of what it measures. Do not call "
+        "this for columns whose meaning is reasonably clear from the name "
+        "(e.g. `temperature`, `hive_id`).\n\n"
         "Answer only using information returned by these tools. If a tool "
         "result doesn't answer the question, say so plainly rather than "
         "guessing a rule name, count, or reading. Respond in plain prose -- "

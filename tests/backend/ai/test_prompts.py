@@ -139,13 +139,33 @@ def test_copilot_system_prompt_includes_schema_and_current_time() -> None:
     assert now.isoformat() in prompt
 
 
-def test_copilot_system_prompt_mentions_both_tools() -> None:
+def test_copilot_system_prompt_mentions_all_tools() -> None:
     now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
 
     prompt = build_copilot_system_prompt(_schema(), now=now)
 
     assert "query_occurrences" in prompt
     assert "query_telemetry" in prompt
+    assert "flag_missing_context" in prompt
+
+
+def test_copilot_system_prompt_includes_ai_context_when_provided() -> None:
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(
+        _schema(), now=now, ai_context="val1 is coolant temperature in Celsius"
+    )
+
+    assert "val1 is coolant temperature in Celsius" in prompt
+    assert "trust it over guessing" in prompt
+
+
+def test_copilot_system_prompt_omits_context_block_when_not_provided() -> None:
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "trust it over guessing" not in prompt
 
 
 def test_copilot_system_prompt_instructs_against_fabricating_answers() -> None:

@@ -50,6 +50,14 @@ async def test_update_replaces_editable_fields(service: ProjectService) -> None:
     assert updated.id == project.id
 
 
+async def test_update_replaces_ai_context(service: ProjectService) -> None:
+    project = await service.create(_valid_input())
+
+    updated = await service.update(project.id, _valid_input(ai_context="val1 is coolant temperature"))
+
+    assert updated.ai_context == "val1 is coolant temperature"
+
+
 async def test_update_missing_project_raises(service: ProjectService) -> None:
     with pytest.raises(EntityNotFoundError):
         await service.update(uuid4(), _valid_input())

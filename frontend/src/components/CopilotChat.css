@@ -37,6 +37,25 @@
   border: 1px solid var(--border);
 }
 
+.copilot-chat__context-nudge {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 4px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.copilot-chat__context-nudge:hover {
+  border-color: var(--accent-border);
+  color: var(--accent-h);
+}
+
 .copilot-chat__typing-cursor {
   display: inline-block;
   width: 2px;

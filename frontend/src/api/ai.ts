@@ -1,4 +1,4 @@
-import type { CopilotMessage } from "../types/ai";
+import type { CopilotMessage, NeedsContext } from "../types/ai";
 import { apiRequest } from "./client";
 
 export function generateSql(
@@ -30,8 +30,8 @@ export function askCopilot(
   projectId: string,
   question: string,
   history: CopilotMessage[] = [],
-): Promise<{ answer: string }> {
-  return apiRequest<{ answer: string }>("/api/ai/copilot", {
+): Promise<{ answer: string; needs_context: NeedsContext | null }> {
+  return apiRequest<{ answer: string; needs_context: NeedsContext | null }>("/api/ai/copilot", {
     method: "POST",
     body: JSON.stringify({ project_id: projectId, question, history }),
   });
