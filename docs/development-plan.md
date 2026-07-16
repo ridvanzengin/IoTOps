@@ -706,6 +706,36 @@ message) far better than a hardcoded decision tree of scripted UI prompts.
   would have used) into the relevant builder, pre-filled — never
   auto-created, same reviewable-draft principle as before.
 
+## Decided: refinement is continued conversation, not a new mechanism
+
+After a `suggestion` card is presented, the conversation doesn't end —
+a follow-up like "use max instead of average" or "split by apiary instead
+of hive" is a refinement request, not a new question, and the per-intent
+system prompt should tell the model to treat it that way: call the same
+`suggest_*` tool again with the adjustment and present an updated card.
+No new backend mechanism needed — this falls out of the tool-calling loop
+already built, just prompted to expect iteration.
+
+**Where the line sits**: chat refinement is for adjusting the *shape* of a
+proposal before committing to it (chart type, aggregation, grouping,
+threshold) — not a replacement for editing in the builder. Once the user
+clicks through, the Panel Builder / Rule form is already a fully editable
+surface; there's no reason to duplicate that inside the chat.
+
+**One real technical gotcha to design in from the start**: the Q&A
+slice's stateless-history design means only the *prose* of a past turn
+round-trips back to the model on the next request — never the literal
+structured `suggestion` payload (the actual SQL/conditions/chart config),
+since tool-use messages are internal to one request (see slice 1's
+"Multi-turn history" decision above). If a refinement turn only has the
+model's own vague recollection of what it suggested, "use max instead"
+risks silently regenerating the whole proposal instead of changing one
+field. Fix: whenever a `suggestion` is present, append a compact
+machine-readable recap to the assistant message's stored `content` (the
+text that actually round-trips as history) — not just the friendly prose
+shown in the bubble — so a refinement request is grounded on the exact
+prior SQL/conditions, not a paraphrase.
+
 ## The one part that's a bigger lift: "Suggest a dashboard"
 
 "Suggest a panel" and "Suggest an automation" both land in an *existing*
@@ -743,6 +773,56 @@ should keep the identifier key and the `value_column` spelled identically
 — not a schema change, just a suggestion-quality constraint to design in
 from the start rather than have suggested rules and dashboards silently
 fail to interoperate.
+
+---
+
+# Future — Project-Level AI Context Helper
+
+**Decided (2026-07-17), not yet built.** Every AI feature so far grounds
+itself in the telemetry schema alone (table/column names + types) — this
+works well for the demo showcases (`temperature`, `hive_id`, `weight` are
+self-explanatory) but doesn't generalize to real-world telemetry, where
+column names are often opaque (`val1`, `sensor_a`, coded status enums) and
+no amount of statistics-querying (see the suggestion tools above) fixes a
+name the model can't interpret in the first place. IoTOps is meant to be
+domain-agnostic, so this gap matters beyond the showcases.
+
+**Design**: a new `Project.ai_context: str = ""` field (deliberately
+**not** reusing the existing `Project.description` — that's a short
+human-facing blurb shown in project lists/cards; this is a longer,
+AI-only domain glossary, and conflating the two would mean editing one
+silently changes the other's behavior). Edited via a new textarea in
+`ProjectForm.tsx`, framed as e.g. "Optional — help the AI understand your
+data" with placeholder text like "e.g. `val1` is coolant temperature in
+°C, `sensor_a` tracks primary shaft vibration." Optional and empty by
+default; an escape hatch for unclear schemas, not a required step.
+
+**Where it's used**: appended to the schema block in every AI prompt that
+already renders it — `build_copilot_system_prompt` (Q&A slice, shipped)
+and the future `suggest_*` tools, framed explicitly as user-provided
+domain context to trust over guessing from column names alone. Worth
+extending to the existing Ollama-backed `build_sql_prompt`/
+`build_query_rule_sql_prompt` too, for consistency — the same
+ambiguous-column-name problem applies there, though that's a smaller,
+separable addition once the field exists.
+
+**Trust model**: no new security concern — this is free text supplied by
+the project's own owner (same trust level as a Rule's message template or
+a Dashboard's name, both already user-authored and already fed into
+prompts/UI), not untrusted input from an anonymous/public-demo user. The
+existing demo-mode gate already blocks every mutating/AI route for
+anonymous visitors regardless.
+
+**Related, pre-existing gap worth noting** (not required to build this,
+but relevant context): `TelemetryService.get_schema()` returns *every*
+hypertable across *all* projects, not scoped to the querying project's own
+Collectors — so today's schema block in every AI prompt already includes
+tables that have nothing to do with the project being asked about. Adding
+per-project context text doesn't fix this by itself; scoping the schema
+block to only the tables a project's own Collectors actually write to
+(derivable from each Collector's TimescaleDB output config) would be a
+natural companion improvement, but is a separate, un-scoped decision — not
+bundled into this one.
 
 ---
 
