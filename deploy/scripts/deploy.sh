@@ -9,13 +9,13 @@ cd /opt/iotops
 COMPOSE="docker compose -p iotops --env-file deploy/iotops/.env.prod -f deploy/iotops/docker-compose.prod.yml"
 
 echo "[deploy] Pulling latest code..."
-git pull origin main
+git pull
 
 echo "[deploy] Building images..."
 $COMPOSE build
 
 echo "[deploy] Restarting app services..."
-$COMPOSE up -d --no-deps mongo mosquitto backend celery-worker celery-beat frontend demo-showcase
+$COMPOSE up -d --no-deps mongo mosquitto kafka backend celery-worker celery-beat frontend demo-showcase
 
 # The shared nginx serves agritwin.online live -- only touch it, and only
 # reload, when this repo's own vhost source actually changed. A bad config
