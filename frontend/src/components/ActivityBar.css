@@ -33,21 +33,21 @@
   opacity: 1;
 }
 
-/* Sits above the project icons, with its own bottom divider so it reads
-   as a distinct "app-level" control rather than another project. */
+/* Same 36x36 square as the project/co-pilot icons below it -- an outlined
+   button rather than a solid-color-filled one (it has no natural "color"
+   the way a project does), with a real border so it reads as a button
+   against the activity bar's own background in both themes, not just a
+   loose icon. */
 .activity-bar__icon--theme {
   background: var(--bg-subtle);
   color: var(--text);
-  width: 36px;
-  margin-bottom: 8px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--border);
-  border-radius: 8px 8px 0 0;
+  border: 1px solid var(--border);
 }
 
 .activity-bar__theme-icon {
   width: 18px;
   height: 18px;
+  display: block;
 }
 
 .activity-bar__icon--active {
