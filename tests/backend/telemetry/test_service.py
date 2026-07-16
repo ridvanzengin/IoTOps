@@ -15,6 +15,7 @@ def _service(
     schema: dict | None = None,
     query_results: dict | None = None,
     query_errors: dict | None = None,
+    query_timeouts: set | None = None,
 ) -> TelemetryService:
     pool = FakePool(
         tables=tables,
@@ -22,6 +23,7 @@ def _service(
         schema=schema,
         query_results=query_results,
         query_errors=query_errors,
+        query_timeouts=query_timeouts,
     )
     return TelemetryService(repository=TelemetryRepository(pool))
 
@@ -112,3 +114,38 @@ async def test_run_query_wraps_database_errors_as_query_execution_error() -> Non
         await service.run_query(
             TelemetrySqlQuery(sql="SELECT DISTINCT device FROM device_metrics ORDER BY time")
         )
+
+
+async def test_run_bounded_query_rejects_non_select_statement() -> None:
+    service = _service(tables=["device_metrics"])
+
+    with pytest.raises(InvalidQueryError):
+        await service.run_bounded_query("DELETE FROM device_metrics")
+
+
+async def test_run_bounded_query_executes_valid_select_with_row_cap() -> None:
+    sql = "SELECT temperature FROM device_metrics"
+    service = _service(
+        tables=["device_metrics"],
+        query_results={sql: [{"temperature": 20.0}, {"temperature": 21.0}, {"temperature": 22.0}]},
+    )
+
+    result = await service.run_bounded_query(sql, limit=2)
+
+    assert result.rows == [{"temperature": 20.0}, {"temperature": 21.0}]
+
+
+async def test_run_bounded_query_wraps_database_errors() -> None:
+    sql = "SELECT bogus_column FROM device_metrics"
+    service = _service(tables=["device_metrics"], query_errors={sql: "column does not exist"})
+
+    with pytest.raises(QueryExecutionError):
+        await service.run_bounded_query(sql)
+
+
+async def test_run_bounded_query_wraps_timeout_as_query_execution_error() -> None:
+    sql = "SELECT * FROM device_metrics"
+    service = _service(tables=["device_metrics"], query_timeouts={sql})
+
+    with pytest.raises(QueryExecutionError):
+        await service.run_bounded_query(sql, timeout_seconds=0.01)

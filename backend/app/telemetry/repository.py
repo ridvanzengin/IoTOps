@@ -88,6 +88,23 @@ class TelemetryRepository:
             records = await conn.fetch(query, limit)
         return [dict(record) for record in records]
 
+    async def execute_bounded(
+        self, sql: str, limit: int, timeout_seconds: float
+    ) -> list[dict[str, Any]]:
+        # For the AI Co-pilot's query_telemetry tool (app/ai/tools.py): the
+        # model writes an arbitrary read-only SELECT with no guaranteed
+        # LIMIT or predictable row ordering, unlike execute_readonly above
+        # (dashboard-panel-specific, assumes an oldest-first ordering it
+        # OFFSETs past). Wrapping in a subquery caps rows regardless of what
+        # the inner query does, while preserving its own ORDER BY. Runs with
+        # a native asyncpg timeout (same pattern as execute_match_query)
+        # since this executes model-generated SQL against real data with a
+        # cost/latency budget to protect, not a human watching it hang.
+        query = f"SELECT * FROM ({sql}) AS _copilot_query LIMIT $1"
+        async with self._pool.acquire() as conn:
+            records = await conn.fetch(query, limit, timeout=timeout_seconds)
+        return [dict(record) for record in records]
+
     async def query_recent(
         self, table: str, limit: int, since: datetime | None = None
     ) -> list[dict[str, Any]]:

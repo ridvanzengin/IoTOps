@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     # container itself, not the host machine running Ollama.
     ollama_base_url: str = "http://host.docker.internal:11434"
     ollama_model: str = "gemma4:latest"
+    # User's own Anthropic API key for the AI Co-pilot chat (app/ai/service.py's
+    # answer_copilot_question) -- separate from the Ollama-backed SQL
+    # generation above, which needs no key. Empty by default; set via .env.
+    # Not validated at startup -- a missing/invalid key surfaces as an
+    # AiGenerationError on the first copilot request.
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-haiku-4-5"
     # False by default -- full read/write functionality out of the box for
     # local dev and self-hosters. The public demo deployment sets DEMO=true
     # explicitly in its own environment; this is not the repo's default.

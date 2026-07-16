@@ -1,12 +1,19 @@
 import re
+from datetime import datetime, timezone
+from uuid import UUID
 
+import anthropic
 import httpx
 
-from app.ai.models import AiVariableHint
-from app.ai.prompts import build_query_rule_sql_prompt, build_sql_prompt
+from app.ai.models import AiVariableHint, CopilotMessage
+from app.ai.prompts import build_copilot_system_prompt, build_query_rule_sql_prompt, build_sql_prompt
+from app.ai.tools import COPILOT_TOOLS, run_query_occurrences, run_query_telemetry
+from app.event.service import EventService
 from app.shared.exceptions import AiGenerationError, InvalidQueryError
 from app.shared.validators import validate_select_only_sql
 from app.telemetry.service import TelemetryService
+
+MAX_COPILOT_ITERATIONS = 4
 
 _CODE_FENCE_RE = re.compile(r"```(?:sql)?", re.IGNORECASE)
 
@@ -22,11 +29,20 @@ class AiService:
         http_client: httpx.AsyncClient,
         base_url: str,
         model: str,
+        event_service: EventService,
+        anthropic_client: anthropic.AsyncAnthropic,
+        anthropic_model: str,
     ) -> None:
         self._telemetry_service = telemetry_service
         self._http_client = http_client
         self._base_url = base_url
         self._model = model
+        # Below: the Anthropic-backed Co-pilot chat -- a separate model
+        # backend from the Ollama-backed SQL generation above, which stays
+        # untouched. See answer_copilot_question.
+        self._event_service = event_service
+        self._anthropic_client = anthropic_client
+        self._anthropic_model = anthropic_model
 
     async def generate_sql(
         self, nl_query: str, variables: list[AiVariableHint] | None = None
@@ -68,3 +84,61 @@ class AiService:
                 "asking about)."
             ) from exc
         return sql
+
+    async def answer_copilot_question(
+        self, project_id: UUID, question: str, history: list[CopilotMessage]
+    ) -> str:
+        schema = await self._telemetry_service.get_schema()
+        now = datetime.now(timezone.utc)
+        system = build_copilot_system_prompt(schema, now=now)
+        messages: list[dict] = [
+            {"role": h.role, "content": h.content} for h in history[-8:]
+        ] + [{"role": "user", "content": question}]
+
+        for _ in range(MAX_COPILOT_ITERATIONS):
+            try:
+                response = await self._anthropic_client.messages.create(
+                    model=self._anthropic_model,
+                    max_tokens=500,
+                    system=system,
+                    tools=COPILOT_TOOLS,
+                    messages=messages,
+                )
+            except anthropic.APIError as exc:
+                raise AiGenerationError(
+                    "The AI didn't return an answer -- try rephrasing the question."
+                ) from exc
+
+            messages.append({"role": "assistant", "content": response.content})
+            tool_uses = [block for block in response.content if block.type == "tool_use"]
+            if not tool_uses:
+                answer = next(
+                    (block.text for block in response.content if block.type == "text"), ""
+                ).strip()
+                if not answer:
+                    raise AiGenerationError(
+                        "The AI didn't return an answer -- try rephrasing the question."
+                    )
+                return answer
+
+            tool_results = []
+            for tool_use in tool_uses:
+                result_text = await self._execute_copilot_tool(
+                    tool_use.name, tool_use.input, project_id
+                )
+                tool_results.append(
+                    {"type": "tool_result", "tool_use_id": tool_use.id, "content": result_text}
+                )
+            messages.append({"role": "user", "content": tool_results})
+
+        raise AiGenerationError(
+            "The AI couldn't finish answering within the allotted steps -- try a more "
+            "specific question."
+        )
+
+    async def _execute_copilot_tool(self, name: str, input_: dict, project_id: UUID) -> str:
+        if name == "query_occurrences":
+            return await run_query_occurrences(self._event_service, project_id, input_)
+        if name == "query_telemetry":
+            return await run_query_telemetry(self._telemetry_service, input_)
+        return f"Unknown tool: {name}"

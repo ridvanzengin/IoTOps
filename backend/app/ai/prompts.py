@@ -1,5 +1,15 @@
+from datetime import datetime
+
 from app.ai.models import AiVariableHint
 from app.telemetry.models import TelemetryTableSchema
+
+
+def _render_schema_block(schema: list[TelemetryTableSchema]) -> str:
+    schema_lines = [
+        f"{table.table}({', '.join(f'{column.name} {column.data_type}' for column in table.columns)})"
+        for table in schema
+    ]
+    return "\n".join(schema_lines)
 
 
 def build_sql_prompt(
@@ -7,11 +17,7 @@ def build_sql_prompt(
     schema: list[TelemetryTableSchema],
     variables: list[AiVariableHint] | None = None,
 ) -> str:
-    schema_lines = [
-        f"{table.table}({', '.join(f'{column.name} {column.data_type}' for column in table.columns)})"
-        for table in schema
-    ]
-    schema_block = "\n".join(schema_lines)
+    schema_block = _render_schema_block(schema)
 
     variables_block = ""
     if variables:
@@ -65,11 +71,7 @@ def build_query_rule_sql_prompt(
     # SQL vs. a macro substituted from a dashboard's own time range that
     # doesn't exist here), not a couple of conditional lines. See
     # iotops-workspace/ROADMAP.md's "Query Rules" note.
-    schema_lines = [
-        f"{table.table}({', '.join(f'{column.name} {column.data_type}' for column in table.columns)})"
-        for table in schema
-    ]
-    schema_block = "\n".join(schema_lines)
+    schema_block = _render_schema_block(schema)
 
     # Repeated twice deliberately (once schema-adjacent, once right before
     # the request) -- live-tested against the real local model: a single
@@ -123,4 +125,40 @@ def build_query_rule_sql_prompt(
         "Return SQL only, even if you have to guess.\n\n"
         f"{identifiers_line}"
         f"Request: {nl_query}"
+    )
+
+
+def build_copilot_system_prompt(schema: list[TelemetryTableSchema], *, now: datetime) -> str:
+    # Unlike the two SQL-generation prompts above, this is a *system* prompt
+    # for a multi-turn tool-calling conversation, not a one-shot "write SQL"
+    # instruction -- occurrences/telemetry values are fetched on demand via
+    # tools (see app/ai/tools.py), not pre-fetched into the prompt itself.
+    schema_block = _render_schema_block(schema)
+    return (
+        f"The current time is {now.isoformat()}. You have no other sense of "
+        "time, so use this to resolve relative references like 'today' or "
+        "'three hours ago'.\n\n"
+        "You are an assistant embedded in an IoT operations platform, "
+        "answering questions about one specific project's Rule-triggered "
+        "events and telemetry. This project's telemetry tables (for "
+        "understanding what kind of data is being collected -- you cannot "
+        "see actual readings through this list alone, only table/column "
+        "names and types):\n"
+        f"{schema_block}\n\n"
+        "You have two tools:\n"
+        "- query_occurrences: look up Rule match/clear occurrences (alerts) "
+        "-- use this for questions about firings, counts, timing, or "
+        "resolution status.\n"
+        "- query_telemetry: run a single read-only SQL SELECT against the "
+        "tables above -- use this for questions about actual sensor "
+        "readings/values. The query must be a single SELECT statement with "
+        "no semicolon; use explicit ISO timestamp bounds for time "
+        "filtering, since there is no dashboard time range here.\n\n"
+        "Answer only using information returned by these tools. If a tool "
+        "result doesn't answer the question, say so plainly rather than "
+        "guessing a rule name, count, or reading. Respond in plain prose -- "
+        "no markdown formatting of any kind (no **bold**, no ## headers, no "
+        "bullet lists), no SQL, no raw data dumps -- unless the question "
+        "specifically asks for a list, in which case use plain dashes, not "
+        "markdown bullets."
     )

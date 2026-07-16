@@ -12,14 +12,18 @@ class FakeConnection:
         schema: dict[str, list[dict[str, Any]]] | None = None,
         query_results: dict[str, list[dict[str, Any]]] | None = None,
         query_errors: dict[str, str] | None = None,
+        query_timeouts: set[str] | None = None,
     ) -> None:
         self.tables = tables
         self.table_rows = table_rows
         self.schema = schema or {}
         self.query_results = query_results or {}
         self.query_errors = query_errors or {}
+        self.query_timeouts = query_timeouts or set()
 
-    async def fetch(self, query: str, *args: Any) -> list[dict[str, Any]]:
+    async def fetch(
+        self, query: str, *args: Any, timeout: float | None = None
+    ) -> list[dict[str, Any]]:
         if "timescaledb_information.hypertables" in query:
             return [{"hypertable_name": t} for t in self.tables]
 
@@ -49,6 +53,20 @@ class FakeConnection:
             # given in, not the front.
             offset = max(0, len(rows) - limit)
             return rows[offset:]
+
+        bounded_match = re.search(
+            r"SELECT \* FROM \((?P<sql>.*)\) AS _copilot_query LIMIT \$1",
+            query,
+            re.DOTALL,
+        )
+        if bounded_match:
+            sql = bounded_match.group("sql")
+            if sql in self.query_timeouts:
+                raise TimeoutError(f"query timed out: {sql}")
+            if sql in self.query_errors:
+                raise asyncpg.exceptions.PostgresError(self.query_errors[sql])
+            (limit,) = args
+            return self.query_results.get(sql, [])[:limit]
 
         match = re.search(r'FROM "((?:[^"]|"")*)"', query)
         assert match is not None
@@ -83,9 +101,10 @@ class FakePool:
         schema: dict[str, list[dict[str, Any]]] | None = None,
         query_results: dict[str, list[dict[str, Any]]] | None = None,
         query_errors: dict[str, str] | None = None,
+        query_timeouts: set[str] | None = None,
     ) -> None:
         self.connection = FakeConnection(
-            tables, table_rows or {}, schema, query_results, query_errors
+            tables, table_rows or {}, schema, query_results, query_errors, query_timeouts
         )
 
     def acquire(self) -> FakeAcquireContext:

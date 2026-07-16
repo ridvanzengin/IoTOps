@@ -1,16 +1,30 @@
+from unittest.mock import AsyncMock
+
+import anthropic
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from mongomock_motor import AsyncMongoMockClient
 
 from app.ai.service import AiService
 from app.dependencies import get_ai_service
+from app.event.repository import EventRepository
+from app.event.service import EventService
 from app.main import app
 from app.telemetry.repository import TelemetryRepository
 from app.telemetry.service import TelemetryService
+from tests.backend.ai.fakes import FakeAnthropicClient, message, text_block
 from tests.backend.telemetry.fakes import FakePool
 
 
-def _client_with_handler(handler) -> TestClient:
+def _event_service() -> EventService:
+    database = AsyncMongoMockClient()["iotops"]
+    return EventService(
+        repository=EventRepository(database, pubsub_redis_client=AsyncMock(), firing_redis_client=AsyncMock())
+    )
+
+
+def _client_with_handler(handler, anthropic_responses: list | None = None) -> TestClient:
     pool = FakePool(tables=["device_metrics"], schema={"device_metrics": []})
     telemetry_service = TelemetryService(repository=TelemetryRepository(pool))
     service = AiService(
@@ -18,6 +32,9 @@ def _client_with_handler(handler) -> TestClient:
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
         base_url="http://ollama",
         model="gemma4:latest",
+        event_service=_event_service(),
+        anthropic_client=FakeAnthropicClient(anthropic_responses or []),
+        anthropic_model="claude-haiku-4-5",
     )
     app.dependency_overrides[get_ai_service] = lambda: service
     return TestClient(app)
@@ -130,3 +147,37 @@ def test_generate_query_rule_sql_accepts_identifiers_hint() -> None:
     )
 
     assert response.status_code == 200
+
+
+def _unused_ollama_handler(request: httpx.Request) -> httpx.Response:
+    raise AssertionError("Ollama should not be called by the copilot path")
+
+
+def test_copilot_returns_200_with_answer() -> None:
+    client = _client_with_handler(
+        _unused_ollama_handler,
+        anthropic_responses=[message(text_block("No occurrences in the last 24 hours."))],
+    )
+
+    response = client.post(
+        "/api/ai/copilot",
+        json={"project_id": "11111111-1111-1111-1111-111111111111", "question": "any alerts?"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "No occurrences in the last 24 hours."
+
+
+def test_copilot_returns_502_on_anthropic_failure() -> None:
+    error = anthropic.APIConnectionError(
+        message="connection refused",
+        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+    )
+    client = _client_with_handler(_unused_ollama_handler, anthropic_responses=[error])
+
+    response = client.post(
+        "/api/ai/copilot",
+        json={"project_id": "11111111-1111-1111-1111-111111111111", "question": "any alerts?"},
+    )
+
+    assert response.status_code == 502

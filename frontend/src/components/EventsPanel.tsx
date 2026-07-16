@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { OCCURRENCES_PAGE_SIZE, useEvents } from "../context/EventsContext";
 import { TIME_RANGES } from "../constants/timeRanges";
 import { hashColor } from "../utils/color";
+import { CopilotChat } from "./CopilotChat";
 import { OccurrenceCard } from "./OccurrenceCard";
 import "./EventsPanel.css";
 
@@ -113,8 +114,8 @@ export function EventsPanel() {
         </button>
       </div>
       {activePanel.kind === "copilot" ? (
-        <div className="events-panel__body events-panel__body--placeholder">
-          <p className="events-panel__hint">Co-pilot is coming soon.</p>
+        <div className="events-panel__body">
+          <CopilotChat />
         </div>
       ) : (
         <div className="events-panel__body">

@@ -1,3 +1,6 @@
+from typing import Literal
+from uuid import UUID
+
 from pydantic import BaseModel, Field
 
 
@@ -23,3 +26,21 @@ class QueryRuleSqlGenerationRequest(BaseModel):
     # anything -- passed through as a hint for both table selection and
     # GROUP BY (see build_query_rule_sql_prompt's own comment).
     identifiers: list[str] = Field(default_factory=list)
+
+
+class CopilotMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class CopilotQuestionRequest(BaseModel):
+    project_id: UUID
+    question: str
+    # Client resends the transcript each turn -- the server is stateless
+    # and re-caps to the last 8 messages regardless of what's sent here
+    # (see AiService.answer_copilot_question).
+    history: list[CopilotMessage] = Field(default_factory=list)
+
+
+class CopilotAnswerResponse(BaseModel):
+    answer: str

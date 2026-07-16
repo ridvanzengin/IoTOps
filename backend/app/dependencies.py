@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import anthropic
 import docker
 import httpx
 import redis.asyncio as async_redis
@@ -31,6 +32,7 @@ _registry: PluginRegistry | None = None
 _docker_manager: CollectorDockerManager | None = None
 _automater_docker_manager: AutomaterDockerManager | None = None
 _http_client: httpx.AsyncClient | None = None
+_anthropic_client: anthropic.AsyncAnthropic | None = None
 _async_redis_client: async_redis.Redis | None = None
 _firing_redis_client: async_redis.Redis | None = None
 
@@ -129,7 +131,17 @@ async def get_ai_service() -> AiService:
         http_client=get_http_client(),
         base_url=settings.ollama_base_url,
         model=settings.ollama_model,
+        event_service=get_event_service(),
+        anthropic_client=get_anthropic_client(),
+        anthropic_model=settings.anthropic_model,
     )
+
+
+def get_anthropic_client() -> anthropic.AsyncAnthropic:
+    global _anthropic_client
+    if _anthropic_client is None:
+        _anthropic_client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    return _anthropic_client
 
 
 def get_event_service() -> EventService:
