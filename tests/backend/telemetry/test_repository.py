@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.telemetry.repository import TelemetryRepository
 from tests.backend.telemetry.fakes import FakePool
 
@@ -94,6 +96,26 @@ async def test_execute_readonly_returns_query_results() -> None:
     rows = await repository.execute_readonly("SELECT avg(temperature) FROM device_metrics", limit=10)
 
     assert rows == [{"avg": 21.5}]
+
+
+async def test_execute_bounded_caps_rows_regardless_of_inner_query() -> None:
+    sql = "SELECT time, temperature FROM hive_metrics"
+    rows = _rows(5)
+    pool = FakePool(tables=["hive_metrics"], query_results={sql: rows})
+    repository = TelemetryRepository(pool)
+
+    result = await repository.execute_bounded(sql, limit=2, timeout_seconds=10.0)
+
+    assert result == rows[:2]
+
+
+async def test_execute_bounded_propagates_timeout() -> None:
+    sql = "SELECT time, temperature FROM hive_metrics"
+    pool = FakePool(tables=["hive_metrics"], query_timeouts={sql})
+    repository = TelemetryRepository(pool)
+
+    with pytest.raises(TimeoutError):
+        await repository.execute_bounded(sql, limit=50, timeout_seconds=10.0)
 
 
 async def test_execute_readonly_keeps_most_recent_rows_when_over_limit() -> None:

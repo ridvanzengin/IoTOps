@@ -66,6 +66,40 @@ skill (`.claude/skills/deploy/SKILL.md`) capturing the routine-update
 flow and all of the above as a troubleshooting playbook, so the next
 session starts from this instead of rediscovering it.
 
+**AI Co-pilot, slice 1: read-only Event/Occurrence + telemetry Q&A.** The
+activity bar's reserved Co-pilot panel slot (placeholder since Milestone
+5) now has a real chat component. Deliberately a different model backend
+from the rest of `app/ai/`: this endpoint uses the user's own Anthropic
+API key (`claude-haiku-4-5`) rather than the local Ollama model, both to
+keep cost trivial ($1/$5 per MTok) and to demonstrate real Claude API
+usage — existing SQL generation (`/api/ai/sql`, `/api/ai/query-rule-sql`)
+is untouched, still Ollama-backed.
+
+Architecture is real tool-calling, not context-stuffing: a manual
+4-iteration loop (`AiService.answer_copilot_question`) gives the model two
+tools it calls on demand — `query_occurrences` (structured Event lookup,
+`project_id` bound server-side, never model-facing) and `query_telemetry`
+(model-written read-only SQL, reusing the existing
+`validate_select_only_sql` guardrail plus a new row cap + 10s timeout via
+`TelemetryService.run_bounded_query`). The timeout addresses, for this one
+call site, the "no runaway-query timeout on interactive Panel queries" gap
+already tracked in Known Issues below. Unlike the original context-
+stuffing design (which could only answer questions from a fixed pre-
+fetched occurrence window), real tool-calling lets the model ask for
+exactly the data it needs, including actual telemetry *values* — verified
+live: "what was the average temperature for hive-3" returned 34.49°C,
+matching a direct `AVG(temperature)` query against TimescaleDB exactly.
+
+Verified end-to-end against live demo data, not just unit tests: occurrence
+counts/timestamps cross-checked against direct DB queries, a multi-turn
+follow-up ("and how does that compare to hive-4?") correctly resolved
+against client-resent history, and an attempt to coax a destructive query
+("delete the old readings") was correctly declined — the model reasoned
+from its own tool descriptions that it had no delete capability, without
+needing the SQL guardrail to catch it. Measured cost: ~$0.008/question
+(6.5K input + ~300 output tokens for a 2-tool-call question) — comfortably
+inside the project's $5 budget for hundreds of questions.
+
 ## 2026-07-14
 
 **Events sidebar: consistent counts, time range, search, pagination.**

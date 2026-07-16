@@ -42,3 +42,20 @@ class TelemetryService:
             raise QueryExecutionError(str(exc)) from exc
         columns = list(rows[0].keys()) if rows else []
         return TelemetrySqlQueryResult(columns=columns, rows=rows)
+
+    async def run_bounded_query(
+        self, sql: str, limit: int = 50, timeout_seconds: float = 10.0
+    ) -> TelemetrySqlQueryResult:
+        # Used by the AI Co-pilot's query_telemetry tool -- a row cap and a
+        # timeout, distinct from run_query above (which serves the Panel
+        # Builder's ad hoc SQL preview and has no timeout of its own; see
+        # docs/development-plan.md's Known Issues). Model-generated SQL gets
+        # both bounds since nobody is watching it hang or eyeballing an
+        # unbounded result set.
+        validate_select_only_sql(sql)
+        try:
+            rows = await self._repository.execute_bounded(sql, limit, timeout_seconds)
+        except (asyncpg.PostgresError, TimeoutError) as exc:
+            raise QueryExecutionError(str(exc)) from exc
+        columns = list(rows[0].keys()) if rows else []
+        return TelemetrySqlQueryResult(columns=columns, rows=rows)

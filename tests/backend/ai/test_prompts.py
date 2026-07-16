@@ -1,5 +1,7 @@
+from datetime import datetime, timezone
+
 from app.ai.models import AiVariableHint
-from app.ai.prompts import build_query_rule_sql_prompt, build_sql_prompt
+from app.ai.prompts import build_copilot_system_prompt, build_query_rule_sql_prompt, build_sql_prompt
 from app.telemetry.models import TelemetryColumn, TelemetryTableSchema
 
 
@@ -126,3 +128,29 @@ def test_query_rule_prompt_repeats_identifiers_hint_near_the_request() -> None:
     assert prompt.count("hive_id") >= 2
     request_index = prompt.rindex("Request:")
     assert "hive_id" in prompt[:request_index]
+
+
+def test_copilot_system_prompt_includes_schema_and_current_time() -> None:
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "device_metrics(time timestamp with time zone, temperature double precision)" in prompt
+    assert now.isoformat() in prompt
+
+
+def test_copilot_system_prompt_mentions_both_tools() -> None:
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "query_occurrences" in prompt
+    assert "query_telemetry" in prompt
+
+
+def test_copilot_system_prompt_instructs_against_fabricating_answers() -> None:
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "say so plainly" in prompt

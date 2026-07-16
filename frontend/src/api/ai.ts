@@ -1,3 +1,4 @@
+import type { CopilotMessage } from "../types/ai";
 import { apiRequest } from "./client";
 
 export function generateSql(
@@ -18,5 +19,20 @@ export function generateQueryRuleSql(prompt: string, identifiers: string[] = [])
   return apiRequest<{ sql: string }>("/api/ai/query-rule-sql", {
     method: "POST",
     body: JSON.stringify({ prompt, identifiers }),
+  });
+}
+
+// The multi-tool-call loop (occurrence/telemetry lookups) happens entirely
+// server-side within this one request/response -- history is a flat
+// transcript of prior turns' questions/answers only, never the internal
+// tool_use/tool_result exchanges.
+export function askCopilot(
+  projectId: string,
+  question: string,
+  history: CopilotMessage[] = [],
+): Promise<{ answer: string }> {
+  return apiRequest<{ answer: string }>("/api/ai/copilot", {
+    method: "POST",
+    body: JSON.stringify({ project_id: projectId, question, history }),
   });
 }

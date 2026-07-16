@@ -1,6 +1,12 @@
 from fastapi import APIRouter, Depends
 
-from app.ai.models import QueryRuleSqlGenerationRequest, SqlGenerationRequest, SqlGenerationResponse
+from app.ai.models import (
+    CopilotAnswerResponse,
+    CopilotQuestionRequest,
+    QueryRuleSqlGenerationRequest,
+    SqlGenerationRequest,
+    SqlGenerationResponse,
+)
 from app.ai.service import AiService
 from app.dependencies import block_in_demo_mode, get_ai_service
 
@@ -27,3 +33,12 @@ async def generate_query_rule_sql(
 ) -> SqlGenerationResponse:
     sql = await service.generate_query_rule_sql(payload.prompt, payload.identifiers)
     return SqlGenerationResponse(sql=sql)
+
+
+@router.post("/copilot", response_model=CopilotAnswerResponse, dependencies=[_ai_disabled_in_demo])
+async def answer_copilot_question(
+    payload: CopilotQuestionRequest,
+    service: AiService = Depends(get_ai_service),
+) -> CopilotAnswerResponse:
+    answer = await service.answer_copilot_question(payload.project_id, payload.question, payload.history)
+    return CopilotAnswerResponse(answer=answer)

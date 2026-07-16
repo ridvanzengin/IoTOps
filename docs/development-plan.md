@@ -489,22 +489,40 @@ Generate SQL from natural language.
 - SQL is generated.
 - Chart renders successfully.
 
-**Status: SQL generation shipped early, pulled forward into Milestone 3
-(`POST /api/ai/sql`, Ollama-backed) — see that milestone's status above.
-Everything else below is not started.** The activity bar already reserves
-an always-reachable Co-pilot panel slot (`EventsContext.tsx`'s
-`ActivePanel` has a `{ kind: "copilot" }` case and `openCopilotPanel()`),
-but no content component exists yet — just a placeholder.
+**Status: SQL generation shipped early (Milestone 3, `POST /api/ai/sql`,
+Ollama-backed). Slice 1 of the Co-pilot (Q&A over stored data) shipped
+2026-07-16.** The activity bar's reserved Co-pilot panel slot
+(`EventsContext.tsx`'s `ActivePanel`'s `{ kind: "copilot" }` case) now
+renders a real `CopilotChat.tsx` component instead of a placeholder.
 
-**Proposed scope, not yet confirmed with the user** — a persistent
-assistant panel, not just one more SQL box, layered on the Events/Rule/
-Dashboard models that already exist:
+Unlike SQL generation, the Co-pilot chat uses a **separate model
+backend**: the user's own Anthropic API key, model `claude-haiku-4-5` (not
+Ollama) — a deliberate choice for this portfolio project, to demonstrate
+real Claude API usage (including tool calling) on a small budget. Existing
+SQL generation stays on Ollama, untouched.
 
-1. **Q&A over what's already stored** — chat against the structured
-   Event/Occurrence history and current telemetry schema (e.g. "why did
-   hive-3 alert three times today?"), reusing `AiService`'s existing
-   Ollama connection and read-only-SQL guardrail. Lowest-risk slice,
-   pure reads.
+Architecture: real tool-calling (a manual 4-iteration loop in
+`AiService.answer_copilot_question`, `backend/app/ai/service.py`), not
+context-stuffing — the model calls two tools on demand rather than having
+occurrences pre-fetched into every prompt:
+- `query_occurrences` (`backend/app/ai/tools.py`) — structured Event/
+  Occurrence lookup, `project_id` bound server-side (never model-facing).
+- `query_telemetry` — model-written read-only SQL, reusing the existing
+  `validate_select_only_sql` guardrail plus a new row cap and 10s timeout
+  (`TelemetryService.run_bounded_query`, addressing the "no runaway-query
+  timeout" gap in Known Issues below, at least for this call site).
+
+This unlocks real telemetry-*value* Q&A ("what was the temperature at
+3pm") that a context-stuffing design couldn't answer. Verified end-to-end
+against live demo data (real occurrence counts/timestamps, real telemetry
+averages cross-checked against TimescaleDB directly) — see CHANGELOG.md's
+2026-07-16 entry. Measured cost: ~$0.008/question, comfortably within the
+project's $5 budget.
+
+**Proposed scope for the remaining two slices, not yet confirmed with the
+user**:
+
+1. ~~Q&A over what's already stored~~ **Done** — see above.
 2. **Rule suggestions** — proposing a new Rule from an observed
    telemetry pattern, pre-filled into the existing rule-creation form
    rather than silently auto-created.
@@ -579,11 +597,10 @@ routine-update flow and troubleshooting.
    and pointed at the VM, VM access confirmed, systemd
    (`iotops-app.service`) auto-starts the stack on reboot.
 
-Everything above lives on branch `deploy/production-setup` (not yet
-merged into `main` as of 2026-07-16) — 15 commits: the infra scaffolding,
-several real bugs found only by actually running the deployment (not
-just planning it), Kafka enablement, and a `/deploy` skill capturing the
-whole playbook for next time.
+Merged into `main` via PR #18 as of 2026-07-16 — 15 commits: the infra
+scaffolding, several real bugs found only by actually running the
+deployment (not just planning it), Kafka enablement, and a `/deploy`
+skill capturing the whole playbook for next time.
 
 ---
 

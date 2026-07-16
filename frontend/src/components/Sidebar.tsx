@@ -23,9 +23,10 @@ interface NavItem {
   to?: string;
   // For an item with no route of its own (AI Co-pilot -- it opens the
   // app-shell's EventsPanel in "copilot" mode, same as the ActivityBar's
-  // own Co-pilot icon, not a page).
+  // own Co-pilot icon, not a page). Never highlighted as active -- opening
+  // the panel doesn't correspond to a "place" the way a route does, and the
+  // ActivityBar's own Co-pilot icon already shows the open/closed state.
   onClick?: () => void;
-  active?: boolean;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
   end?: boolean;
   disabled?: boolean;
@@ -74,7 +75,7 @@ function renderNavItem(item: NavItem, collapsed: boolean) {
       <button
         key={item.label}
         type="button"
-        className={`sidebar__link sidebar__link--button${item.active ? " sidebar__link--active" : ""}`}
+        className="sidebar__link sidebar__link--button"
         onClick={item.onClick}
         title={title}
       >
@@ -116,7 +117,6 @@ export function Sidebar() {
     {
       label: "AI Co-pilot",
       icon: CopilotIcon,
-      active: copilotOpen,
       onClick: () => (copilotOpen ? closePanel() : openCopilotPanel()),
     },
   ];

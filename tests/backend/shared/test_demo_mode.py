@@ -42,6 +42,7 @@ GATED_ROUTES = {
     ("POST", "/api/event/occurrences/{event_id}/resolve"),
     ("POST", "/api/ai/sql"),
     ("POST", "/api/ai/query-rule-sql"),
+    ("POST", "/api/ai/copilot"),
 }
 
 
