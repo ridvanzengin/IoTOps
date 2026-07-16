@@ -9,7 +9,7 @@ This deployment reuses the shared VM's existing `infra` Compose project
 `~/personal/agritwin/deploy/infra/docker-compose.yml` on the VM at
 `/opt/agritwin/deploy/infra/`. IoTOps never runs its own nginx/Postgres/
 Redis in production. **Prerequisite: the `infra` project and
-`agritwin-infra.service` must already be running before step 5 below.**
+`agritwin-infra.service` must already be running before step 6 below.**
 
 ---
 
@@ -17,7 +17,7 @@ Redis in production. **Prerequisite: the `infra` project and
 
 In Namecheap, point `iotops.online` and `www.iotops.online` A records at
 the VM's IP. Do this first — propagation takes time and nothing below
-except step 9 (TLS) depends on it.
+except step 10 (TLS) depends on it.
 
 ---
 
@@ -30,7 +30,32 @@ git clone -b main https://github.com/ridvanzengin/IoTOps.git /opt/iotops
 
 ---
 
-## 3 — Create the secret env file
+## 3 — Clone and build `custom-telegraf`
+
+The Automater's real-time Rules only ever consume this as a pre-built
+local Docker image, tagged `custom-telegraf:latest` (matching
+`settings.automater_telegraf_image`'s default) — nothing here `docker
+pull`s it, so it must be built on this VM before the demo-showcase seed
+step (step 7) ever tries to deploy an Automater. Skipping this step
+doesn't fail loudly: the first deploy attempt just 404s
+(`ImageNotFound`), and a naive retry-the-same-request client (like
+`examples/demo/seed.py`) piles up orphaned, never-deployed Automater
+records instead of erroring cleanly — this bit the very first production
+deployment.
+
+```bash
+git clone -b main https://github.com/ridvanzengin/custom-telegraf.git /opt/custom-telegraf
+cd /opt/custom-telegraf
+docker build -t custom-telegraf:latest .
+```
+
+First build compiles Telegraf from scratch (a few minutes, real Go
+module downloads); subsequent builds after a `git pull` reuse BuildKit's
+cache mounts and take ~30s.
+
+---
+
+## 4 — Create the secret env file
 
 ```bash
 cp /opt/iotops/deploy/iotops/.env.prod.example /opt/iotops/deploy/iotops/.env.prod
@@ -40,7 +65,7 @@ nano /opt/iotops/deploy/iotops/.env.prod
 
 ---
 
-## 4 — Add the IoTOps nginx vhost (HTTP-only for now)
+## 5 — Add the IoTOps nginx vhost (HTTP-only for now)
 
 ```bash
 cp /opt/iotops/deploy/nginx/iotops.conf \
@@ -52,11 +77,11 @@ docker exec infra-nginx-1 nginx -s reload
 
 The HTTPS server block in `iotops.conf` is fully commented out at this
 point — a `listen 443 ssl` block with no matching cert fails `nginx -t`
-outright. It gets uncommented in step 9, after a real cert exists.
+outright. It gets uncommented in step 10, after a real cert exists.
 
 ---
 
-## 5 — Create the database on the shared TimescaleDB container
+## 6 — Create the database on the shared TimescaleDB container
 
 ```bash
 docker exec -it infra-db-1 psql -U postgres <<'SQL'
@@ -77,7 +102,7 @@ and the warning at the bottom of this file).
 
 ---
 
-## 6 — Build and start the app (HTTP only, no Kafka)
+## 7 — Build and start the app (HTTP only, no Kafka)
 
 ```bash
 cd /opt/iotops
@@ -96,7 +121,7 @@ launch — see the deployment plan's rationale. Apiary (MQTT) and Solar
 
 ---
 
-## 7 — Verify over plain HTTP (no DNS needed yet)
+## 8 — Verify over plain HTTP (no DNS needed yet)
 
 ```bash
 curl --resolve iotops.online:80:<VM_IP> http://iotops.online/
@@ -117,17 +142,17 @@ actually landing, not just that the container started.
 
 ---
 
-## 8 — Wait for DNS
+## 9 — Wait for DNS
 
 ```bash
 dig +short A iotops.online
 ```
 
-Don't proceed to step 9 until this returns the VM's IP.
+Don't proceed to step 10 until this returns the VM's IP.
 
 ---
 
-## 9 — TLS
+## 10 — TLS
 
 ```bash
 certbot certonly --webroot \
@@ -143,7 +168,7 @@ needed. Then:
 1. Uncomment the HTTPS `server` block in
    `/opt/iotops/deploy/nginx/iotops.conf` (the repo copy, so it's
    reviewed and versioned).
-2. Re-copy it onto the VM (same command as step 4) and reload:
+2. Re-copy it onto the VM (same command as step 5) and reload:
    ```bash
    cp /opt/iotops/deploy/nginx/iotops.conf \
       /opt/agritwin/deploy/infra/nginx/conf.d/iotops.conf
@@ -159,7 +184,7 @@ needed. Then:
 
 ---
 
-## 10 — Systemd auto-start
+## 11 — Systemd auto-start
 
 ```bash
 cp /opt/iotops/deploy/systemd/iotops-app.service /etc/systemd/system/
@@ -183,6 +208,13 @@ Pulls the repo, rebuilds images, restarts app services, and only touches
 the shared nginx (`nginx -t` then reload) if `deploy/nginx/iotops.conf`
 actually changed since the last deploy — routine deploys never reload
 AgriTwin's live serving path on an unrelated push.
+
+Doesn't touch `custom-telegraf` — if that repo changes (a plugin fix, a
+new upstream Telegraf version), pull and rebuild it separately:
+
+```bash
+cd /opt/custom-telegraf && git pull origin main && docker build -t custom-telegraf:latest .
+```
 
 ---
 

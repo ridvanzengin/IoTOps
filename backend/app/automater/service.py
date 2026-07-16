@@ -61,6 +61,7 @@ class AutomaterService:
             # evaluates a rule against metrics whose name equals its
             # table). Already-covered tables need no collector_id at all --
             # existing behavior, unchanged.
+            pending_forwarding: tuple[Collector, InputPlugin] | None = None
             if not self._has_input_for_table(automater, rule.table):
                 if collector_id is None:
                     raise InvalidOperationError(
@@ -77,8 +78,18 @@ class AutomaterService:
                         configuration=self._automater_scoped_configuration(matched_input.configuration),
                     )
                 )
-                await self._ensure_http_forwarding(collector, automater, matched_input)
+                # Deferred until after a successful deploy below -- see the
+                # matching comment on the brand-new-Automater branch. A
+                # failed deploy here shouldn't leave the Collector with a
+                # forwarding output aimed at a table this Automater never
+                # actually started serving.
+                pending_forwarding = (collector, matched_input)
             automater.rules.append(rule)
+            deployed = await self._redeploy_or_stop(automater)
+            if pending_forwarding is not None:
+                collector, matched_input = pending_forwarding
+                await self._ensure_http_forwarding(collector, deployed, matched_input)
+            return deployed
         else:
             if not automater_name:
                 raise InvalidOperationError(
@@ -131,8 +142,6 @@ class AutomaterService:
                 raise
             await self._ensure_http_forwarding(collector, automater, matched_input)
             return automater
-
-        return await self._redeploy_or_stop(automater)
 
     def _has_input_for_table(self, automater: Automater, table: str) -> bool:
         # Not scoped to any particular plugin_type -- an Automater's input

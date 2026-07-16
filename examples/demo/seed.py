@@ -9,10 +9,24 @@ application itself -- see examples/demo/README.md.
 
 import logging
 import os
+import re
 import time
 from typing import Any
 
 import requests
+
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _slugify(value: str, max_length: int = 40, fallback: str = "unnamed") -> str:
+    """Mirrors backend/app/shared/naming.py's slugify() exactly -- this
+    script has no import path to the backend package (examples/demo is a
+    standalone container), but needs to derive the same container
+    hostname Collector/AutomaterDockerManager actually create
+    (`iotops-{collector,automater}-{slug}-{short_id}`), not just guess at
+    it from the raw name/id."""
+    slug = _NON_ALNUM_RE.sub("-", value.strip().lower()).strip("-")
+    return slug[:max_length].strip("-") or fallback
 
 logger = logging.getLogger("demo_seed")
 
@@ -456,11 +470,25 @@ def _solar_http_target_urls(collector_id: str) -> list[str]:
     """http_listener_v2 has no broker -- see solar_publisher.py's own
     docstring. Returns the Collector's own target plus every Automater
     currently covering SOLAR_TABLE (today just SOLAR_AUTOMATER_NAME, but
-    looked up rather than assumed)."""
-    urls = [f"http://iotops-collector-{collector_id}:{SOLAR_HTTP_PORT}{SOLAR_HTTP_PATH}"]
+    looked up rather than assumed).
+
+    Container hostnames are `iotops-{collector,automater}-{name-slug}-
+    {short_id}` (see collector_container_name/automater_container_name in
+    the backend), not just the bare id -- building the bare-id form here
+    silently pushed to a hostname that never existed, in every
+    environment this has ever run in.
+    """
+    collector_slug = _slugify(SOLAR_COLLECTOR_NAME, fallback="collector")
+    urls = [
+        f"http://iotops-collector-{collector_slug}-{collector_id[:8]}:{SOLAR_HTTP_PORT}{SOLAR_HTTP_PATH}"
+    ]
     for automater in _request("GET", "/api/automater"):
         if any(i["configuration"].get("name_override") == SOLAR_TABLE for i in automater["inputs"]):
-            urls.append(f"http://iotops-automater-{automater['id']}:{SOLAR_HTTP_PORT}{SOLAR_HTTP_PATH}")
+            automater_slug = _slugify(automater["name"], fallback="automater")
+            urls.append(
+                f"http://iotops-automater-{automater_slug}-{automater['id'][:8]}:"
+                f"{SOLAR_HTTP_PORT}{SOLAR_HTTP_PATH}"
+            )
     return urls
 
 
