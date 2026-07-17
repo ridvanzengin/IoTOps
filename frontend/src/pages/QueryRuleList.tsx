@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { deleteQueryRule, listQueryRules, updateQueryRule } from "../api/queryRule";
 import { listProjects } from "../api/project";
-import { MoreIcon } from "../components/icons";
+import { CopilotIcon, MoreIcon } from "../components/icons";
 import { useEvents } from "../context/EventsContext";
 import type { QueryRule } from "../types/queryRule";
 import type { Project } from "../types/project";
@@ -95,10 +95,15 @@ export function QueryRuleList() {
       <div className="collector-page__header">
         <h1>Scheduled Rules</h1>
         <div className="collector-page__header-actions">
-          <button type="button" className="button" onClick={() => openCopilotPanel("suggest-automation")}>
-            Suggest an automation
+          <button
+            type="button"
+            className="button button--primary"
+            onClick={() => openCopilotPanel("suggest-automation")}
+          >
+            <CopilotIcon width={16} height={16} />
+            Ask AI
           </button>
-          <Link className="button button--primary" to="/query-rules/new">
+          <Link className="button button--success" to="/query-rules/new">
             + New Rule
           </Link>
         </div>
