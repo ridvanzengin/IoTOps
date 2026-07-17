@@ -4,12 +4,22 @@ from uuid import uuid4
 
 from mongomock_motor import AsyncMongoMockClient
 
-from app.ai.tools import run_flag_missing_context, run_query_occurrences, run_query_telemetry
+from app.ai.tools import (
+    run_flag_missing_context,
+    run_list_existing_rules,
+    run_query_occurrences,
+    run_query_telemetry,
+    run_suggest_automation,
+)
+from app.automater.models import Automater, Condition, Rule
 from app.event.models import Event, EventFlag, OccurrenceStatus
 from app.event.repository import EventRepository, to_document
 from app.event.service import EventService
+from app.query_rule.models import QueryRule, QueryRuleSchedule
+from app.shared.models import InputPlugin, OutputPlugin
 from app.telemetry.repository import TelemetryRepository
 from app.telemetry.service import TelemetryService
+from tests.backend.ai.fakes import FakeAutomaterService, FakeQueryRuleService
 from tests.backend.telemetry.fakes import FakePool
 
 
@@ -149,3 +159,151 @@ def test_flag_missing_context_returns_an_ack() -> None:
 
     assert isinstance(result, str)
     assert result
+
+
+def _automater(project_id, rules: list[Rule]) -> Automater:
+    return Automater(
+        project_id=project_id,
+        name="Test Automater",
+        inputs=[InputPlugin(plugin_type="mqtt_consumer", name="in")],
+        outputs=[OutputPlugin(plugin_type="celery", name="out")],
+        rules=rules,
+    )
+
+
+def _rule(**overrides) -> Rule:
+    defaults: dict = {
+        "name": "High temperature",
+        "table": "device_metrics",
+        "conditions": [Condition(column="temperature", operator=">", value=90)],
+        "identifiers": ["device_id"],
+    }
+    defaults.update(overrides)
+    return Rule(**defaults)
+
+
+def _query_rule(project_id, **overrides) -> QueryRule:
+    defaults: dict = {
+        "project_id": project_id,
+        "name": "High average vibration",
+        "sql": "SELECT machine_id FROM machine_metrics GROUP BY machine_id HAVING AVG(vibration) > 5",
+        "identifiers": ["machine_id"],
+        "schedule": QueryRuleSchedule(interval="15m"),
+    }
+    defaults.update(overrides)
+    return QueryRule(**defaults)
+
+
+async def test_list_existing_rules_reports_none_when_project_has_no_rules() -> None:
+    result = await run_list_existing_rules(FakeAutomaterService(), FakeQueryRuleService(), uuid4())
+
+    assert "no existing" in result.lower()
+
+
+async def test_list_existing_rules_filters_automaters_by_project() -> None:
+    project_id = uuid4()
+    other_project_automater = _automater(uuid4(), [_rule(name="Other project's rule")])
+    this_project_automater = _automater(project_id, [_rule(name="High temperature")])
+    automater_service = FakeAutomaterService([other_project_automater, this_project_automater])
+
+    result = await run_list_existing_rules(automater_service, FakeQueryRuleService(), project_id)
+
+    assert "High temperature" in result
+    assert "Other project's rule" not in result
+    assert "device_metrics" in result
+    assert "device_id" in result
+
+
+async def test_list_existing_rules_includes_query_rules() -> None:
+    project_id = uuid4()
+    query_rule_service = FakeQueryRuleService([_query_rule(project_id)])
+
+    result = await run_list_existing_rules(FakeAutomaterService(), query_rule_service, project_id)
+
+    assert "High average vibration" in result
+    assert "every 15m" in result
+    assert "machine_id" in result
+
+
+def test_suggest_automation_builds_automater_rule_suggestion() -> None:
+    project_id = uuid4()
+
+    ack, suggestion = run_suggest_automation(
+        project_id,
+        {
+            "kind": "automater_rule",
+            "name": "High hive temperature",
+            "severity": "high",
+            "identifiers": ["hive_id"],
+            "table": "hive_metrics",
+            "conditions": [{"column": "temperature", "operator": ">", "value": 38, "join": "AND"}],
+        },
+    )
+
+    assert isinstance(ack, str) and ack
+    assert suggestion is not None
+    assert suggestion.kind == "automater_rule"
+    assert suggestion.state.project_id == project_id
+    assert suggestion.state.table == "hive_metrics"
+    assert suggestion.state.conditions[0].column == "temperature"
+
+
+def test_suggest_automation_builds_query_rule_suggestion() -> None:
+    project_id = uuid4()
+
+    ack, suggestion = run_suggest_automation(
+        project_id,
+        {
+            "kind": "query_rule",
+            "name": "High average vibration",
+            "severity": "medium",
+            "identifiers": ["machine_id"],
+            "sql": "SELECT machine_id FROM machine_metrics GROUP BY machine_id HAVING AVG(vibration) > 5",
+            "schedule_interval": "15m",
+        },
+    )
+
+    assert isinstance(ack, str) and ack
+    assert suggestion is not None
+    assert suggestion.kind == "query_rule"
+    assert suggestion.state.schedule.interval == "15m"
+    assert suggestion.state.schedule.cron is None
+
+
+def test_suggest_automation_query_rule_supports_cron_schedule() -> None:
+    project_id = uuid4()
+
+    _, suggestion = run_suggest_automation(
+        project_id,
+        {
+            "kind": "query_rule",
+            "name": "Daily rollup",
+            "severity": "low",
+            "identifiers": [],
+            "sql": "SELECT 1",
+            "schedule_cron": "0 3 * * *",
+        },
+    )
+
+    assert suggestion is not None
+    assert suggestion.state.schedule.cron == "0 3 * * *"
+    assert suggestion.state.schedule.interval is None
+
+
+def test_suggest_automation_returns_error_text_and_none_on_invalid_input() -> None:
+    ack, suggestion = run_suggest_automation(
+        uuid4(),
+        {"kind": "automater_rule", "name": "Missing table/conditions", "severity": "low", "identifiers": []},
+    )
+
+    assert suggestion is None
+    assert "couldn't build" in ack.lower()
+
+
+def test_suggest_automation_returns_error_text_on_unknown_kind() -> None:
+    ack, suggestion = run_suggest_automation(
+        uuid4(), {"kind": "bogus", "name": "x", "severity": "low", "identifiers": []}
+    )
+
+    assert suggestion is None
+    assert "couldn't build" in ack.lower()

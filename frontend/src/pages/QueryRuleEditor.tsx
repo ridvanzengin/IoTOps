@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { generateQueryRuleSql } from "../api/ai";
 import { ApiError } from "../api/client";
 import { createQueryRule, previewQueryRule } from "../api/queryRule";
@@ -10,6 +10,7 @@ import { NlSqlBuilder } from "../components/NlSqlBuilder";
 import { SchemaBrowser } from "../components/SchemaBrowser";
 import type { QueryRuleInput } from "../types/queryRule";
 import type { ResolveMode, RuleSeverity } from "../types/automater";
+import type { QueryRuleSuggestionState } from "../types/ai";
 import type { Project } from "../types/project";
 import type { TelemetrySqlQueryResult } from "../types/telemetry";
 import "./Collector.css";
@@ -28,6 +29,7 @@ type ScheduleMode = "interval" | "cron";
 
 export function QueryRuleEditor() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -60,6 +62,32 @@ export function QueryRuleEditor() {
       .then(setProjects)
       .catch(() => setLoadError("Failed to load available projects."));
   }, []);
+
+  // Prefills from a Co-pilot "Suggest an automation" suggestion card --
+  // see AutomaterEditor.tsx's own prefill effect for the fuller comment on
+  // why this depends on location.state rather than running once on mount
+  // (the Co-pilot panel outlives route navigation, so a refined suggestion
+  // opened a second time while already on this route needs to re-prefill).
+  useEffect(() => {
+    const state = location.state as QueryRuleSuggestionState | null;
+    if (!state) return;
+    setProjectId(state.project_id);
+    setName(state.name);
+    setCategory(state.category);
+    setEventType(state.event_type);
+    setSeverity(state.severity);
+    setMessage(state.message);
+    setResolveMode(state.resolve_mode);
+    setIdentifiers(state.identifiers);
+    setSql(state.sql);
+    if (state.schedule.interval) {
+      setScheduleMode("interval");
+      setInterval(state.schedule.interval);
+    } else if (state.schedule.cron) {
+      setScheduleMode("cron");
+      setCron(state.schedule.cron);
+    }
+  }, [location.state]);
 
   async function handleGenerate(prompt: string): Promise<string> {
     setNlPrompt(prompt);

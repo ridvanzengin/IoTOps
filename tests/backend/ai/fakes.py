@@ -51,3 +51,41 @@ class FakeProjectService:
 
     async def get(self, project_id: Any) -> Any:
         return SimpleNamespace(ai_context=self._ai_context)
+
+
+class FakeAutomaterService:
+    """Stands in for AutomaterService -- the suggest-automation intent's
+    list_existing_rules tool only ever calls .list(), so a full
+    AutomaterService (which pulls in a real Docker manager) is
+    unnecessary machinery for AI-module tests."""
+
+    def __init__(self, automaters: list[Any] | None = None) -> None:
+        self._automaters = automaters or []
+
+    async def list(self) -> list[Any]:
+        return self._automaters
+
+
+class FakeQueryRuleService:
+    """Stands in for QueryRuleService -- list_existing_rules only ever
+    calls .list(project_id)."""
+
+    def __init__(self, query_rules: list[Any] | None = None) -> None:
+        self._query_rules = query_rules or []
+
+    async def list(self, project_id: Any = None) -> list[Any]:
+        return [qr for qr in self._query_rules if qr.project_id == project_id]
+
+
+class FakeCollectorService:
+    """Stands in for CollectorService -- AiService only ever calls
+    .list() (no project filter, same as the real one) to derive which
+    telemetry tables belong to the current project. A full CollectorService
+    (which pulls in a real Docker manager) is unnecessary machinery for
+    AI-module tests."""
+
+    def __init__(self, collectors: list[Any] | None = None) -> None:
+        self._collectors = collectors or []
+
+    async def list(self) -> list[Any]:
+        return self._collectors

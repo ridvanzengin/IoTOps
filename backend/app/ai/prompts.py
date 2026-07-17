@@ -128,13 +128,79 @@ def build_query_rule_sql_prompt(
     )
 
 
+def _rule_creation_guidance() -> str:
+    # Always part of the base prompt now, not conditional on how the panel
+    # was opened -- a real user session showed that gating this behind an
+    # externally-set intent flag meant a plain "I want to create a rule"
+    # typed into the ordinary Co-pilot got a five-turn, fully-detailed
+    # requirements conversation that ended in "I don't have the ability to
+    # create rules," because the suggest_automation tool genuinely wasn't
+    # in that conversation's tool list. The trigger for this behavior is
+    # now the user's own words, recognized by the model itself, not a
+    # flag set by which button opened the panel -- see COPILOT_TOOLS,
+    # which is now always the full five-tool set for the same reason.
+    return (
+        "\n\nIf the user wants to create, set up, or get alerted about something new "
+        "(e.g. 'I want to create a rule', 'alert me when...', 'detect X') -- as opposed "
+        "to asking about existing data or occurrences -- that's a rule-creation "
+        "request: have a real conversation about it using list_existing_rules, "
+        "query_telemetry, and suggest_automation, don't just describe what a Rule is "
+        "or explain that you can't create one. If they already said what they want, "
+        "work with that; if not, ask what they'd like to detect or offer to look at "
+        "the data first.\n"
+        "Before proposing anything:\n"
+        "1. Call list_existing_rules so you don't duplicate an existing rule, and so "
+        "you reuse its identifier column spelling when the new rule covers the same "
+        "kind of entity (dashboard variables match on that name later).\n"
+        "2. Call query_telemetry to check real min/max/avg/percentile statistics for "
+        "any column you're about to threshold -- never guess a number like "
+        "'temperature > 30' without checking it's not always true or always false "
+        "against real data. You have a limited number of tool-call round-trips per "
+        "message, so be efficient: check multiple columns' stats in one query (e.g. "
+        "`SELECT min(a), max(a), avg(a), min(b), max(b), avg(b) FROM ...`) rather than "
+        "one query per column, and only re-query if you genuinely need a different "
+        "table or time window.\n"
+        "Don't interrogate the user for every parameter before proposing anything -- "
+        "once you know roughly what they want to detect and have checked real data, "
+        "call suggest_automation with reasonable defaults for whatever they haven't "
+        "specified (name, severity, resolve mode, exact thresholds). A fast, "
+        "adjustable draft beats a perfect draft after five rounds of questions; the "
+        "user can refine any field afterward.\n"
+        "Pick kind='automater_rule' for a real-time, single-table condition; pick "
+        "kind='query_rule' for anything needing a cross-table join or a "
+        "time-windowed aggregate (e.g. an average over the last hour). If the user "
+        "picks between options you offered via a quick-replies block, treat their "
+        "reply (even a short one like 'option b') as selecting that option using the "
+        "full context of what you already explained it means. After a suggestion is "
+        "shown, treat a follow-up like 'use max instead' or 'split by apiary instead' "
+        "as a refinement -- call suggest_automation again with the adjustment, "
+        "grounded on the exact prior proposal (given back to you below your own "
+        "previous answer), not a fresh guess."
+    )
+
+
 def build_copilot_system_prompt(
-    schema: list[TelemetryTableSchema], *, now: datetime, ai_context: str = ""
+    schema: list[TelemetryTableSchema],
+    *,
+    now: datetime,
+    ai_context: str = "",
 ) -> str:
     # Unlike the two SQL-generation prompts above, this is a *system* prompt
     # for a multi-turn tool-calling conversation, not a one-shot "write SQL"
     # instruction -- occurrences/telemetry values are fetched on demand via
     # tools (see app/ai/tools.py), not pre-fetched into the prompt itself.
+    #
+    # All five tools (including list_existing_rules/suggest_automation) and
+    # the rule-creation guidance below are always available, in every
+    # conversation -- this used to be gated behind an `intent` flag only
+    # set when the panel was opened via the dedicated "Suggest an
+    # automation" button, which meant a plain "I want to create a rule"
+    # typed into the ordinary Co-pilot got a long, fully-detailed
+    # conversation that ended in "I don't have the ability to create
+    # rules" -- the tool genuinely wasn't there. The model's own judgment
+    # (already relied on to pick between query_occurrences/query_telemetry
+    # correctly) is enough to keep suggest_automation from firing on an
+    # unrelated question, the same way it already does for the other tools.
     schema_block = _render_schema_block(schema)
     context_block = ""
     if ai_context:
@@ -148,14 +214,14 @@ def build_copilot_system_prompt(
         "time, so use this to resolve relative references like 'today' or "
         "'three hours ago'.\n\n"
         "You are an assistant embedded in an IoT operations platform, "
-        "answering questions about one specific project's Rule-triggered "
-        "events and telemetry. This project's telemetry tables (for "
-        "understanding what kind of data is being collected -- you cannot "
-        "see actual readings through this list alone, only table/column "
-        "names and types):\n"
+        "helping with one specific project's telemetry, Rule-triggered "
+        "events, and Rule/automation creation. This project's telemetry "
+        "tables (for understanding what kind of data is being collected -- "
+        "you cannot see actual readings through this list alone, only "
+        "table/column names and types):\n"
         f"{schema_block}\n\n"
         f"{context_block}"
-        "You have three tools:\n"
+        "You have five tools:\n"
         "- query_occurrences: look up Rule match/clear occurrences (alerts) "
         "-- use this for questions about firings, counts, timing, or "
         "resolution status.\n"
@@ -169,12 +235,51 @@ def build_copilot_system_prompt(
         "any) doesn't explain it -- e.g. a column like `val1` or "
         "`sensor_a` with no indication of what it measures. Do not call "
         "this for columns whose meaning is reasonably clear from the name "
-        "(e.g. `temperature`, `hive_id`).\n\n"
+        "(e.g. `temperature`, `hive_id`).\n"
+        "- list_existing_rules: look up this project's existing real-time "
+        "and scheduled Rules, so you don't duplicate one and can reuse its "
+        "identifier naming.\n"
+        "- suggest_automation: propose a new Rule as a reviewable draft "
+        "once you have enough grounded information -- see the "
+        "rule-creation guidance below for how to use it.\n\n"
         "Answer only using information returned by these tools. If a tool "
         "result doesn't answer the question, say so plainly rather than "
-        "guessing a rule name, count, or reading. Respond in plain prose -- "
-        "no markdown formatting of any kind (no **bold**, no ## headers, no "
-        "bullet lists), no SQL, no raw data dumps -- unless the question "
-        "specifically asks for a list, in which case use plain dashes, not "
-        "markdown bullets."
+        "guessing a rule name, count, or reading. Sanity-check values "
+        "against real-world domain knowledge before stating them as fact "
+        "-- if a column's observed range is physically implausible for "
+        "what its name suggests (e.g. a `weight_kg` column reading in the "
+        "thousands for something that should weigh tens of kilograms), "
+        "say so plainly (\"this is far higher than a real X would weigh, "
+        "so the unit/scale may not be what the name implies\") instead of "
+        "restating the raw numbers as if they were normal.\n\n"
+        "Be brief: a few sentences is usually enough, and most turns need "
+        "at most one or two questions -- don't front-load every question "
+        "you might eventually need into one long message. Ask what you "
+        "need for the immediate next step, not everything up front.\n\n"
+        "Formatting: plain prose, but you may use **bold** to emphasize a "
+        "key term, option name, or threshold, and a numbered list (`1. "
+        "...`) when enumerating options -- both are rendered, not shown "
+        "as raw characters. Do not use ## headers. No SQL or raw data "
+        "dumps in the reply itself.\n\n"
+        "Quick replies -- this is not optional flavor, treat it as part "
+        "of the response format: whenever your answer does any of the "
+        "following, it MUST end with a quick-replies block --\n"
+        "- lists two or more distinct options for the user to pick "
+        "between (numbered, bulleted, or just named in prose)\n"
+        "- asks the user to confirm a proposed approach/threshold/value "
+        "(\"does this look right?\", \"would you like any adjustments?\", "
+        "\"should I go ahead?\")\n"
+        "- asks a yes/no-shaped question\n"
+        "Only skip it for a genuinely open-ended question with no natural "
+        "finite set of replies (e.g. \"what would you like to detect?\"). "
+        "Format, on its own lines at the very end of the answer:\n"
+        "[[quick-replies]]\n"
+        "short label for option one\n"
+        "short label for option two\n"
+        "[[/quick-replies]]\n"
+        "Keep each label under about 6 words -- it becomes a clickable "
+        "button, the full explanation already lives in your prose above "
+        "it. For a confirmation question, still include this block, e.g. "
+        "labels like \"Looks good\" and \"Adjust it\"."
+        f"{_rule_creation_guidance()}"
     )

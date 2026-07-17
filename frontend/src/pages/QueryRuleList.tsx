@@ -4,6 +4,7 @@ import { ApiError } from "../api/client";
 import { deleteQueryRule, listQueryRules, updateQueryRule } from "../api/queryRule";
 import { listProjects } from "../api/project";
 import { MoreIcon } from "../components/icons";
+import { useEvents } from "../context/EventsContext";
 import type { QueryRule } from "../types/queryRule";
 import type { Project } from "../types/project";
 import "./Collector.css";
@@ -14,6 +15,7 @@ function scheduleSummary(rule: QueryRule): string {
 }
 
 export function QueryRuleList() {
+  const { openCopilotPanel } = useEvents();
   const [queryRules, setQueryRules] = useState<QueryRule[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,9 +94,14 @@ export function QueryRuleList() {
     <main className="collector-page">
       <div className="collector-page__header">
         <h1>Scheduled Rules</h1>
-        <Link className="button button--primary" to="/query-rules/new">
-          + New Rule
-        </Link>
+        <div className="collector-page__header-actions">
+          <button type="button" className="button" onClick={() => openCopilotPanel("suggest-automation")}>
+            Suggest an automation
+          </button>
+          <Link className="button button--primary" to="/query-rules/new">
+            + New Rule
+          </Link>
+        </div>
       </div>
 
       {error && <p className="collector-page__error">{error}</p>}

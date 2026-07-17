@@ -519,24 +519,22 @@ averages cross-checked against TimescaleDB directly) — see CHANGELOG.md's
 2026-07-16 entry. Measured cost: ~$0.008/question, comfortably within the
 project's $5 budget.
 
-**Proposed scope for the remaining two slices, not yet confirmed with the
-user**:
+**Scope for the remaining two slices**:
 
 1. ~~Q&A over what's already stored~~ **Done** — see above.
-2. **Rule suggestions** — proposing a new Rule from an observed
-   telemetry pattern, pre-filled into the existing rule-creation form
-   rather than silently auto-created.
+2. ~~**Rule suggestions**~~ **Done (2026-07-17)** — proposing a new Rule
+   from an observed telemetry pattern, pre-filled into the existing
+   rule-creation form rather than silently auto-created. See
+   CHANGELOG.md's 2026-07-17 entry and "Future — Suggested Dashboards &
+   Automations" below for the shipped design (now historical, kept for
+   the still-open Slice 3 below).
 3. **Dashboard/panel suggestions** — same idea, proposing a chart from a
-   schema + usage pattern, landing in the Panel Builder.
+   schema + usage pattern, landing in the Panel Builder. Not yet built.
 
-Design for both is settled (2026-07-17), superseding the standalone-endpoint
-sketch previously in "Future — Suggested Dashboards & Automations" below —
-see that section for the full architecture (including the identifier/
-value_column interoperability constraint to keep in mind once this gets
-built): **all three "Suggest..." entry points route through the Co-pilot
-chat** (not separate prefilled-form buttons), reusing the tool-calling
-loop and structured-output pattern already built for slice 1. Not yet
-built — planning only.
+All three "Suggest..." entry points route through the Co-pilot chat (not
+separate prefilled-form buttons), reusing the tool-calling loop and
+structured-output pattern already built for slice 1 — Slice 2 proved this
+pattern end to end; Slice 3 reuses it as designed.
 
 ---
 
@@ -648,12 +646,15 @@ Fix opportunistically, not preemptively.
 # Future — Suggested Dashboards & Automations
 
 Milestone 6's remaining two slices (rule suggestions, panel/dashboard
-suggestions). **Design decided 2026-07-17, not yet built** — this
-supersedes the standalone-single-shot-endpoint sketch this section
-previously had (`POST /api/ai/dashboard` / `POST /api/ai/automation` as
-plain generation endpoints, a model-selection dropdown). Both ideas are
-superseded by routing everything through the Co-pilot chat instead — see
-below for why.
+suggestions). **Design decided 2026-07-17; rule suggestions shipped the
+same day** (see CHANGELOG.md's 2026-07-17 entry) — this supersedes the
+standalone-single-shot-endpoint sketch this section previously had
+(`POST /api/ai/dashboard` / `POST /api/ai/automation` as plain generation
+endpoints, a model-selection dropdown). Both ideas are superseded by
+routing everything through the Co-pilot chat instead — see below for why.
+Panel/dashboard suggestions are still unbuilt; the design below is the
+plan for those, and doubles as a record of what rule suggestions already
+implemented.
 
 ## Decided: all three "Suggest..." entry points open the Co-pilot, not a separate prefilled-form flow
 
@@ -750,15 +751,19 @@ Hive, mirroring the existing Beekeeping showcase pattern) — per the
 "decided" section above, this should be asked conversationally, not
 hardcoded as a toggle.
 
-## Recommended build order (not yet started)
+## Recommended build order
 
-1. **Rule suggestions** — smallest complete vertical slice (intent-routed
-   panel open → conversational clarification → `suggest_automation` tool
-   → suggestion card → prefilled `/automaters/new` or `/query-rules/new`).
-   Proves the whole pattern end to end.
-2. **Panel suggestions** — reuses the same pattern; smaller lift since it
-   plugs into the existing Panel Builder prefill flow (already used by the
-   NL-to-SQL button), just model-initiated instead of user-typed.
+1. ~~**Rule suggestions**~~ **Done (2026-07-17)** — smallest complete
+   vertical slice (intent-routed panel open → conversational
+   clarification → `suggest_automation` tool → suggestion card →
+   prefilled `/automaters/new` or `/query-rules/new`). Proved the whole
+   pattern end to end, including live verification against the real
+   Anthropic API (not just mocks) — see CHANGELOG.md's 2026-07-17 entry
+   for a real bug that surfaced only under live testing.
+2. **Panel suggestions** — not yet started. Reuses the same pattern;
+   smaller lift since it plugs into the existing Panel Builder prefill
+   flow (already used by the NL-to-SQL button), just model-initiated
+   instead of user-typed.
 3. **Dashboard suggestions** — last, since it needs the new draft-editor
    capability above.
 

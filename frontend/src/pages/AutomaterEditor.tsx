@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { createRule, listAutomaters } from "../api/automater";
 import { listCollectors } from "../api/collector";
@@ -16,6 +16,7 @@ import type {
   RulePayload,
   RuleSeverity,
 } from "../types/automater";
+import type { AutomaterRuleSuggestionState } from "../types/ai";
 import type { Collector, InputPluginPayload } from "../types/collector";
 import type { Plugin } from "../types/plugin";
 import type { Project } from "../types/project";
@@ -55,6 +56,7 @@ function describeInputSource(configuration: Record<string, unknown>): string | n
 
 export function AutomaterEditor() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [projects, setProjects] = useState<Project[]>([]);
   const [collectors, setCollectors] = useState<Collector[]>([]);
   const [automaters, setAutomaters] = useState<Automater[]>([]);
@@ -100,6 +102,36 @@ export function AutomaterEditor() {
       .then(setInputPlugins)
       .catch(() => setLoadError("Failed to load input plugin types."));
   }, []);
+
+  // Prefills from a Co-pilot "Suggest an automation" suggestion card (see
+  // CopilotChat.tsx's handleOpenSuggestion), same navigate(..., { state })
+  // pattern ProjectForm.tsx already uses for its own focusField. Only the
+  // Rule's own fields are prefilled -- automaterId/collectorId (which
+  // existing Automater/Collector to attach to) is left to the user, since
+  // that's a deployment decision the model has no basis for. visibleSchema
+  // already resolves off projectId alone before a collector is chosen, so
+  // the prefilled table is visible in the schema panel immediately.
+  //
+  // Depends on location.state, not just []: the Co-pilot panel is mounted
+  // once at the app-shell level and outlives route navigation, so a user
+  // can refine a suggestion and click "Open in builder" a second time
+  // while already on this route -- that calls navigate() with a new state
+  // object but doesn't remount this component. A mount-only effect would
+  // silently keep showing the first draft's values.
+  useEffect(() => {
+    const state = location.state as AutomaterRuleSuggestionState | null;
+    if (!state) return;
+    setProjectId(state.project_id);
+    setRuleName(state.rule_name);
+    setCategory(state.category);
+    setEventType(state.event_type);
+    setSeverity(state.severity);
+    setMessage(state.message);
+    setResolveMode(state.resolve_mode);
+    setIdentifiers(state.identifiers);
+    setTable(state.table);
+    setConditions(state.conditions);
+  }, [location.state]);
 
   // Telegraf measurement-names an input after its own plugin's Telegraf
   // name (e.g. "mqtt_consumer", "kafka_consumer") when name_override isn't
@@ -266,6 +298,13 @@ export function AutomaterEditor() {
   }, [inputTagKeys]);
 
   const missingTagKeys = useMemo(() => {
+    // Nothing is actually "reused" yet without a resolved input -- checking
+    // against inputTagKeys (which defaults to []) before that point would
+    // flag every referenced identifier as missing regardless of whether
+    // it's really a problem, since there's no real input to compare
+    // against. The relevant nudge before an Automater/Collector is picked
+    // is the one rendered next to the Automater field itself, not this.
+    if (!derivedInput) return [];
     const referenced = new Set([...identifiers, ...extractPlaceholders(message)]);
     const tableSchema = schema.find((t) => t.table === table);
     return [...referenced].filter((name) => {
@@ -277,7 +316,7 @@ export function AutomaterEditor() {
       // rule out it'll arrive as a string.
       return !column || !isNumericType(column.data_type);
     });
-  }, [identifiers, message, inputTagKeys, schema, table]);
+  }, [derivedInput, identifiers, message, inputTagKeys, schema, table]);
 
   function canSubmit(): boolean {
     const automaterPartValid = isNewAutomater
@@ -385,6 +424,11 @@ export function AutomaterEditor() {
                 <option value={NEW_AUTOMATER}>+ New Automater</option>
               </select>
             </label>
+            {projectId && !automaterId && (
+              <p className="automater-editor__warning" style={{ marginTop: -8 }}>
+                Please select an Automater.
+              </p>
+            )}
 
             {isNewAutomater && (
               <>
@@ -396,6 +440,11 @@ export function AutomaterEditor() {
                     required
                   />
                 </label>
+                {!automaterName.trim() && (
+                  <p className="automater-editor__warning" style={{ marginTop: -8 }}>
+                    Please enter a name.
+                  </p>
+                )}
                 <label className="field">
                   <span>New Automater Description</span>
                   <input
@@ -430,6 +479,11 @@ export function AutomaterEditor() {
                     ))}
                   </select>
                 </label>
+                {!collectorId && projectCollectors.length > 0 && (
+                  <p className="automater-editor__warning" style={{ marginTop: -8 }}>
+                    Please select a Collector.
+                  </p>
+                )}
                 {projectId && projectCollectors.length === 0 && (
                   <p className="collector-page__error">
                     No Collector exists for this project yet — create one first, an Automater reuses one

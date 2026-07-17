@@ -248,7 +248,7 @@ export function Home() {
             </Link>
           </div>
         </div>
-        <button type="button" className="home-command__promo" onClick={openCopilotPanel}>
+        <button type="button" className="home-command__promo" onClick={() => openCopilotPanel()}>
           <CopilotIcon className="home-command__promo-icon" />
           <strong>AI-native ops</strong>
           <span>Ask your telemetry questions and get automation suggestions as you grow.</span>
@@ -462,7 +462,7 @@ export function Home() {
                 across your projects today — a persistent assistant that understands your telemetry,
                 automation, dashboards, and event history.
               </p>
-              <button type="button" className="button" onClick={openCopilotPanel}>
+              <button type="button" className="button" onClick={() => openCopilotPanel()}>
                 Open Co-pilot
               </button>
             </div>

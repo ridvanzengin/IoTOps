@@ -9,8 +9,12 @@ import { debounce } from "../utils/debounce";
 import type { EventRuleCount, Occurrence } from "../types/event";
 import type { Dashboard, Variable } from "../types/dashboard";
 import type { Project } from "../types/project";
+import type { CopilotIntent } from "../types/ai";
 
-export type ActivePanel = { kind: "project"; projectId: string } | { kind: "copilot" } | null;
+export type ActivePanel =
+  | { kind: "project"; projectId: string }
+  | { kind: "copilot"; intent?: CopilotIntent }
+  | null;
 
 // What EventsPanel's filter chips can narrow the occurrence list to. Kept
 // here (not local component state) because applying a filter changes what
@@ -73,7 +77,7 @@ interface EventsContextValue {
   activeCount: number;
   activeDashboardVariables: ActiveDashboardVariables | null;
   openProjectPanel: (projectId: string) => void;
-  openCopilotPanel: () => void;
+  openCopilotPanel: (intent?: CopilotIntent) => void;
   closePanel: () => void;
   setOccurrenceFilter: (filter: OccurrenceFilter | null) => void;
   setTimeRange: (range: string) => void;
@@ -321,8 +325,8 @@ export function EventsProvider({ children }: { children: ReactNode }) {
     fetchCounts(projectId, timeRange, "");
   }
 
-  function openCopilotPanel() {
-    setActivePanel({ kind: "copilot" });
+  function openCopilotPanel(intent?: CopilotIntent) {
+    setActivePanel({ kind: "copilot", intent });
     setOccurrences([]);
     setOccurrencesTotal(0);
     setOccurrencesOffset(0);
