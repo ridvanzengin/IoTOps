@@ -12,7 +12,17 @@ skill assumes that initial setup is done (it is, as of 2026-07-16) and
 covers *operating* the live deployment: routine updates, and the
 debugging playbook for the failure modes actually hit standing this up.
 
-SSH: `ssh -i ~/.ssh/id_ed25519_personal root@167.233.143.105`. Every
+SSH: `ssh iotops-vm` — assumes an `iotops-vm` host alias in your local
+`~/.ssh/config` (not committed here, so the VM's real IP never ends up in
+this public repo's history):
+```
+Host iotops-vm
+    HostName <the VM's IP>
+    User root
+    IdentityFile <path to your private key>
+```
+If that alias isn't set up yet, ask the user for the VM's IP and suggest
+adding it there rather than typing the raw IP into a command. Every
 command below runs on that VM unless noted otherwise.
 
 ## Routine update (the common case)
