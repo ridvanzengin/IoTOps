@@ -10,6 +10,206 @@ Newest first. Each entry is a compressed summary, not a full narrative —
 where a bug fix taught something worth remembering (a real footgun, not
 just "fixed a typo"), that's kept; blow-by-blow debugging steps aren't.
 
+## 2026-07-18
+
+**`AutomaterEditor.tsx`'s "Create Rule" button disabled with no explanation
+when an Automater isn't picked yet.** Following up on the AI rule-drafting
+work: a Co-pilot-suggested rule prefills table/conditions/message/severity
+but deliberately leaves `automaterId` unset (which deployment should host
+the rule isn't inferable from data -- see yesterday's entries). Landing on
+a form that already looks complete, with no visible reason the submit
+button was greyed out, was confusing. Worse, the tag-keys warning that
+*was* showing in that state was actively misleading: `missingTagKeys`
+compared referenced identifiers against `inputTagKeys`, which defaults to
+`[]` before an Automater/Collector resolves a real input -- so it
+flagged every referenced identifier as "not in the reused input's Tag
+Keys" even though nothing had been reused yet, there was simply no input
+to check against. Fixed both: `missingTagKeys` now returns empty until
+`derivedInput` actually resolves, and a plain hint appears next to the
+Automater field itself when it's still unset, explaining why the button
+is disabled and what to do about it. Query Rules have no equivalent gap --
+`QueryRuleEditor.tsx` has no Automater field at all; scheduled queries run
+standalone against TimescaleDB, not through an Automater's Telegraf
+process.
+
+## 2026-07-17
+
+**Co-pilot Slice 2 — Rule Suggestions shipped.** "Suggest an automation" on
+`/automaters` and `/query-rules` opens the Co-pilot with a
+`suggest-automation` intent. Two new tools -- `list_existing_rules`
+(avoids proposing a duplicate, reuses existing identifier naming) and
+`suggest_automation` (the actual proposal, captured structurally like
+`flag_missing_context` rather than executed) -- join the existing
+`query_telemetry` tool, which the model now also uses to ground a
+threshold in real min/max/avg/percentile stats before proposing one. The
+model decides between a real-time Automater Rule and a scheduled Query
+Rule based on whether the request needs a single-table condition or a
+cross-table/time-windowed aggregate. `CopilotAnswerResponse` gains a
+`suggestion` field, rendered by `CopilotChat.tsx` as a card that deep-links
+into `/automaters/new` or `/query-rules/new` prefilled via React Router
+`state` -- never auto-created. Refinement ("use the average instead") is
+just continued conversation, grounded by a machine-readable recap appended
+to the stored assistant message (see `_SUGGESTION_CONTEXT_START`/`_END` in
+`app/ai/service.py`).
+
+Verified live against two real demo projects (Manufacturing Line,
+Beekeeping) using the real Anthropic API, not just the 77 mocked backend
+tests -- surfaced a real bug mocks alone couldn't: on a refinement turn,
+the model sometimes echoes the `[[suggestion-context]]...` recap marker
+itself (mimicking what it saw in its own prior turn's history), producing
+two blocks in one answer. The frontend's strip regex wasn't global, so
+only the first got removed and the second leaked raw JSON into the chat
+bubble -- fixed by making the strip global, which holds regardless of how
+many blocks appear, not just this specific cause.
+
+**Same-day follow-up, from a real user session detecting hornet attacks on
+hives:** `MAX_COPILOT_ITERATIONS` bumped 6 → 10 -- a genuinely
+cross-table request (weight-loss + elevated-sound combined) needed more
+tool-call round-trips than the cap allowed and hit a hard "couldn't finish
+within the allotted steps" error mid-conversation; the suggest-automation
+system prompt addendum also now tells the model to batch multiple
+columns' stats into one `query_telemetry` call instead of one per column,
+to spend the budget it does have more efficiently. Added a general
+quick-replies mechanism (`[[quick-replies]]` block instructions in the
+base system prompt, parsed server-side into `CopilotAnswerResponse
+.quick_replies`, rendered as clickable chips in `CopilotChat.tsx`) so a
+"pick between these options" answer is tappable instead of prose the user
+had to retype ("option b") back at the model. The Co-pilot's greeting and
+post-project-pick line are now intent-aware for the suggest-automation
+flow ("Which project would you like to set up an automation for?" instead
+of the generic Q&A greeting), and the old "or say 'surprise me'" text
+instruction became an actual clickable chip ("Analyze my telemetry and
+suggest an automation"), reusing the same chip mechanism as project
+selection and quick-replies rather than a third UI pattern.
+
+**Second same-day follow-up, from a real hive-theft-detection session (8
+distinct issues, all fixed):**
+- **Cross-project schema leak (the significant one).** The Co-pilot's
+  system prompt was built from `TelemetryService.get_schema()`'s *global*
+  table list -- TimescaleDB has no per-project table isolation, a
+  "project" is a Mongo-side grouping of Collectors, so every project's
+  Co-pilot saw every other project's tables too. Live symptom: opening the
+  Co-pilot from the Beekeeping project and asking about theft got a reply
+  about vehicle/equipment theft, because vehicle tables were sitting right
+  there in its context. Fixed with `AiService._project_schema`, which
+  derives "tables this project's own Collectors actually write to" the
+  same way `AutomaterEditor.tsx`'s DB Schema panel already does
+  client-side, and scopes the schema block to just those.
+- **SQL validator rejected legitimate CTEs.** `validate_select_only_sql`
+  only accepted a literal `^SELECT` prefix, so an AI-suggested Query Rule
+  using a `WITH ... AS (...) SELECT ...` CTE (needed for a window-function
+  weight-change comparison) failed with "Only single, read-only SELECT
+  statements are allowed" the moment the user tried to run it. Fixed by
+  also accepting a `WITH` prefix -- but that reopens a real hole (Postgres
+  only allows INSERT/UPDATE/DELETE as a *named CTE*, never as a plain
+  FROM-subquery, so rejecting WITH outright had accidentally made a
+  data-modifying CTE structurally impossible); closed it with an explicit
+  keyword blocklist instead. Shared by every SQL entry point (Panel
+  Builder, Query Rules, the Co-pilot's own `query_telemetry`), not just
+  this one.
+- Numbered options and confirmation-style questions ("does this threshold
+  look right?") weren't reliably getting a `[[quick-replies]]` block --
+  the original instruction's "discrete choices" framing apparently didn't
+  read as covering a plain confirmation. Made the trigger condition
+  explicit and closer to exhaustive.
+- The model reliably used `**bold**` and numbered lists despite an
+  explicit "no markdown of any kind" instruction. Stopped fighting it:
+  the prompt now allows both, and `CopilotChat.tsx` actually renders
+  `**bold**` (a small hand-rolled inline parser, not a new dependency)
+  instead of showing literal asterisks.
+- Added an instruction to sanity-check values against real-world domain
+  knowledge before restating them as fact -- the model had said "hives
+  typically weigh 30-2830 kg" (a real hive weighs tens of kilograms, not
+  thousands) as if that were normal.
+- The seed "surprise me" chip and confirmed-working quick-reply chips
+  were re-verified live to render as actual chips, not a message bubble.
+
+**Third same-day follow-up: a full 8-angle code review of the whole
+feature (correctness, reuse, simplification, efficiency, altitude,
+CLAUDE.md conventions) before committing, verified against the running
+backend, surfaced 6 more real issues, all fixed:**
+- The keyword blocklist added for the CTE fix above scanned the *whole*
+  SQL string, including quoted data -- `WHERE action = 'delete'` was
+  rejected for containing the word "delete" as a value, not a statement.
+  Now blanks out string literals before scanning.
+- Allowing `WITH` also allowed `WITH RECURSIVE` -- an unbounded recursive
+  CTE run through the Panel Builder's ad hoc SQL path (which has no query
+  timeout, unlike the Co-pilot's own bounded `query_telemetry`) is a real
+  resource-exhaustion risk. `RECURSIVE` added to the blocklist.
+- `AutomaterEditor.tsx`/`QueryRuleEditor.tsx`'s suggestion-prefill effects
+  only ran on mount, but the Co-pilot chat panel is mounted once at the
+  app-shell level and outlives route navigation -- refining a suggestion
+  and clicking "Open in builder" a second time while already on that
+  route silently kept the first draft's stale values. Now depends on
+  `location.state` instead of running once.
+- `frontend/src/types/ai.ts` hand-copied `RuleSeverity`/`ResolveMode`/
+  `ConditionOperator`/`QueryRuleSchedule` instead of importing the
+  existing ones from `types/automater.ts`/`types/queryRule.ts` -- real
+  duplication risk if those ever changed without this file following.
+  Now imports them (and reuses `ConditionPayload` directly instead of a
+  redundant `ConditionSuggestion`).
+- `_extract_quick_replies` only stripped the *first* `[[quick-replies]]`
+  block, the same non-global mistake already found and fixed for the
+  sibling `[[suggestion-context]]` marker earlier today. Now strips every
+  occurrence (using the *last* block's labels, since the prompt places
+  the real one at the end of the answer) and the frontend gained a
+  matching backstop regex, mirroring the suggestion-context treatment.
+- If the model's entire final answer was just a `[[quick-replies]]` block
+  with no prose, extraction left an empty string, which raised a hard
+  error and silently discarded a suggestion already built earlier in the
+  same turn. Now falls back to a plain line instead of failing when a
+  suggestion exists.
+
+Prioritized by portfolio-project relevance (does a visitor ever see it,
+does it make the demo look broken, is it cheap to fix) over
+production-scale concerns -- deliberately left unfixed: an unguarded
+plugin-registry lookup that would only break if a Collector's plugin type
+is later renamed/removed (low odds, clean 404 if it ever happens), a
+latent `\n\n`-prefix gap in the suggestion-context strip regex with no
+observed trigger, and two efficiency findings (redundant service
+construction in `get_ai_service()`, a full schema+collector refetch per
+Co-pilot turn) that are invisible at demo scale.
+
+**Fourth same-day follow-up: `suggest_automation`/`list_existing_rules`
+are no longer gated behind an `intent` flag -- they're available in every
+Co-pilot conversation now.** A real session opened the plain Co-pilot
+(the generic icon, not the dedicated "Suggest an automation" button on
+`/automaters`/`/query-rules`) and typed "I want to create a rule." Five
+rounds of increasingly detailed clarifying questions later -- including a
+real telemetry check -- the model said "I don't have the ability to
+create or modify rules directly," because it genuinely didn't: the
+suggestion tools were only ever attached to the tool list when
+`intent="suggest-automation"`, which only that one button ever set.
+
+Rather than making the dead end fail faster, removed the gate entirely:
+`COPILOT_TOOLS` (`app/ai/tools.py`) is now always the full five-tool set,
+`build_copilot_system_prompt` always includes the rule-creation guidance
+(reworded to trigger off the model recognizing intent from the user's own
+words -- "I want to create a rule," "alert me when..." -- rather than an
+externally-set flag), and `CopilotQuestionRequest.intent` /
+`answer_copilot_question`'s `intent` param are gone from the backend
+entirely. `intent` still exists as a `CopilotChat.tsx` prop -- opening via
+the dedicated button still shows an intent-aware greeting and a seed
+suggestion chip -- but it's now purely local UI framing, never sent to the
+server; the model's own judgment (already relied on to pick between the
+other tools correctly) keeps `suggest_automation` from firing on an
+unrelated question, the same way `flag_missing_context` already does.
+
+Also addressed directly: the same session's answers were long, multi-
+paragraph walls of text bundling 3-4 questions into one turn before ever
+proposing anything. Added an explicit brevity instruction (a few sentences
+per turn, one or two questions at most) and a "propose a fast, adjustable
+draft with reasonable defaults instead of interrogating for every
+parameter first" instruction -- refinement afterward is cheap (that's what
+quick-replies are for), so front-loading every possible question isn't
+necessary.
+
+Re-verified live, replaying the reported scenario from the plain Co-pilot
+icon: "I want to create a rule" → "detect co2 anomalies, spikes
+specifically" → one grounded threshold question with quick-reply chips →
+a working suggestion card, in 3 short turns instead of 6 long ones ending
+in refusal.
+
 ## 2026-07-16
 
 **IoTOps is live at https://iotops.online.** Deployed on the shared

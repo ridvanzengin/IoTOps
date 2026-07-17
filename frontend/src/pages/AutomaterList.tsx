@@ -12,6 +12,7 @@ import {
 import { listProjects } from "../api/project";
 import { ChevronIcon, MoreIcon } from "../components/icons";
 import { StatusBadge } from "../components/StatusBadge";
+import { useEvents } from "../context/EventsContext";
 import type { Automater, Rule } from "../types/automater";
 import type { Project } from "../types/project";
 import "./Collector.css";
@@ -27,6 +28,7 @@ function conditionsSummary(rule: Rule): string {
 }
 
 export function AutomaterList() {
+  const { openCopilotPanel } = useEvents();
   const [automaters, setAutomaters] = useState<Automater[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -105,9 +107,14 @@ export function AutomaterList() {
     <main className="collector-page">
       <div className="collector-page__header">
         <h1>Automation</h1>
-        <Link className="button button--primary" to="/automaters/new">
-          + New Rule
-        </Link>
+        <div className="collector-page__header-actions">
+          <button type="button" className="button" onClick={() => openCopilotPanel("suggest-automation")}>
+            Suggest an automation
+          </button>
+          <Link className="button button--primary" to="/automaters/new">
+            + New Rule
+          </Link>
+        </div>
       </div>
 
       {error && <p className="collector-page__error">{error}</p>}

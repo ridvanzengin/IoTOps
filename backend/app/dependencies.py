@@ -135,6 +135,10 @@ async def get_ai_service() -> AiService:
         project_service=await get_project_service(),
         anthropic_client=get_anthropic_client(),
         anthropic_model=settings.anthropic_model,
+        automater_service=get_automater_service(),
+        query_rule_service=await get_query_rule_service(),
+        collector_service=get_collector_service(),
+        plugin_registry=get_plugin_registry(),
     )
 
 

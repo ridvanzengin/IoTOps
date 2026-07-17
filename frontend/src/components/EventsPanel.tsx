@@ -115,7 +115,7 @@ export function EventsPanel() {
       </div>
       {activePanel.kind === "copilot" ? (
         <div className="events-panel__body">
-          <CopilotChat />
+          <CopilotChat key={activePanel.intent ?? "default"} intent={activePanel.intent} />
         </div>
       ) : (
         <div className="events-panel__body">

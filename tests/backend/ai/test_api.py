@@ -11,9 +11,19 @@ from app.dependencies import get_ai_service
 from app.event.repository import EventRepository
 from app.event.service import EventService
 from app.main import app
+from app.plugin.registry import build_default_registry
 from app.telemetry.repository import TelemetryRepository
 from app.telemetry.service import TelemetryService
-from tests.backend.ai.fakes import FakeAnthropicClient, FakeProjectService, message, text_block, tool_use_block
+from tests.backend.ai.fakes import (
+    FakeAnthropicClient,
+    FakeAutomaterService,
+    FakeCollectorService,
+    FakeProjectService,
+    FakeQueryRuleService,
+    message,
+    text_block,
+    tool_use_block,
+)
 from tests.backend.telemetry.fakes import FakePool
 
 
@@ -36,6 +46,10 @@ def _client_with_handler(handler, anthropic_responses: list | None = None) -> Te
         project_service=FakeProjectService(),
         anthropic_client=FakeAnthropicClient(anthropic_responses or []),
         anthropic_model="claude-haiku-4-5",
+        automater_service=FakeAutomaterService(),
+        query_rule_service=FakeQueryRuleService(),
+        collector_service=FakeCollectorService(),
+        plugin_registry=build_default_registry(),
     )
     app.dependency_overrides[get_ai_service] = lambda: service
     return TestClient(app)
@@ -168,6 +182,33 @@ def test_copilot_returns_200_with_answer() -> None:
     assert response.status_code == 200
     assert response.json()["answer"] == "No occurrences in the last 24 hours."
     assert response.json()["needs_context"] is None
+    assert response.json()["quick_replies"] is None
+
+
+def test_copilot_returns_quick_replies_when_offered() -> None:
+    client = _client_with_handler(
+        _unused_ollama_handler,
+        anthropic_responses=[
+            message(
+                text_block(
+                    "Real-time or scheduled?\n\n"
+                    "[[quick-replies]]\n"
+                    "Real-time\n"
+                    "Scheduled\n"
+                    "[[/quick-replies]]"
+                )
+            )
+        ],
+    )
+
+    response = client.post(
+        "/api/ai/copilot",
+        json={"project_id": "11111111-1111-1111-1111-111111111111", "question": "detect X"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "Real-time or scheduled?"
+    assert response.json()["quick_replies"] == ["Real-time", "Scheduled"]
 
 
 def test_copilot_returns_needs_context_when_flagged() -> None:
@@ -186,6 +227,48 @@ def test_copilot_returns_needs_context_when_flagged() -> None:
 
     assert response.status_code == 200
     assert response.json()["needs_context"] == {"column": "val1", "reason": "no unit given"}
+
+
+def test_copilot_returns_suggestion_from_a_plain_conversation_with_no_intent() -> None:
+    # Regression: this used to require the client to set intent=
+    # "suggest-automation" (only sent by the dedicated "Suggest an
+    # automation" button) for suggest_automation to be available at all.
+    # A real session showed a plain "I want to create a rule" typed into
+    # the ordinary Co-pilot -- no intent, no special entry point -- being
+    # told the AI couldn't create rules, because the tool genuinely wasn't
+    # in that conversation's tool list. It's always available now.
+    client = _client_with_handler(
+        _unused_ollama_handler,
+        anthropic_responses=[
+            message(
+                tool_use_block(
+                    "suggest_automation",
+                    {
+                        "kind": "automater_rule",
+                        "name": "High temperature",
+                        "severity": "high",
+                        "identifiers": ["device_id"],
+                        "table": "device_metrics",
+                        "conditions": [{"column": "temperature", "operator": ">", "value": 90}],
+                    },
+                )
+            ),
+            message(text_block("Here's a draft rule.")),
+        ],
+    )
+
+    response = client.post(
+        "/api/ai/copilot",
+        json={
+            "project_id": "11111111-1111-1111-1111-111111111111",
+            "question": "I want to create a rule",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["suggestion"]["kind"] == "automater_rule"
+    assert body["suggestion"]["state"]["table"] == "device_metrics"
 
 
 def test_copilot_returns_502_on_anthropic_failure() -> None:

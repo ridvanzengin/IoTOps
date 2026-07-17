@@ -174,3 +174,91 @@ def test_copilot_system_prompt_instructs_against_fabricating_answers() -> None:
     prompt = build_copilot_system_prompt(_schema(), now=now)
 
     assert "say so plainly" in prompt
+
+
+def test_copilot_system_prompt_instructs_quick_replies_format() -> None:
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "[[quick-replies]]" in prompt
+    assert "[[/quick-replies]]" in prompt
+
+
+def test_copilot_system_prompt_requires_quick_replies_for_confirmation_questions() -> None:
+    # Regression: a live session showed the model asking confirmation-
+    # style questions ("does this approach make sense?") without a
+    # quick-replies block -- the original instruction only mentioned
+    # "discrete choices", which the model apparently didn't read as
+    # covering a yes/no confirmation. Made explicit.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "confirm a proposed approach" in prompt
+    assert "yes/no-shaped question" in prompt
+
+
+def test_copilot_system_prompt_allows_bold_and_numbered_lists() -> None:
+    # Regression: the model reliably uses **bold**/numbered lists to
+    # enumerate options despite an earlier "no markdown of any kind"
+    # instruction -- rather than keep fighting a strong model tendency,
+    # the frontend now renders both, so the prompt should say so instead
+    # of forbidding formatting it's actually going to receive raw.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "**bold**" in prompt
+    assert "## headers" in prompt  # still disallowed
+
+
+def test_copilot_system_prompt_instructs_sanity_checking_implausible_values() -> None:
+    # Regression: the model stated "hives typically weigh 30-2830 kg" as
+    # if that were a normal fact -- a real hive weighs tens of kilograms,
+    # not thousands. It should flag an implausible magnitude rather than
+    # repeat it uncritically.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "physically implausible" in prompt
+
+
+def test_copilot_system_prompt_always_includes_suggestion_tools_and_guidance() -> None:
+    # Regression: these used to be gated behind an `intent` flag only set
+    # when the panel was opened via the dedicated "Suggest an automation"
+    # button. A real session showed a plain "I want to create a rule"
+    # typed into the ordinary Co-pilot getting a long conversation that
+    # ended in "I don't have the ability to create rules" -- the tool
+    # genuinely wasn't there. Every conversation gets the full tool set now.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "suggest_automation" in prompt
+    assert "list_existing_rules" in prompt
+    assert "automater_rule" in prompt
+    assert "query_rule" in prompt
+    assert "rule-creation request" in prompt
+
+
+def test_copilot_system_prompt_instructs_proposing_a_fast_draft_over_interrogating() -> None:
+    # Regression: a real session asked the user roughly 15 clarifying
+    # questions across 5 rounds before ever proposing a draft. The prompt
+    # should push toward a fast, adjustable first draft instead.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "Don't interrogate the user for every parameter" in prompt
+
+
+def test_copilot_system_prompt_instructs_brevity() -> None:
+    # Regression: the same real session's answers were long, multi-
+    # paragraph walls of text with several questions bundled into one turn.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "Be brief" in prompt

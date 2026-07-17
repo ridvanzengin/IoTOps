@@ -56,6 +56,42 @@
   color: var(--accent-h);
 }
 
+.copilot-chat__suggestion-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  align-self: flex-start;
+  max-width: 90%;
+  margin-top: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+  background: var(--accent-bg);
+}
+
+.copilot-chat__suggestion-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-h);
+}
+
+.copilot-chat__suggestion-action {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--accent-border);
+  background: var(--bg);
+  color: var(--accent-h);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.copilot-chat__suggestion-action:hover {
+  background: var(--accent-border);
+}
+
 .copilot-chat__typing-cursor {
   display: inline-block;
   width: 2px;

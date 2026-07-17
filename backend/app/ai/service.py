@@ -1,3 +1,4 @@
+import json
 import re
 from datetime import datetime, timezone
 from uuid import UUID
@@ -5,27 +6,101 @@ from uuid import UUID
 import anthropic
 import httpx
 
-from app.ai.models import AiVariableHint, CopilotMessage, NeedsContext
+from app.ai.models import AiVariableHint, CopilotMessage, CopilotSuggestion, NeedsContext
 from app.ai.prompts import build_copilot_system_prompt, build_query_rule_sql_prompt, build_sql_prompt
 from app.ai.tools import (
     COPILOT_TOOLS,
     run_flag_missing_context,
+    run_list_existing_rules,
     run_query_occurrences,
     run_query_telemetry,
+    run_suggest_automation,
 )
+from app.automater.service import AutomaterService
+from app.collector.models import Collector
+from app.collector.service import CollectorService
 from app.event.service import EventService
+from app.plugin.registry import PluginRegistry
 from app.project.service import ProjectService
+from app.query_rule.service import QueryRuleService
 from app.shared.exceptions import AiGenerationError, InvalidQueryError
 from app.shared.validators import validate_select_only_sql
+from app.telemetry.models import TelemetryTableSchema
 from app.telemetry.service import TelemetryService
 
-MAX_COPILOT_ITERATIONS = 4
+# A suggestion turn can chain several tool calls before a final answer
+# (list_existing_rules, one or more query_telemetry checks across
+# different columns/tables, suggest_automation, then the text response).
+# Live-tested against a real cross-table request ("weight loss + elevated
+# sound together") that genuinely needed more round-trips than a
+# single-signal one -- 6 wasn't enough and exhausted with a hard error.
+# 10 gives real headroom; each iteration is one cheap Haiku call, so the
+# cost of a few extra unused iterations on simpler turns is negligible.
+MAX_COPILOT_ITERATIONS = 10
+
+# Marks a compact, machine-readable recap of a turn's suggestion, appended
+# to the *stored* answer text (not shown in the chat bubble -- see
+# CopilotChat.tsx's stripping) so a later refinement turn ("use max
+# instead") is grounded on the exact prior proposal once this round-trips
+# back as history, not the model's own paraphrased recollection of it. See
+# development-plan.md's "One real technical gotcha" note.
+_SUGGESTION_CONTEXT_START = "\n\n[[suggestion-context]]"
+_SUGGESTION_CONTEXT_END = "[[/suggestion-context]]"
+
+# Lets the model offer a small set of clickable choices (see
+# build_copilot_system_prompt's own instructions for the exact format)
+# instead of prose-only options the user would have to retype. Parsed out
+# of the final answer and returned as CopilotAnswerResponse.quick_replies
+# -- unlike the suggestion recap above, these don't need to round-trip as
+# history: once clicked, the choice becomes a normal user message, and the
+# prose already explains each option well enough for later reference.
+_QUICK_REPLIES_RE = re.compile(
+    r"\n*\[\[quick-replies\]\]\s*\n(.*?)\n\[\[/quick-replies\]\]\s*", re.DOTALL
+)
 
 _CODE_FENCE_RE = re.compile(r"```(?:sql)?", re.IGNORECASE)
 
 
+def _extract_quick_replies(text: str) -> tuple[str, list[str] | None]:
+    matches = list(_QUICK_REPLIES_RE.finditer(text))
+    if not matches:
+        return text, None
+    # Use the *last* block's labels -- the system prompt places the real
+    # quick-replies block "at the very end of the answer" (see
+    # build_copilot_system_prompt), so if the model also echoes a stale
+    # one from earlier history, the final occurrence is the one actually
+    # meant for this turn. Strip *every* occurrence from the text either
+    # way -- the sibling suggestion-context marker was observed live being
+    # echoed a second time by the model (mimicking what it saw in its own
+    # prior-turn history), and stripping only the first match there left a
+    # raw duplicate visible in the chat bubble. Defending the same way
+    # here even though it hasn't been directly observed for this marker.
+    labels = [line.strip(" -*\t") for line in matches[-1].group(1).splitlines()]
+    labels = [label for label in labels if label]
+    stripped = _QUICK_REPLIES_RE.sub("", text).strip()
+    return stripped, labels or None
+
+
 def _strip_markdown_fences(text: str) -> str:
     return _CODE_FENCE_RE.sub("", text).strip()
+
+
+def _collector_table_names(collectors: list[Collector], registry: PluginRegistry) -> set[str]:
+    # Mirrors AutomaterEditor.tsx's own inputTableNames -- TimescaleDB has
+    # no per-project table isolation (a "project" is a Mongo-side grouping
+    # of Collectors/Automaters, not something the database itself knows
+    # about), so which tables "belong" to a project has to be derived from
+    # that project's own Collectors' inputs, same as the frontend already
+    # does for the DB Schema panel.
+    names: set[str] = set()
+    for collector in collectors:
+        for input_plugin in collector.inputs:
+            override = input_plugin.configuration.get("name_override")
+            if isinstance(override, str) and override:
+                names.add(override)
+            else:
+                names.add(registry.get(input_plugin.plugin_type).telegraf_name)
+    return names
 
 
 class AiService:
@@ -39,6 +114,10 @@ class AiService:
         project_service: ProjectService,
         anthropic_client: anthropic.AsyncAnthropic,
         anthropic_model: str,
+        automater_service: AutomaterService,
+        query_rule_service: QueryRuleService,
+        collector_service: CollectorService,
+        plugin_registry: PluginRegistry,
     ) -> None:
         self._telemetry_service = telemetry_service
         self._http_client = http_client
@@ -51,6 +130,14 @@ class AiService:
         self._project_service = project_service
         self._anthropic_client = anthropic_client
         self._anthropic_model = anthropic_model
+        # Only used by the list_existing_rules tool -- see
+        # _execute_copilot_tool.
+        self._automater_service = automater_service
+        self._query_rule_service = query_rule_service
+        # Only used to scope the Co-pilot's own schema block to the current
+        # project's tables -- see _project_schema.
+        self._collector_service = collector_service
+        self._plugin_registry = plugin_registry
 
     async def generate_sql(
         self, nl_query: str, variables: list[AiVariableHint] | None = None
@@ -94,9 +181,12 @@ class AiService:
         return sql
 
     async def answer_copilot_question(
-        self, project_id: UUID, question: str, history: list[CopilotMessage]
-    ) -> tuple[str, NeedsContext | None]:
-        schema = await self._telemetry_service.get_schema()
+        self,
+        project_id: UUID,
+        question: str,
+        history: list[CopilotMessage],
+    ) -> tuple[str, NeedsContext | None, CopilotSuggestion | None, list[str] | None]:
+        schema = await self._project_schema(project_id)
         project = await self._project_service.get(project_id)
         now = datetime.now(timezone.utc)
         system = build_copilot_system_prompt(schema, now=now, ai_context=project.ai_context)
@@ -104,6 +194,7 @@ class AiService:
             {"role": h.role, "content": h.content} for h in history[-8:]
         ] + [{"role": "user", "content": question}]
         needs_context: NeedsContext | None = None
+        suggestion: CopilotSuggestion | None = None
 
         for _ in range(MAX_COPILOT_ITERATIONS):
             try:
@@ -129,7 +220,22 @@ class AiService:
                     raise AiGenerationError(
                         "The AI didn't return an answer -- try rephrasing the question."
                     )
-                return answer, needs_context
+                answer, quick_replies = _extract_quick_replies(answer)
+                if not answer:
+                    if suggestion is None:
+                        raise AiGenerationError(
+                            "The AI didn't return an answer -- try rephrasing the question."
+                        )
+                    # The model's entire final answer was just a
+                    # quick-replies block with no prose -- rare (the
+                    # system prompt asks for prose plus the block), but
+                    # shouldn't discard an already-drafted suggestion
+                    # from an earlier tool call this same turn.
+                    answer = "Here's a draft for you to review."
+                if suggestion is not None:
+                    recap = json.dumps(suggestion.model_dump(mode="json"))
+                    answer = f"{answer}{_SUGGESTION_CONTEXT_START}{recap}{_SUGGESTION_CONTEXT_END}"
+                return answer, needs_context, suggestion, quick_replies
 
             tool_results = []
             for tool_use in tool_uses:
@@ -142,9 +248,18 @@ class AiService:
                         column=tool_use.input.get("column", ""),
                         reason=tool_use.input.get("reason", ""),
                     )
-                result_text = await self._execute_copilot_tool(
-                    tool_use.name, tool_use.input, project_id
-                )
+                    result_text = run_flag_missing_context(tool_use.input)
+                elif tool_use.name == "suggest_automation":
+                    # Same structural-signal shape as flag_missing_context
+                    # above -- keeps the most recent draft if called more
+                    # than once in one turn (a refinement re-proposing).
+                    result_text, new_suggestion = run_suggest_automation(project_id, tool_use.input)
+                    if new_suggestion is not None:
+                        suggestion = new_suggestion
+                else:
+                    result_text = await self._execute_copilot_tool(
+                        tool_use.name, tool_use.input, project_id
+                    )
                 tool_results.append(
                     {"type": "tool_result", "tool_use_id": tool_use.id, "content": result_text}
                 )
@@ -155,11 +270,27 @@ class AiService:
             "specific question."
         )
 
+    async def _project_schema(self, project_id: UUID) -> list[TelemetryTableSchema]:
+        # Regression: the Co-pilot used to get the *global* TimescaleDB
+        # schema regardless of which project was selected (every table
+        # from every project's Collectors), so it would ask about vehicle
+        # or solar-panel theft for a beekeeping project just because those
+        # tables happened to exist somewhere else. Scoped to exactly the
+        # tables this project's own Collectors write to, same as
+        # AutomaterEditor.tsx's own DB Schema panel already does
+        # client-side.
+        schema = await self._telemetry_service.get_schema()
+        collectors = [c for c in await self._collector_service.list() if c.project_id == project_id]
+        table_names = _collector_table_names(collectors, self._plugin_registry)
+        return [table for table in schema if table.table in table_names]
+
     async def _execute_copilot_tool(self, name: str, input_: dict, project_id: UUID) -> str:
         if name == "query_occurrences":
             return await run_query_occurrences(self._event_service, project_id, input_)
         if name == "query_telemetry":
             return await run_query_telemetry(self._telemetry_service, input_)
-        if name == "flag_missing_context":
-            return run_flag_missing_context(input_)
+        if name == "list_existing_rules":
+            return await run_list_existing_rules(
+                self._automater_service, self._query_rule_service, project_id
+            )
         return f"Unknown tool: {name}"
