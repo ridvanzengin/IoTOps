@@ -10,7 +10,7 @@ import {
   stopAutomaterDeployment,
 } from "../api/automater";
 import { listProjects } from "../api/project";
-import { ChevronIcon, MoreIcon } from "../components/icons";
+import { ChevronIcon, CopilotIcon, MoreIcon } from "../components/icons";
 import { StatusBadge } from "../components/StatusBadge";
 import { useEvents } from "../context/EventsContext";
 import type { Automater, Rule } from "../types/automater";
@@ -108,10 +108,15 @@ export function AutomaterList() {
       <div className="collector-page__header">
         <h1>Automation</h1>
         <div className="collector-page__header-actions">
-          <button type="button" className="button" onClick={() => openCopilotPanel("suggest-automation")}>
-            Suggest an automation
+          <button
+            type="button"
+            className="button button--primary"
+            onClick={() => openCopilotPanel("suggest-automation")}
+          >
+            <CopilotIcon width={16} height={16} />
+            Ask AI
           </button>
-          <Link className="button button--primary" to="/automaters/new">
+          <Link className="button button--success" to="/automaters/new">
             + New Rule
           </Link>
         </div>
