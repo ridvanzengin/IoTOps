@@ -501,9 +501,11 @@ Ollama) — a deliberate choice for this portfolio project, to demonstrate
 real Claude API usage (including tool calling) on a small budget. Existing
 SQL generation stays on Ollama, untouched.
 
-Architecture: real tool-calling (a manual 4-iteration loop in
+Architecture: real tool-calling (a manual iteration loop —
+`MAX_COPILOT_ITERATIONS = 10`, bumped from an original 4 once a real
+cross-table suggestion request needed more round-trips than that — in
 `AiService.answer_copilot_question`, `backend/app/ai/service.py`), not
-context-stuffing — the model calls two tools on demand rather than having
+context-stuffing — the model calls tools on demand rather than having
 occurrences pre-fetched into every prompt:
 - `query_occurrences` (`backend/app/ai/tools.py`) — structured Event/
   Occurrence lookup, `project_id` bound server-side (never model-facing).
@@ -511,6 +513,10 @@ occurrences pre-fetched into every prompt:
   `validate_select_only_sql` guardrail plus a new row cap and 10s timeout
   (`TelemetryService.run_bounded_query`, addressing the "no runaway-query
   timeout" gap in Known Issues below, at least for this call site).
+- `flag_missing_context`, `list_existing_rules`, `suggest_automation` —
+  added for later slices, see below. All five tools are always in the
+  model's tool list now, in every conversation — see "Lesson learned"
+  under Slice 2 below for why that wasn't the original design.
 
 This unlocks real telemetry-*value* Q&A ("what was the temperature at
 3pm") that a context-stuffing design couldn't answer. Verified end-to-end
@@ -522,19 +528,42 @@ project's $5 budget.
 **Scope for the remaining two slices**:
 
 1. ~~Q&A over what's already stored~~ **Done** — see above.
-2. ~~**Rule suggestions**~~ **Done (2026-07-17)** — proposing a new Rule
-   from an observed telemetry pattern, pre-filled into the existing
+2. ~~**Rule suggestions**~~ **Done (2026-07-17, PR #22).** Proposes a new
+   real-time Automater Rule or scheduled Query Rule from real telemetry
+   stats + existing-rule awareness, pre-filled into the existing
    rule-creation form rather than silently auto-created. See
-   CHANGELOG.md's 2026-07-17 entry and "Future — Suggested Dashboards &
-   Automations" below for the shipped design (now historical, kept for
-   the still-open Slice 3 below).
+   CHANGELOG.md's 2026-07-17/2026-07-18 entries and "Future — Suggested
+   Dashboards & Automations" below for the shipped design (the
+   entry-point/refinement/interoperability decisions there are still
+   accurate; the *tool-availability-gated-by-intent* part is superseded,
+   see the lesson-learned callout right below it).
 3. **Dashboard/panel suggestions** — same idea, proposing a chart from a
    schema + usage pattern, landing in the Panel Builder. Not yet built.
+
+**Lesson learned building Slice 2, apply to Slice 3 from the start:**
+`suggest_automation`/`list_existing_rules` were originally gated behind
+an `intent="suggest-automation"` flag, only set when the panel was opened
+via the dedicated button — the plan below still describes that design. A
+real user session showed a plain "I want to create a rule" typed into
+the ordinary Co-pilot hitting a dead end ("I don't have the ability to
+create rules") because the tool genuinely wasn't attached to that
+conversation. Fixed by making all five tools always available in every
+conversation, gated only by the model's own judgment (the same way it
+already avoids misusing `query_occurrences` on an unrelated question) —
+not by an externally-set flag. **`suggest_panel`/`suggest_dashboard`
+should be always-on tools from the start, not intent-gated**; keep
+`intent` only for what it's still legitimately useful for — UI framing
+(an intent-aware greeting) and, for panel-suggestion specifically,
+skipping the project-picker step when `dashboardId`/`projectId` are
+already known from context.
 
 All three "Suggest..." entry points route through the Co-pilot chat (not
 separate prefilled-form buttons), reusing the tool-calling loop and
 structured-output pattern already built for slice 1 — Slice 2 proved this
-pattern end to end; Slice 3 reuses it as designed.
+pattern end to end (including a live-tested quick-replies mechanism for
+multi-choice/confirmation questions, and prompt tuning for brevity and
+proposing a fast draft over interrogating for every parameter); Slice 3
+reuses it as designed.
 
 ---
 
@@ -639,7 +668,14 @@ Fix opportunistically, not preemptively.
 - **No runaway-query timeout on interactive Panel queries.** Query Rules'
   scheduled evaluation has a hard 10s `asyncpg` timeout
   (`TelemetryRepository.execute_match_query`); the equivalent
-  interactive path (Panel Builder's ad hoc SQL) has none at all.
+  interactive path (Panel Builder's ad hoc SQL) has none at all. One
+  concrete vector through this gap is closed (2026-07-18): allowing `WITH`
+  in `validate_select_only_sql` (for AI-suggested CTEs) briefly reopened
+  it to `WITH RECURSIVE` specifically, since Postgres can spin forever on
+  an unbounded recursive CTE with no query-level timeout to stop it —
+  `RECURSIVE` is now in the forbidden-keyword blocklist. The general gap
+  (any ordinary long-running query, recursive or not, still has no
+  timeout on this path) remains open.
 
 ---
 
@@ -658,6 +694,17 @@ implemented.
 
 ## Decided: all three "Suggest..." entry points open the Co-pilot, not a separate prefilled-form flow
 
+> **Superseded in one specific way (2026-07-18):** the "per-intent system
+> prompt switches in the tool" and "branching logic lives in the prompt"
+> language below described gating *tool availability* on `intent`. That
+> part didn't survive contact with a real user — see the "Lesson learned"
+> callout earlier in this doc (under Milestone 6). `suggest_automation`/
+> `list_existing_rules` are unconditionally in the tool list now; the
+> model decides when to use them from the conversation itself. Everything
+> else below (opening the Co-pilot with an intent rather than a separate
+> form, the `dashboardId`/`projectId` shortcut for panel-suggestion, the
+> three suggestion tools' own read-only introspection) is still the plan.
+
 "Suggest an automation" (on the Automaters/Query Rules list pages),
 "Suggest a dashboard" (on the Dashboards page), and "Suggest a panel" (a
 new option in an existing dashboard's `+` dropdown) all call
@@ -673,16 +720,22 @@ message) far better than a hardcoded decision tree of scripted UI prompts.
 - `ActivePanel`'s `{ kind: "copilot" }` case gains an optional intent field
   (and, for the panel-suggestion entry point specifically, the
   already-known `dashboardId`/`projectId` — no "which project?" step needed
-  there, since it's opened from inside an already-open dashboard).
-- The existing scripted greeting/project-picker (`CopilotChat.tsx`) stays
+  there, since it's opened from inside an already-open dashboard). This
+  part shipped for `suggest-automation` as planned — `intent` is a real,
+  still-used `CopilotChat.tsx` prop, just UI framing only now (greeting
+  text, seed chip), never sent to the backend.
+- ~~The existing scripted greeting/project-picker (`CopilotChat.tsx`) stays
   exactly as shipped for the other two intents — free, deterministic, no
   model call. Once a project is picked, `CopilotChat` switches to a
   per-intent system prompt that instructs the model what to ask and when
   to stop asking and call the suggestion tool. The branching logic lives in
-  the prompt, not in frontend code.
+  the prompt, not in frontend code.~~ The greeting/project-picker part
+  still holds; the tool-switching part doesn't — see the superseded note
+  above.
 - Three new tools alongside `query_occurrences`/`query_telemetry`:
-  `suggest_automation`, `suggest_panel`, `suggest_dashboard`. Each does its
-  own read-only introspection before proposing anything:
+  `suggest_automation` (shipped, always available), `suggest_panel`,
+  `suggest_dashboard` (not yet built — build these always-available too).
+  Each does its own read-only introspection before proposing anything:
   - **What already exists** — a new read tool over current Rules/
     Automaters (for `suggest_automation`) or Panels/Variables (for
     `suggest_panel`/`suggest_dashboard`), so the model doesn't propose a
@@ -753,13 +806,18 @@ hardcoded as a toggle.
 
 ## Recommended build order
 
-1. ~~**Rule suggestions**~~ **Done (2026-07-17)** — smallest complete
-   vertical slice (intent-routed panel open → conversational
-   clarification → `suggest_automation` tool → suggestion card →
-   prefilled `/automaters/new` or `/query-rules/new`). Proved the whole
-   pattern end to end, including live verification against the real
-   Anthropic API (not just mocks) — see CHANGELOG.md's 2026-07-17 entry
-   for a real bug that surfaced only under live testing.
+1. ~~**Rule suggestions**~~ **Done (2026-07-17, PR #22)** — smallest
+   complete vertical slice (panel open → conversational clarification →
+   `suggest_automation` tool → suggestion card → prefilled
+   `/automaters/new` or `/query-rules/new`). Proved the whole pattern end
+   to end, including several rounds of live verification against the real
+   Anthropic API (not just mocks) that each surfaced a real bug mocks
+   alone didn't catch — see CHANGELOG.md's 2026-07-17/2026-07-18 entries.
+   Biggest one: tool availability gated by entry-point `intent` broke a
+   plain "I want to create a rule" typed into the ordinary Co-pilot; fixed
+   by making the tools always-available (see the "Lesson learned" callout
+   above) — build Slices 2/3 that way from the start next time, skip
+   re-discovering this the hard way.
 2. **Panel suggestions** — not yet started. Reuses the same pattern;
    smaller lift since it plugs into the existing Panel Builder prefill
    flow (already used by the NL-to-SQL button), just model-initiated

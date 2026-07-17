@@ -11,7 +11,11 @@ v1.1) has its core engine done — real rule/Redis/Celery logic in both
 custom-telegraf plugins, Automater backend + frontend, automated tests,
 and a persisted Events feature (Mongo-backed, SSE-delivered sidebar with
 activity-bar redesign, Panel-chart overlays) — with the beekeeping
-swarm-alert wiring still open. See
+swarm-alert wiring still open. Milestone 6 (AI Assistant, v1.2) has the
+Co-pilot's Q&A slice and rule-suggestion slice (Slices 1–2) shipped —
+real Anthropic tool-calling, a suggestion always available in every
+conversation (not gated behind a specific entry point), never
+auto-creating anything. See
 [docs/development-plan.md](docs/development-plan.md) for current
 milestone status.
 
