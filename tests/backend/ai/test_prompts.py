@@ -286,6 +286,129 @@ def test_copilot_system_prompt_omits_dashboard_block_when_not_provided() -> None
     assert "currently viewing dashboard" not in prompt
 
 
+def test_copilot_system_prompt_always_includes_dashboard_suggestion_tool_and_guidance() -> None:
+    # Same always-on principle as every other suggestion tool.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "suggest_dashboard" in prompt
+    assert "dashboard-suggestion request" in prompt
+
+
+def test_copilot_system_prompt_dashboard_guidance_instructs_proposing_every_panel() -> None:
+    # The one thing genuinely different from a single panel suggestion --
+    # propose the whole starter set, not just the strongest idea.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "EVERY panel worth having" in prompt
+
+
+def test_copilot_system_prompt_dashboard_guidance_targets_at_least_four_panels() -> None:
+    # User feedback: a 2-panel AI-generated dashboard felt thin compared
+    # to a 4-panel one from another session -- the tool's hard floor of 3
+    # is a rejection threshold, not a target; guidance should push the
+    # model to not just barely clear it.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "aim for at least 4 panels" in prompt
+    assert "the tool rejects fewer than 3" in prompt
+
+
+def test_copilot_system_prompt_dashboard_guidance_forbids_asking_to_add_already_identified_panels() -> None:
+    # Regression: a live session surveyed the data, named 4 candidate
+    # panels in prose, but only included 2 in the suggest_dashboard call
+    # and asked "would you like me to add [the other two] before you
+    # create it?" with quick-replies -- an incomplete first draft (and a
+    # declared Array variable that neither included panel actually used)
+    # for no real benefit over just including everything up front.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "do NOT propose a smaller subset" in prompt
+    assert "never as a way to defer including panels you've already decided are worth having" in prompt
+
+
+def test_copilot_system_prompt_dashboard_guidance_forbids_declaring_an_unused_variable() -> None:
+    # Regression: a live session declared a "Panel Array" variable, but
+    # all 4 proposed panels were flat fleet-wide overviews that never
+    # actually filtered or grouped by it -- a purely decorative variable
+    # that reads as broken to the user, not helpful. An earlier version of
+    # this guidance explicitly permitted this ("declared-but-unused is
+    # fine, for later") -- live testing showed that's not what users want;
+    # a declared variable must be exercised by at least one panel in the
+    # same call, or not declared at all.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "a declared variable is NOT allowed to sit unused" in prompt
+    assert "EARN that variable by including at least one panel" in prompt
+
+
+def test_copilot_system_prompt_dashboard_guidance_requires_declaring_a_used_grouping_column() -> None:
+    # Regression: a live session had the model GROUP BY a genuinely
+    # meaningful entity column (panel_array_id, real values like
+    # 'array-1') in one of its own proposed panels, yet still declared no
+    # variables at all -- an inconsistency the guidance now forbids
+    # outright, not just discourages.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "you MUST declare that column as a variable" in prompt
+
+
+def test_copilot_system_prompt_dashboard_guidance_allows_mixing_overview_and_filtered_panels() -> None:
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "a single dashboard can mix both" in prompt
+
+
+def test_copilot_system_prompt_dashboard_guidance_prefers_filtering_over_high_cardinality_groupby() -> None:
+    # User feedback: real deployments have many instances of a per-entity
+    # column (many device_ids, hives, machines) -- a panel that groups/
+    # series_by's that column to draw one line per entity is unreadable at
+    # that scale. The default should lean toward a variable-filtered (one
+    # entity at a time) or aggregated panel, not a flat many-line overview.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "lean toward filtered-by-variable as the default" in prompt
+    assert "unreadable, overlapping mess" in prompt
+
+
+def test_copilot_system_prompt_dashboard_guidance_requires_variable_sql_agreement() -> None:
+    # Regression: the model described "a Machine filter variable" in
+    # prose and wrote panel sql referencing $machine_id, but the actual
+    # variables list was empty -- every panel silently returned no data.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "these two must always agree" in prompt.lower()
+
+
+def test_copilot_system_prompt_dashboard_guidance_forbids_giving_up_to_prose_after_an_error() -> None:
+    # Regression: a live session had suggest_dashboard fail once (called
+    # with an empty panels list), and instead of fixing the input and
+    # retrying, the model apologized and described the whole dashboard in
+    # prose instead -- no card, nothing for the user to act on.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "Do not respond to a suggest_dashboard error by apologizing" in prompt
+
+
 def test_copilot_system_prompt_includes_dashboard_hint_when_provided() -> None:
     now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
     dashboard_id = uuid4()
@@ -313,6 +436,34 @@ def test_copilot_system_prompt_panel_guidance_forbids_narrating_without_calling_
 
     assert "Never describe a specific proposed panel in prose" in prompt
     assert "leaves the user with nothing to open" in prompt
+
+
+def test_copilot_system_prompt_panel_guidance_requires_checking_distinct_values_before_grouping() -> None:
+    # Regression: a live session grouped by "host" and narrated it in
+    # prose as "4 inverter systems", but the actual distinct values were
+    # Docker container id hex strings -- a genuine hallucination, since a
+    # column's name alone ("host") was treated as evidence it's a real
+    # business entity without ever checking what the values looked like.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "check its actual DISTINCT" in prompt
+    assert "container ids" in prompt
+    assert "hashes, hex strings" in prompt
+
+
+def test_copilot_system_prompt_panel_guidance_warns_against_high_cardinality_groupby() -> None:
+    # Companion to the distinct-values check above: even a genuinely real
+    # entity column (not a hallucination) shouldn't be grouped/series_by'd
+    # directly once it has many instances -- stacking many lines/bars in
+    # one panel is unreadable regardless of whether the entity is real.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "check the COUNT of distinct values" in prompt
+    assert "unreadable, overlapping mess" in prompt
 
 
 def test_copilot_system_prompt_panel_guidance_forbids_generic_menu_for_vague_requests() -> None:

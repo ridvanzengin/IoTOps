@@ -8,15 +8,13 @@ import { NlSqlBuilder } from "../components/NlSqlBuilder";
 import { defaultChartForType, PanelEditor } from "../components/PanelEditor";
 import { SchemaBrowser } from "../components/SchemaBrowser";
 import { DEFAULT_TIME_RANGE } from "../constants/timeRanges";
+import { DEFAULT_POSITION, findFreePosition } from "../utils/panelLayout";
 import { resolveVariablesFrom } from "../utils/variables";
 import type { PanelSuggestionState } from "../types/ai";
-import type { Chart, Panel, PanelPosition, Variable } from "../types/dashboard";
+import type { Chart, PanelPosition, Variable } from "../types/dashboard";
 import type { TelemetrySqlQueryResult } from "../types/telemetry";
 import "./Collector.css";
 import "./PanelBuilder.css";
-
-const DEFAULT_POSITION: PanelPosition = { x: 0, y: 0, width: 6, height: 8 };
-const GRID_COLUMNS = 12;
 
 // Best-effort text insertion, not a SQL parser — consistent with how this app
 // already treats panel SQL as macro-substitutable text rather than an AST.
@@ -30,36 +28,6 @@ function appendWhereClause(sql: string, clause: string): string {
   const hasWhere = /\bWHERE\b/i.test(before);
   const fragment = hasWhere ? `AND ${clause}` : `WHERE ${clause}`;
   return `${before} ${fragment} ${after}`.trimEnd();
-}
-
-function positionsOverlap(a: PanelPosition, b: PanelPosition): boolean {
-  return (
-    a.x < b.x + b.width &&
-    a.x + a.width > b.x &&
-    a.y < b.y + b.height &&
-    a.y + a.height > b.y
-  );
-}
-
-// First-fit shelf packing: try each existing row (y = 0, or just below any
-// panel) left-to-right before falling back to a new row underneath
-// everything, so a new panel lands in an empty slot beside existing panels
-// rather than always starting a fresh row.
-function findFreePosition(panels: Panel[], width: number, height: number): PanelPosition {
-  const candidateYs = [0, ...panels.map((panel) => panel.position.y + panel.position.height)];
-  const sortedYs = Array.from(new Set(candidateYs)).sort((a, b) => a - b);
-
-  for (const y of sortedYs) {
-    for (let x = 0; x + width <= GRID_COLUMNS; x++) {
-      const candidate: PanelPosition = { x, y, width, height };
-      if (!panels.some((panel) => positionsOverlap(candidate, panel.position))) {
-        return candidate;
-      }
-    }
-  }
-
-  const bottom = panels.reduce((max, panel) => Math.max(max, panel.position.y + panel.position.height), 0);
-  return { x: 0, y: bottom, width, height };
 }
 
 export function PanelBuilder() {

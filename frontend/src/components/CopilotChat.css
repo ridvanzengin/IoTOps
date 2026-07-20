@@ -92,6 +92,50 @@
   background: var(--accent-border);
 }
 
+.copilot-chat__suggestion-action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.copilot-chat__suggestion-detail {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.copilot-chat__suggestion-panel-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.copilot-chat__suggestion-panel-type {
+  color: var(--text);
+  opacity: 0.7;
+}
+
+.copilot-chat__thinking {
+  font-weight: 600;
+  background: linear-gradient(90deg, var(--chip), var(--accent), var(--chip));
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: copilot-chat-thinking-shift 2.4s ease-in-out infinite;
+}
+
+@keyframes copilot-chat-thinking-shift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
 .copilot-chat__typing-cursor {
   display: inline-block;
   width: 2px;

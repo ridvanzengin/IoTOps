@@ -134,3 +134,34 @@ async def test_execute_readonly_keeps_most_recent_rows_when_over_limit() -> None
     rows = await repository.execute_readonly(sql, limit=2)
 
     assert rows == ordered_rows[-2:]
+
+
+async def test_execute_readonly_strips_trailing_semicolon_before_wrapping() -> None:
+    # Regression: AI-generated SQL (and hand-typed SQL out of psql habit)
+    # routinely ends with a semicolon. execute_readonly wraps `sql` inside
+    # a CTE to add its own OFFSET -- `WITH _panel_rows AS (SELECT ...;) ...`
+    # is a syntax error in real Postgres even though the inner SELECT
+    # alone is valid, since a semicolon can't appear inside a parenthesized
+    # subquery expression. The fake's regex extraction wouldn't itself
+    # reproduce that syntax error, so this asserts indirectly: the lookup
+    # only succeeds if the semicolon was stripped before wrapping.
+    pool = FakePool(
+        tables=["device_metrics"],
+        query_results={"SELECT avg(temperature) FROM device_metrics": [{"avg": 21.5}]},
+    )
+    repository = TelemetryRepository(pool)
+
+    rows = await repository.execute_readonly("SELECT avg(temperature) FROM device_metrics;", limit=10)
+
+    assert rows == [{"avg": 21.5}]
+
+
+async def test_execute_bounded_strips_trailing_semicolon_before_wrapping() -> None:
+    sql = "SELECT time, temperature FROM hive_metrics"
+    rows = _rows(3)
+    pool = FakePool(tables=["hive_metrics"], query_results={sql: rows})
+    repository = TelemetryRepository(pool)
+
+    result = await repository.execute_bounded(sql + ";", limit=10, timeout_seconds=10.0)
+
+    assert result == rows

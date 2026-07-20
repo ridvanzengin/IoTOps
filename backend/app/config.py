@@ -27,16 +27,12 @@ class Settings(BaseSettings):
     docker_network: str = "iotops"
     telegraf_image: str = "telegraf:1.32-alpine"
     automater_telegraf_image: str = "custom-telegraf:latest"
-    # host.docker.internal, not localhost: the backend runs inside a
-    # container (see docker-compose.yml), so "localhost" would mean the
-    # container itself, not the host machine running Ollama.
-    ollama_base_url: str = "http://host.docker.internal:11434"
-    ollama_model: str = "gemma4:latest"
-    # User's own Anthropic API key for the AI Co-pilot chat (app/ai/service.py's
-    # answer_copilot_question) -- separate from the Ollama-backed SQL
-    # generation above, which needs no key. Empty by default; set via .env.
-    # Not validated at startup -- a missing/invalid key surfaces as an
-    # AiGenerationError on the first copilot request.
+    # User's own Anthropic API key -- backs both the AI Co-pilot chat
+    # (app/ai/service.py's answer_copilot_question) and NL-to-SQL
+    # generation (generate_sql/generate_query_rule_sql), the only AI
+    # backend in the app now. Empty by default; set via .env. Not
+    # validated at startup -- a missing/invalid key surfaces as an
+    # AiGenerationError on the first AI request.
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-haiku-4-5"
     # False by default -- full read/write functionality out of the box for

@@ -605,15 +605,16 @@ Only JSON datasets.
 
 # AI Integration
 
-Two separate model backends, deliberately not unified behind one
-provider-selection setting:
+One model backend (Anthropic, `claude-haiku-4-5`, the user's own API key)
+for every AI feature -- there used to be a separate local Ollama instance
+for SQL generation specifically, retired in favor of a single API backend
+for everything the AI does:
 
-- **`POST /api/ai/sql`** and **`POST /api/ai/query-rule-sql`** — implemented,
-  Ollama-backed. Ground the prompt with the live telemetry schema and
+- **`POST /api/ai/sql`** and **`POST /api/ai/query-rule-sql`** —
+  implemented. Ground the prompt with the live telemetry schema and
   enforce that the response is a single read-only SELECT statement before
   returning it to the caller.
-- **`POST /api/ai/copilot`** — implemented, Anthropic-backed (`claude-haiku-4-5`,
-  the user's own API key). A real tool-calling conversation (`AiService.
+- **`POST /api/ai/copilot`** — implemented. A real tool-calling conversation (`AiService.
   answer_copilot_question`), not a single-shot prompt: the model calls
   `query_occurrences`/`query_telemetry` on demand rather than having
   context pre-fetched, and answers only from tool results.

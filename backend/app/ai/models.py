@@ -1,11 +1,60 @@
+import re
 from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
 from app.automater.models import Condition, ResolveMode, RuleSeverity
-from app.dashboard.models import BarChart, Chart, GaugeChart, LineChart, PieChart, Query, ScatterChart
+from app.dashboard.models import (
+    BarChart,
+    Chart,
+    GaugeChart,
+    LineChart,
+    PieChart,
+    Query,
+    ScatterChart,
+    Variable,
+    validate_variables,
+)
 from app.query_rule.models import QueryRuleSchedule
+
+
+def _validate_chart_completeness(chart: Chart) -> None:
+    # Shared by PanelSuggestionState and DashboardSuggestionState -- a
+    # *suggestion* must have every field a real chart needs, unlike an
+    # in-progress PanelEditor.tsx draft, which legitimately has blank
+    # axis/field names before the user finishes it (see PanelSuggestionState's
+    # own comment). Raising here means an incomplete draft reads as a
+    # retryable tool error (see run_suggest_panel/run_suggest_dashboard),
+    # not a suggestion card with blank chart fields.
+    if isinstance(chart, (LineChart, BarChart, ScatterChart)):
+        if not chart.x_axis or not chart.y_axis:
+            raise ValueError("line/bar/scatter panel suggestion requires x_axis and y_axis")
+    elif isinstance(chart, PieChart):
+        if not chart.label_field or not chart.value_field:
+            raise ValueError("pie panel suggestion requires label_field and value_field")
+    elif isinstance(chart, GaugeChart):
+        if not chart.value_field:
+            raise ValueError("gauge panel suggestion requires value_field")
+
+
+# Matches a $token the same way substitute_macros (app/shared/sql_macros.py)
+# does when resolving one -- used here in the opposite direction, to find
+# which variable names a panel's SQL *references* rather than to resolve
+# them, so DashboardSuggestionState can catch a panel referencing a
+# variable that was never declared in the same suggest_dashboard call.
+# Live-tested: the model described "a Machine filter variable" in its own
+# prose and wrote every panel's SQL against $machine_id, but the actual
+# tool call's `variables` list was empty -- nothing caught the mismatch,
+# so the dashboard was created with panels silently querying a macro that
+# was never substituted (Postgres saw the literal text "$machine_id" in
+# the WHERE clause), and every panel came back empty.
+_VARIABLE_TOKEN_RE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
+_TIME_RANGE_MACROS = {"__timeFrom", "__timeTo"}
+
+
+def _referenced_variable_names(sql: str) -> set[str]:
+    return {name for name in _VARIABLE_TOKEN_RE.findall(sql) if name not in _TIME_RANGE_MACROS}
 
 
 class AiVariableHint(BaseModel):
@@ -126,25 +175,119 @@ class PanelSuggestionState(BaseModel):
 
     @model_validator(mode="after")
     def _validate_complete(self) -> "PanelSuggestionState":
-        # Chart's own field types don't enforce non-empty axis/field names
-        # (a real, in-progress PanelEditor.tsx draft legitimately has
-        # those blank before the user finishes it) -- a *suggestion*
-        # specifically needs its own completeness check, mirroring
-        # AutomaterRuleSuggestionState/QueryRuleSuggestionState's own
-        # validators, so an incomplete draft reads as a retryable tool
-        # error (see run_suggest_panel) rather than a suggestion card with
-        # blank chart fields.
         if not self.query.sql:
             raise ValueError("panel suggestion requires a non-empty sql query")
-        if isinstance(self.chart, (LineChart, BarChart, ScatterChart)):
-            if not self.chart.x_axis or not self.chart.y_axis:
-                raise ValueError("line/bar/scatter panel suggestion requires x_axis and y_axis")
-        elif isinstance(self.chart, PieChart):
-            if not self.chart.label_field or not self.chart.value_field:
-                raise ValueError("pie panel suggestion requires label_field and value_field")
-        elif isinstance(self.chart, GaugeChart):
-            if not self.chart.value_field:
-                raise ValueError("gauge panel suggestion requires value_field")
+        _validate_chart_completeness(self.chart)
+        return self
+
+
+class DashboardPanelSuggestion(BaseModel):
+    # Same shape as PanelSuggestionState minus dashboard_id -- nested
+    # inside DashboardSuggestionState, so the dashboard it belongs to is
+    # implicit (it doesn't exist yet at proposal time, unlike a standalone
+    # panel suggestion which always targets a real, already-existing
+    # dashboard).
+    title: str
+    chart: Chart
+    query: Query
+    time_range: str = "1h"
+
+
+class DashboardSuggestionState(BaseModel):
+    project_id: UUID
+    name: str
+    description: str = ""
+    variables: list[Variable] = Field(default_factory=list)
+    panels: list[DashboardPanelSuggestion]
+
+    @model_validator(mode="after")
+    def _validate_complete(self) -> "DashboardSuggestionState":
+        if len(self.panels) < 3:
+            # A single- or two-panel "dashboard" defeats the entire point
+            # of this tool over suggest_panel -- live-tested repeatedly:
+            # the model settling for 1-2 panels when the data supported
+            # more, and separately (see MAX_COPILOT_ITERATIONS handling)
+            # an iteration-budget exhaustion surfacing a partial draft as
+            # if it were final. suggest_panel exists for the "just one or
+            # two things worth monitoring" case; a suggest_dashboard call
+            # should never settle for fewer than 3.
+            raise ValueError(
+                "dashboard suggestion requires at least 3 panels -- if there's only one or "
+                "two things worth monitoring, use suggest_panel instead"
+            )
+        declared_names = {v.name for v in self.variables}
+        used_names: set[str] = set()
+        for index, panel in enumerate(self.panels):
+            # Identify the offending panel by position + title, not just
+            # the bare invariant text -- a bare ValueError raised from
+            # inside a model_validator over a list gets wrapped by
+            # Pydantic with a dump of the *entire* DashboardSuggestionState
+            # (every panel, every variable, as repr'd Python objects) as
+            # "input_value", not just the one bad panel. For a 5-panel
+            # dashboard that's a wall of noise the model has to parse to
+            # find the one relevant fact -- live-tested to actually cause
+            # the model to give up on retrying suggest_dashboard and
+            # describe the dashboard in prose instead (no card at all).
+            # Naming the panel up front keeps the actionable part of the
+            # message short regardless of how much noise Pydantic appends.
+            try:
+                if not panel.query.sql:
+                    raise ValueError("requires a non-empty sql query")
+                _validate_chart_completeness(panel.chart)
+                # A panel can only filter by a variable this same call
+                # actually declares -- see _referenced_variable_names'
+                # own comment for the live-tested failure this catches
+                # (SQL referencing $machine_id with an empty variables
+                # list, so the token was never substituted and every
+                # panel came back with no data).
+                referenced = _referenced_variable_names(panel.query.sql)
+                undeclared = referenced - declared_names
+                if undeclared:
+                    names = ", ".join(f"${name}" for name in sorted(undeclared))
+                    raise ValueError(
+                        f"references undeclared variable(s) {names} -- either add them to "
+                        "variables or remove the reference from the sql"
+                    )
+                used_names |= referenced
+            except ValueError as exc:
+                raise ValueError(f"panel {index} ('{panel.title}') {exc}") from exc
+        # A chain parent (e.g. Apiary, predicate_variable for Hive) counts
+        # as used even without its own direct $apiary reference in any
+        # panel's sql, as long as the variable it narrows is used -- it's
+        # still doing real work narrowing the child's own options on the
+        # dashboard, not decoration. Walk the chain from each used variable
+        # up through predicate_variable to propagate "used" to its
+        # ancestors.
+        by_name = {v.name: v for v in self.variables}
+        for name in list(used_names):
+            current = by_name.get(name)
+            while current is not None and current.predicate_variable:
+                used_names.add(current.predicate_variable)
+                current = by_name.get(current.predicate_variable)
+        unused_names = declared_names - used_names
+        if unused_names:
+            # The mirror-image bug of the undeclared-variable check above,
+            # live-tested just as directly: the model declared a Panel
+            # Array variable "for later" but every proposed panel was a
+            # flat fleet-wide overview that never actually filtered or
+            # grouped by it -- a purely decorative variable the user has
+            # no way to tell is meant to do anything. A declared variable
+            # earns its place by being exercised by at least one panel in
+            # THIS SAME call (a filtered panel, or a per-entity comparison
+            # panel grouping by the same column) -- it's not a "just in
+            # case, for later" placeholder.
+            names = ", ".join(f"${name}" for name in sorted(unused_names))
+            raise ValueError(
+                f"declares variable(s) {names} that no panel actually uses -- either add a "
+                "panel that filters or groups by at least one of them, or remove them from "
+                "variables"
+            )
+        # Reuses the same chain-order invariant DashboardInput itself
+        # enforces (a predicate_variable must reference an earlier name in
+        # this same list) -- catching a broken chain here reads as a
+        # retryable tool error the model can fix, not a 422 from
+        # POST /api/dashboard after the user already clicked "Create".
+        validate_variables(self.variables)
         return self
 
 
@@ -166,14 +309,23 @@ class PanelSuggestion(BaseModel):
     state: PanelSuggestionState
 
 
-# Discriminated on `kind` -- the frontend derives which route to prefill
-# (/automaters/new, /query-rules/new, or /dashboards/{dashboard_id}/
-# panels/new) from it rather than the backend sending a route string, so
-# that routing decision isn't duplicated in two layers. See
-# app/ai/tools.py's SUGGEST_AUTOMATION_TOOL/SUGGEST_PANEL_TOOL and
+class DashboardSuggestion(BaseModel):
+    kind: Literal["dashboard"] = "dashboard"
+    label: str
+    state: DashboardSuggestionState
+
+
+# Discriminated on `kind` -- the frontend derives which route/action to
+# take (/automaters/new, /query-rules/new, /dashboards/{dashboard_id}/
+# panels/new, or -- for "dashboard" -- a direct create-then-navigate
+# rather than a route at all, see CopilotChat.tsx's suggestion-card
+# handling) from it rather than the backend sending a route string, so
+# that decision isn't duplicated in two layers. See app/ai/tools.py's
+# SUGGEST_AUTOMATION_TOOL/SUGGEST_PANEL_TOOL/SUGGEST_DASHBOARD_TOOL and
 # AiService._execute_copilot_tool.
 CopilotSuggestion = Annotated[
-    AutomaterRuleSuggestion | QueryRuleSuggestion | PanelSuggestion, Field(discriminator="kind")
+    AutomaterRuleSuggestion | QueryRuleSuggestion | PanelSuggestion | DashboardSuggestion,
+    Field(discriminator="kind"),
 ]
 
 

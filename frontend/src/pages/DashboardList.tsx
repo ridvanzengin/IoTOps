@@ -3,7 +3,8 @@ import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { deleteDashboard, listDashboards } from "../api/dashboard";
 import { listProjects } from "../api/project";
-import { MoreIcon } from "../components/icons";
+import { CopilotIcon, MoreIcon } from "../components/icons";
+import { useEvents } from "../context/EventsContext";
 import type { Dashboard } from "../types/dashboard";
 import type { Project } from "../types/project";
 import "./Collector.css";
@@ -15,6 +16,7 @@ export function DashboardList() {
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const { openCopilotPanel } = useEvents();
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -67,9 +69,19 @@ export function DashboardList() {
     <main className="collector-page">
       <div className="collector-page__header">
         <h1>Dashboards</h1>
-        <Link className="button button--primary" to="/dashboards/new">
-          + New Dashboard
-        </Link>
+        <div className="collector-page__header-actions">
+          <button
+            type="button"
+            className="button button--primary"
+            onClick={() => openCopilotPanel("suggest-dashboard")}
+          >
+            <CopilotIcon width={16} height={16} />
+            Ask AI
+          </button>
+          <Link className="button button--success" to="/dashboards/new">
+            + New Dashboard
+          </Link>
+        </div>
       </div>
 
       {error && <p className="collector-page__error">{error}</p>}

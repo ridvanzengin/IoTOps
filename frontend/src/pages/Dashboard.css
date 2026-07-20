@@ -230,7 +230,9 @@
 }
 
 .dashboard-menu__item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   padding: 6px 10px;
   border: none;
@@ -242,6 +244,10 @@
   color: var(--text-h);
   cursor: pointer;
   text-decoration: none;
+}
+
+.dashboard-menu__item svg {
+  flex-shrink: 0;
 }
 
 .dashboard-menu__item:hover {
