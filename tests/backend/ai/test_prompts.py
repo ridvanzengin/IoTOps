@@ -341,6 +341,19 @@ def test_copilot_system_prompt_panel_guidance_requires_refreshing_existing_panel
     assert "Re-call it right before you call suggest_panel" in prompt
 
 
+def test_copilot_system_prompt_panel_guidance_forbids_scope_qualifiers_in_titles() -> None:
+    # Regression: a live session titled a variable-filtered panel
+    # "Vibration Over Time (Selected Machine)" -- the dashboard's own
+    # variable selector already shows what's selected, so the qualifier
+    # is redundant noise, worse once repeated across several panels.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "Vibration Over Time (Selected Machine)" in prompt
+    assert "naming convention" in prompt.lower()
+
+
 def test_copilot_system_prompt_dashboard_hint_without_variables_omits_variable_block() -> None:
     now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
     dashboard_id = uuid4()

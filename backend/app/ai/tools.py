@@ -238,7 +238,13 @@ SUGGEST_PANEL_TOOL = {
                 "output, asking the user which dashboard first if more than one exists and "
                 "it isn't obvious which they mean.",
             },
-            "title": {"type": "string", "description": "Short panel title."},
+            "title": {
+                "type": "string",
+                "description": "Short panel title describing what it shows (e.g. 'Vibration Over "
+                "Time', 'Vibration by Machine'). Never append a parenthetical qualifier like "
+                "'(Selected Machine)' -- the dashboard's own variable selector already shows what's "
+                "currently selected, so repeating it in every panel's title is redundant.",
+            },
             "chart_type": {"type": "string", "enum": ["line", "bar", "scatter", "pie", "gauge"]},
             "sql": {
                 "type": "string",
