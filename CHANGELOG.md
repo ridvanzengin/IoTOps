@@ -10,6 +10,48 @@ Newest first. Each entry is a compressed summary, not a full narrative —
 where a bug fix taught something worth remembering (a real footgun, not
 just "fixed a typo"), that's kept; blow-by-blow debugging steps aren't.
 
+## 2026-07-20
+
+**Ollama retired -- every AI feature now runs on the same Anthropic
+client.** SQL generation (`POST /api/ai/sql`, `POST /api/ai/query-rule-sql`,
+backing the Panel Builder and Query Rule editor's NL-to-SQL boxes) used to
+be a separate local-Ollama HTTP passthrough, kept apart from the
+Anthropic-backed Co-pilot chat since Milestone 3. Switched
+`AiService._generate_sql_from_prompt` onto `anthropic_client.messages.create`
+directly; removed the Ollama HTTP client, `OLLAMA_BASE_URL`/`OLLAMA_MODEL`
+config, and all related wiring from `dependencies.py`/`config.py`. One AI
+backend, one API key, going forward.
+
+**Root cause found for the Co-pilot's recurring "iteration budget
+exhausted" and "dashboard has fewer panels than it should" bugs, chased
+across several rounds of prompt-wording changes: `max_tokens=500` on the
+Anthropic call, truncating `suggest_dashboard`'s larger tool-call payloads
+(a 4-6 panel dashboard's JSON, each panel with a full SQL string, easily
+exceeds that).** Added per-iteration tool-call logging (there was no
+`logging.basicConfig` anywhere in the app before this, so nothing
+surfaced) and reproduced live: 17 of 19 `suggest_dashboard` calls in one
+real turn had `name`/`description`/`variables` but no `panels` key at all
+-- the model ran out of tokens before reaching that field, the tool
+correctly rejected the incomplete call, and the model just retried the
+same truncated shape until the budget ran out. Fixed by bumping to
+`max_tokens=4096`. Same truncation also explained a live
+`[[quick-replies]]` block leaking raw markup into the chat when it got
+cut off before its closing tag -- hardened `_extract_quick_replies` to
+strip an unterminated block instead of leaving it visible either way.
+
+**`DashboardSuggestionState` now structurally enforces two more
+invariants**, after live testing showed prompt-only guidance wasn't
+reliably followed: at least 3 panels (was 2; guidance targets 4+), and
+every declared variable must actually be filtered or grouped by at least
+one panel (chain parents excepted, since narrowing a child variable's own
+options is real work even without a direct SQL reference) -- a variable
+declared "for later" with no panel using it now gets rejected instead of
+shipping as dead UI. Guidance also hardened against grouping by
+infrastructure columns that merely look like real entities (e.g. `host`
+holding Docker container ids, narrated as "4 systems" without ever
+checking the actual distinct values) and against high-cardinality
+group-by producing an unreadable many-line panel.
+
 ## 2026-07-18
 
 **`AutomaterEditor.tsx`'s "Create Rule" button disabled with no explanation

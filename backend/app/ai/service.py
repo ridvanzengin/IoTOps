@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 import anthropic
-import httpx
 
 from app.ai.models import AiVariableHint, CopilotMessage, CopilotSuggestion, NeedsContext
 from app.ai.prompts import build_copilot_system_prompt, build_query_rule_sql_prompt, build_sql_prompt
@@ -66,6 +65,10 @@ MAX_COPILOT_ITERATIONS = 20
 # the wording itself. Sized well above what even a 6-panel dashboard with
 # a 2-level variable chain needs, with headroom for prose before/after.
 MAX_COPILOT_RESPONSE_TOKENS = 4096
+
+# A single SELECT statement, no prose -- generous headroom over what even
+# a many-column/many-join query needs.
+SQL_GENERATION_MAX_TOKENS = 1024
 
 logger = logging.getLogger(__name__)
 
@@ -151,9 +154,6 @@ class AiService:
     def __init__(
         self,
         telemetry_service: TelemetryService,
-        http_client: httpx.AsyncClient,
-        base_url: str,
-        model: str,
         event_service: EventService,
         project_service: ProjectService,
         anthropic_client: anthropic.AsyncAnthropic,
@@ -165,12 +165,12 @@ class AiService:
         dashboard_service: DashboardService,
     ) -> None:
         self._telemetry_service = telemetry_service
-        self._http_client = http_client
-        self._base_url = base_url
-        self._model = model
-        # Below: the Anthropic-backed Co-pilot chat -- a separate model
-        # backend from the Ollama-backed SQL generation above, which stays
-        # untouched. See answer_copilot_question.
+        # Both the NL-to-SQL generation below (generate_sql/
+        # generate_query_rule_sql) and the Co-pilot chat further down
+        # (answer_copilot_question) go through the same Anthropic client --
+        # there used to be a separate Ollama-backed HTTP passthrough for
+        # SQL generation specifically, retired in favor of a single API
+        # backend for everything the AI does.
         self._event_service = event_service
         self._project_service = project_service
         self._anthropic_client = anthropic_client
@@ -203,15 +203,15 @@ class AiService:
 
     async def _generate_sql_from_prompt(self, prompt: str) -> str:
         try:
-            response = await self._http_client.post(
-                f"{self._base_url}/api/generate",
-                json={"model": self._model, "prompt": prompt, "stream": False},
+            response = await self._anthropic_client.messages.create(
+                model=self._anthropic_model,
+                max_tokens=SQL_GENERATION_MAX_TOKENS,
+                messages=[{"role": "user", "content": prompt}],
             )
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
+        except anthropic.APIError as exc:
             raise AiGenerationError(f"AI SQL generation failed: {exc}") from exc
 
-        raw = response.json().get("response", "")
+        raw = next((block.text for block in response.content if block.type == "text"), "")
         sql = _strip_markdown_fences(raw)
         try:
             validate_select_only_sql(sql)

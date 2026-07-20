@@ -35,13 +35,13 @@ Redis · Celery · Docker · [custom-telegraf](https://github.com/ridvanzengin/c
   `docker.sock`) to deploy Collector/Automater containers, so
   `HOST_RUNTIME_DIR` in `.env` must be set to this repo's `runtime/`
   directory as an absolute host path
-- Optional, for AI features: a local [Ollama](https://ollama.com)
-  instance running on the host
+- Optional, for AI features: an [Anthropic](https://www.anthropic.com)
+  API key
 
 ## Quickstart
 
 ```bash
-cp .env.example .env   # set HOST_RUNTIME_DIR (and OLLAMA_* if using AI features)
+cp .env.example .env   # set HOST_RUNTIME_DIR (and ANTHROPIC_API_KEY if using AI features)
 docker compose up
 ```
 

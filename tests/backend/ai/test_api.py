@@ -35,14 +35,11 @@ def _event_service() -> EventService:
     )
 
 
-def _client_with_handler(handler, anthropic_responses: list | None = None) -> TestClient:
+def _client(anthropic_responses: list | None = None) -> TestClient:
     pool = FakePool(tables=["device_metrics"], schema={"device_metrics": []})
     telemetry_service = TelemetryService(repository=TelemetryRepository(pool))
     service = AiService(
         telemetry_service=telemetry_service,
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
-        base_url="http://ollama",
-        model="gemma4:latest",
         event_service=_event_service(),
         project_service=FakeProjectService(),
         anthropic_client=FakeAnthropicClient(anthropic_responses or []),
@@ -64,10 +61,7 @@ def _clear_overrides():
 
 
 def test_generate_sql_returns_200() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"response": "SELECT * FROM device_metrics"})
-
-    client = _client_with_handler(handler)
+    client = _client(anthropic_responses=[message(text_block("SELECT * FROM device_metrics"))])
 
     response = client.post("/api/ai/sql", json={"prompt": "show me all metrics"})
 
@@ -78,21 +72,19 @@ def test_generate_sql_returns_200() -> None:
 def test_generate_sql_rejects_non_select_returns_502() -> None:
     # 502 (AiGenerationError), not 400 -- the AI failing to return valid
     # SQL is a different failure than a user hand-writing bad SQL.
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"response": "DELETE FROM device_metrics"})
-
-    client = _client_with_handler(handler)
+    client = _client(anthropic_responses=[message(text_block("DELETE FROM device_metrics"))])
 
     response = client.post("/api/ai/sql", json={"prompt": "delete everything"})
 
     assert response.status_code == 502
 
 
-def test_generate_sql_returns_502_on_ollama_failure() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("connection refused")
-
-    client = _client_with_handler(handler)
+def test_generate_sql_returns_502_on_anthropic_failure() -> None:
+    error = anthropic.APIConnectionError(
+        message="connection refused",
+        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+    )
+    client = _client(anthropic_responses=[error])
 
     response = client.post("/api/ai/sql", json={"prompt": "anything"})
 
@@ -100,10 +92,7 @@ def test_generate_sql_returns_502_on_ollama_failure() -> None:
 
 
 def test_generate_sql_accepts_variable_hints() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"response": "SELECT * FROM device_metrics"})
-
-    client = _client_with_handler(handler)
+    client = _client(anthropic_responses=[message(text_block("SELECT * FROM device_metrics"))])
 
     response = client.post(
         "/api/ai/sql",
@@ -117,10 +106,9 @@ def test_generate_sql_accepts_variable_hints() -> None:
 
 
 def test_generate_query_rule_sql_returns_200() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"response": "SELECT device_id FROM device_metrics GROUP BY device_id"})
-
-    client = _client_with_handler(handler)
+    client = _client(
+        anthropic_responses=[message(text_block("SELECT device_id FROM device_metrics GROUP BY device_id"))]
+    )
 
     response = client.post(
         "/api/ai/query-rule-sql", json={"prompt": "devices with high average temperature"}
@@ -131,21 +119,19 @@ def test_generate_query_rule_sql_returns_200() -> None:
 
 
 def test_generate_query_rule_sql_rejects_non_select_returns_502() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"response": "DELETE FROM device_metrics"})
-
-    client = _client_with_handler(handler)
+    client = _client(anthropic_responses=[message(text_block("DELETE FROM device_metrics"))])
 
     response = client.post("/api/ai/query-rule-sql", json={"prompt": "delete everything"})
 
     assert response.status_code == 502
 
 
-def test_generate_query_rule_sql_returns_502_on_ollama_failure() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("connection refused")
-
-    client = _client_with_handler(handler)
+def test_generate_query_rule_sql_returns_502_on_anthropic_failure() -> None:
+    error = anthropic.APIConnectionError(
+        message="connection refused",
+        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+    )
+    client = _client(anthropic_responses=[error])
 
     response = client.post("/api/ai/query-rule-sql", json={"prompt": "anything"})
 
@@ -153,10 +139,9 @@ def test_generate_query_rule_sql_returns_502_on_ollama_failure() -> None:
 
 
 def test_generate_query_rule_sql_accepts_identifiers_hint() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"response": "SELECT hive_id FROM hive_metrics GROUP BY hive_id"})
-
-    client = _client_with_handler(handler)
+    client = _client(
+        anthropic_responses=[message(text_block("SELECT hive_id FROM hive_metrics GROUP BY hive_id"))]
+    )
 
     response = client.post(
         "/api/ai/query-rule-sql",
@@ -166,13 +151,8 @@ def test_generate_query_rule_sql_accepts_identifiers_hint() -> None:
     assert response.status_code == 200
 
 
-def _unused_ollama_handler(request: httpx.Request) -> httpx.Response:
-    raise AssertionError("Ollama should not be called by the copilot path")
-
-
 def test_copilot_returns_200_with_answer() -> None:
-    client = _client_with_handler(
-        _unused_ollama_handler,
+    client = _client(
         anthropic_responses=[message(text_block("No occurrences in the last 24 hours."))],
     )
 
@@ -188,8 +168,7 @@ def test_copilot_returns_200_with_answer() -> None:
 
 
 def test_copilot_returns_quick_replies_when_offered() -> None:
-    client = _client_with_handler(
-        _unused_ollama_handler,
+    client = _client(
         anthropic_responses=[
             message(
                 text_block(
@@ -214,8 +193,7 @@ def test_copilot_returns_quick_replies_when_offered() -> None:
 
 
 def test_copilot_returns_needs_context_when_flagged() -> None:
-    client = _client_with_handler(
-        _unused_ollama_handler,
+    client = _client(
         anthropic_responses=[
             message(tool_use_block("flag_missing_context", {"column": "val1", "reason": "no unit given"})),
             message(text_block("I'm not sure what val1 represents.")),
@@ -239,8 +217,7 @@ def test_copilot_returns_suggestion_from_a_plain_conversation_with_no_intent() -
     # the ordinary Co-pilot -- no intent, no special entry point -- being
     # told the AI couldn't create rules, because the tool genuinely wasn't
     # in that conversation's tool list. It's always available now.
-    client = _client_with_handler(
-        _unused_ollama_handler,
+    client = _client(
         anthropic_responses=[
             message(
                 tool_use_block(
@@ -275,8 +252,7 @@ def test_copilot_returns_suggestion_from_a_plain_conversation_with_no_intent() -
 
 def test_copilot_returns_panel_suggestion_with_dashboard_id() -> None:
     dashboard_id = "22222222-2222-2222-2222-222222222222"
-    client = _client_with_handler(
-        _unused_ollama_handler,
+    client = _client(
         anthropic_responses=[
             message(
                 tool_use_block(
@@ -311,8 +287,7 @@ def test_copilot_returns_panel_suggestion_with_dashboard_id() -> None:
 
 
 def test_copilot_returns_dashboard_suggestion() -> None:
-    client = _client_with_handler(
-        _unused_ollama_handler,
+    client = _client(
         anthropic_responses=[
             message(
                 tool_use_block(
@@ -369,7 +344,7 @@ def test_copilot_returns_502_on_anthropic_failure() -> None:
         message="connection refused",
         request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
     )
-    client = _client_with_handler(_unused_ollama_handler, anthropic_responses=[error])
+    client = _client(anthropic_responses=[error])
 
     response = client.post(
         "/api/ai/copilot",

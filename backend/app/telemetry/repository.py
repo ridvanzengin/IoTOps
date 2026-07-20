@@ -16,6 +16,20 @@ def _quote_identifier(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def _strip_trailing_semicolon(sql: str) -> str:
+    # validate_select_only_sql already tolerates (and validates against) a
+    # trailing semicolon, but only on its own internal copy -- it never
+    # mutates the caller's sql, so a semicolon-terminated statement (Claude
+    # routinely ends generated SQL this way; so does anyone hand-typing SQL
+    # out of psql habit) reaches here unchanged. Every method below wraps
+    # `sql` inside a subquery/CTE to add its own LIMIT/OFFSET, and a
+    # semicolon can't appear inside a parenthesized subquery expression --
+    # `SELECT * FROM (SELECT ...;) AS x` is a syntax error even though the
+    # inner SELECT alone is perfectly valid. Strip it once here so every
+    # wrapping call site below is safe regardless of where `sql` came from.
+    return sql.strip().rstrip(";").strip()
+
+
 class TelemetryRepository:
     def __init__(self, pool: _Pool) -> None:
         self._pool = pool
@@ -80,7 +94,7 @@ class TelemetryRepository:
         # only version already relied on it being preserved through a
         # plain wrapping SELECT.
         query = (
-            f"WITH _panel_rows AS ({sql}) "
+            f"WITH _panel_rows AS ({_strip_trailing_semicolon(sql)}) "
             f"SELECT * FROM _panel_rows "
             f"OFFSET GREATEST(0, (SELECT count(*) FROM _panel_rows) - $1)"
         )
@@ -100,7 +114,7 @@ class TelemetryRepository:
         # a native asyncpg timeout (same pattern as execute_match_query)
         # since this executes model-generated SQL against real data with a
         # cost/latency budget to protect, not a human watching it hang.
-        query = f"SELECT * FROM ({sql}) AS _copilot_query LIMIT $1"
+        query = f"SELECT * FROM ({_strip_trailing_semicolon(sql)}) AS _copilot_query LIMIT $1"
         async with self._pool.acquire() as conn:
             records = await conn.fetch(query, limit, timeout=timeout_seconds)
         return [dict(record) for record in records]

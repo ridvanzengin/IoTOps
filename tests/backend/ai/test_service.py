@@ -84,12 +84,7 @@ async def _event_service_with_occurrence(project_id, rule_name: str = "swarm-ale
     )
 
 
-def _unused_ollama_handler(request: httpx.Request) -> httpx.Response:
-    raise AssertionError("Ollama should not be called by the copilot path")
-
-
 def _service(
-    handler,
     anthropic_responses: list | None = None,
     event_service: EventService | None = None,
     anthropic_client=None,
@@ -99,12 +94,8 @@ def _service(
     collector_service=None,
     dashboard_service=None,
 ) -> AiService:
-    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     return AiService(
         telemetry_service=_telemetry_service(),
-        http_client=client,
-        base_url="http://ollama",
-        model="gemma4:latest",
         event_service=event_service or _event_service(),
         project_service=FakeProjectService(ai_context),
         anthropic_client=anthropic_client or FakeAnthropicClient(anthropic_responses or []),
@@ -125,137 +116,118 @@ def _service(
 
 
 async def test_generate_sql_strips_markdown_fences() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200, json={"response": "```sql\nSELECT * FROM device_metrics\n```"}
-        )
+    responses = [message(text_block("```sql\nSELECT * FROM device_metrics\n```"))]
 
-    sql = await _service(handler).generate_sql("show me all metrics")
+    sql = await _service(anthropic_responses=responses).generate_sql("show me all metrics")
 
     assert sql == "SELECT * FROM device_metrics"
 
 
 async def test_generate_sql_sends_configured_model() -> None:
-    captured: dict[str, bytes] = {}
+    fake_client = FakeAnthropicClient([message(text_block("SELECT 1"))])
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        captured["body"] = request.read()
-        return httpx.Response(200, json={"response": "SELECT 1"})
+    await _service(anthropic_client=fake_client).generate_sql("count rows")
 
-    await _service(handler).generate_sql("count rows")
-
-    assert b'"model":"gemma4:latest"' in captured["body"]
+    assert fake_client.messages.calls[0]["model"] == "claude-haiku-4-5"
 
 
 async def test_generate_sql_rejects_non_select_response() -> None:
     # Wrapped into AiGenerationError, not left as InvalidQueryError -- the
     # AI failing to return usable SQL is a different failure than the
     # *user* hand-writing bad SQL, and deserves a message that says so.
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"response": "DELETE FROM device_metrics"})
+    responses = [message(text_block("DELETE FROM device_metrics"))]
 
     with pytest.raises(AiGenerationError):
-        await _service(handler).generate_sql("delete everything")
+        await _service(anthropic_responses=responses).generate_sql("delete everything")
 
 
-async def test_generate_sql_wraps_transport_errors() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("connection refused")
+async def test_generate_sql_wraps_api_errors() -> None:
+    error = anthropic.APIConnectionError(
+        message="connection refused",
+        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+    )
 
     with pytest.raises(AiGenerationError, match="AI SQL generation failed"):
-        await _service(handler).generate_sql("anything")
-
-
-async def test_generate_sql_wraps_http_error_status() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500)
-
-    with pytest.raises(AiGenerationError):
-        await _service(handler).generate_sql("anything")
+        await _service(anthropic_responses=[error]).generate_sql("anything")
 
 
 async def test_generate_sql_forwards_variable_hints_into_prompt() -> None:
-    captured: dict[str, bytes] = {}
+    fake_client = FakeAnthropicClient([message(text_block("SELECT 1"))])
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        captured["body"] = request.read()
-        return httpx.Response(200, json={"response": "SELECT 1"})
-
-    await _service(handler).generate_sql(
+    await _service(anthropic_client=fake_client).generate_sql(
         "temperature for the selected hive",
         variables=[AiVariableHint(name="hive_id", label="Hive")],
     )
 
-    assert b"$hive_id" in captured["body"]
+    assert "$hive_id" in fake_client.messages.calls[0]["messages"][0]["content"]
 
 
 async def test_generate_query_rule_sql_strips_markdown_fences() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200, json={"response": "```sql\nSELECT device_id FROM device_metrics GROUP BY device_id\n```"}
-        )
+    responses = [
+        message(text_block("```sql\nSELECT device_id FROM device_metrics GROUP BY device_id\n```"))
+    ]
 
-    sql = await _service(handler).generate_query_rule_sql("devices with high average temperature")
+    sql = await _service(anthropic_responses=responses).generate_query_rule_sql(
+        "devices with high average temperature"
+    )
 
     assert sql == "SELECT device_id FROM device_metrics GROUP BY device_id"
 
 
 async def test_generate_query_rule_sql_uses_the_query_rule_prompt() -> None:
-    captured: dict[str, bytes] = {}
+    fake_client = FakeAnthropicClient([message(text_block("SELECT 1"))])
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        captured["body"] = request.read()
-        return httpx.Response(200, json={"response": "SELECT 1"})
-
-    await _service(handler).generate_query_rule_sql("devices with high average temperature")
+    await _service(anthropic_client=fake_client).generate_query_rule_sql(
+        "devices with high average temperature"
+    )
 
     # The query-rule-specific framing, not the Panel/dashboard one -- a
     # cheap way to confirm this went through build_query_rule_sql_prompt,
     # not build_sql_prompt, without re-testing the prompt's own content.
-    assert b"scheduled monitoring rule" in captured["body"]
+    assert "scheduled monitoring rule" in fake_client.messages.calls[0]["messages"][0]["content"]
 
 
 async def test_generate_query_rule_sql_rejects_non_select_response() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"response": "DELETE FROM device_metrics"})
+    responses = [message(text_block("DELETE FROM device_metrics"))]
 
     with pytest.raises(AiGenerationError):
-        await _service(handler).generate_query_rule_sql("delete everything")
+        await _service(anthropic_responses=responses).generate_query_rule_sql("delete everything")
 
 
 async def test_generate_query_rule_sql_gives_actionable_message_on_invalid_sql() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"response": "I need more information about which table."})
+    responses = [message(text_block("I need more information about which table."))]
 
     with pytest.raises(AiGenerationError, match="more specific"):
-        await _service(handler).generate_query_rule_sql("average humidity is higher than 60")
+        await _service(anthropic_responses=responses).generate_query_rule_sql(
+            "average humidity is higher than 60"
+        )
 
 
-async def test_generate_query_rule_sql_wraps_transport_errors() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("connection refused")
+async def test_generate_query_rule_sql_wraps_api_errors() -> None:
+    error = anthropic.APIConnectionError(
+        message="connection refused",
+        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+    )
 
     with pytest.raises(AiGenerationError):
-        await _service(handler).generate_query_rule_sql("anything")
+        await _service(anthropic_responses=[error]).generate_query_rule_sql("anything")
 
 
 async def test_generate_query_rule_sql_forwards_identifiers_hint_into_prompt() -> None:
-    captured: dict[str, bytes] = {}
+    fake_client = FakeAnthropicClient([message(text_block("SELECT 1"))])
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        captured["body"] = request.read()
-        return httpx.Response(200, json={"response": "SELECT 1"})
+    await _service(anthropic_client=fake_client).generate_query_rule_sql(
+        "average humidity per hive", identifiers=["hive_id"]
+    )
 
-    await _service(handler).generate_query_rule_sql("average humidity per hive", identifiers=["hive_id"])
-
-    assert b"hive_id" in captured["body"]
+    assert "hive_id" in fake_client.messages.calls[0]["messages"][0]["content"]
 
 
 async def test_answer_copilot_question_returns_final_text_with_no_tool_calls() -> None:
     responses = [message(text_block("There have been no alerts today."))]
 
     answer, needs_context, suggestion, quick_replies = await _service(
-        _unused_ollama_handler, anthropic_responses=responses
+        anthropic_responses=responses
     ).answer_copilot_question(uuid4(), "any alerts today?", [])
 
     assert answer == "There have been no alerts today."
@@ -275,7 +247,7 @@ async def test_answer_copilot_question_executes_tool_call_then_returns_final_ans
     )
 
     answer, needs_context, suggestion, quick_replies = await _service(
-        _unused_ollama_handler, event_service=event_service, anthropic_client=fake_client
+        event_service=event_service, anthropic_client=fake_client
     ).answer_copilot_question(project_id, "why did swarm-alert fire?", [])
 
     assert answer == "swarm-alert fired once today."
@@ -298,7 +270,7 @@ async def test_answer_copilot_question_raises_when_iterations_exhausted() -> Non
 
     with pytest.raises(AiGenerationError, match="allotted steps"):
         await _service(
-            _unused_ollama_handler, anthropic_responses=responses
+            anthropic_responses=responses
         ).answer_copilot_question(uuid4(), "keep asking forever", [])
 
 
@@ -328,7 +300,7 @@ async def test_answer_copilot_question_returns_suggestion_built_before_iteration
     ] + [message(tool_use_block("query_occurrences", {})) for _ in range(MAX_COPILOT_ITERATIONS - 1)]
 
     answer, needs_context, suggestion, quick_replies = await _service(
-        _unused_ollama_handler, anthropic_responses=responses
+        anthropic_responses=responses
     ).answer_copilot_question(project_id, "chart hive temperature", [])
 
     assert needs_context is None
@@ -350,7 +322,7 @@ async def test_answer_copilot_question_wraps_anthropic_api_errors() -> None:
 
     with pytest.raises(AiGenerationError) as exc_info:
         await _service(
-            _unused_ollama_handler, anthropic_responses=[error]
+            anthropic_responses=[error]
         ).answer_copilot_question(uuid4(), "anything", [])
     assert "SQL" not in str(exc_info.value)
 
@@ -360,7 +332,7 @@ async def test_answer_copilot_question_raises_on_empty_final_answer() -> None:
 
     with pytest.raises(AiGenerationError):
         await _service(
-            _unused_ollama_handler, anthropic_responses=responses
+            anthropic_responses=responses
         ).answer_copilot_question(uuid4(), "anything", [])
 
 
@@ -371,7 +343,7 @@ async def test_answer_copilot_question_surfaces_flag_missing_context() -> None:
     ]
 
     answer, needs_context, suggestion, quick_replies = await _service(
-        _unused_ollama_handler, anthropic_responses=responses
+        anthropic_responses=responses
     ).answer_copilot_question(uuid4(), "what does val1 mean?", [])
 
     assert answer == "I'm not sure what val1 represents."
@@ -386,7 +358,7 @@ async def test_answer_copilot_question_forwards_ai_context_into_system_prompt() 
     fake_client = FakeAnthropicClient([message(text_block("Answer."))])
 
     await _service(
-        _unused_ollama_handler,
+        
         anthropic_client=fake_client,
         ai_context="val1 is coolant temperature in Celsius",
     ).answer_copilot_question(uuid4(), "what is val1?", [])
@@ -406,7 +378,7 @@ async def test_answer_copilot_question_scopes_schema_to_project_collectors() -> 
     fake_client = FakeAnthropicClient([message(text_block("Answer."))])
 
     await _service(
-        _unused_ollama_handler,
+        
         anthropic_client=fake_client,
         collector_service=FakeCollectorService([_collector(project_id, table="device_metrics")]),
     ).answer_copilot_question(project_id, "what tables can you see?", [])
@@ -422,7 +394,7 @@ async def test_answer_copilot_question_ignores_other_projects_collectors() -> No
     fake_client = FakeAnthropicClient([message(text_block("Answer."))])
 
     await _service(
-        _unused_ollama_handler,
+        
         anthropic_client=fake_client,
         collector_service=FakeCollectorService(
             [
@@ -448,7 +420,7 @@ async def test_answer_copilot_question_always_includes_suggestion_tools() -> Non
     fake_client = FakeAnthropicClient([message(text_block("Answer."))])
 
     await _service(
-        _unused_ollama_handler, anthropic_client=fake_client
+        anthropic_client=fake_client
     ).answer_copilot_question(uuid4(), "any alerts?", [])
 
     tool_names = {tool["name"] for tool in fake_client.messages.calls[0]["tools"]}
@@ -476,7 +448,7 @@ async def test_answer_copilot_question_surfaces_automater_rule_suggestion() -> N
     ]
 
     answer, needs_context, suggestion, _ = await _service(
-        _unused_ollama_handler, anthropic_responses=responses
+        anthropic_responses=responses
     ).answer_copilot_question(project_id, "watch for hot hives", [])
 
     assert needs_context is None
@@ -513,7 +485,7 @@ async def test_answer_copilot_question_surfaces_query_rule_suggestion() -> None:
     ]
 
     _, _, suggestion, _ = await _service(
-        _unused_ollama_handler, anthropic_responses=responses
+        anthropic_responses=responses
     ).answer_copilot_question(project_id, "watch for noisy machines", [])
 
     assert suggestion is not None
@@ -530,7 +502,7 @@ async def test_answer_copilot_question_invalid_suggestion_lets_model_retry() -> 
     ]
 
     answer, _, suggestion, _ = await _service(
-        _unused_ollama_handler, anthropic_responses=responses
+        anthropic_responses=responses
     ).answer_copilot_question(project_id, "suggest something", [])
 
     assert suggestion is None
@@ -561,7 +533,7 @@ async def test_answer_copilot_question_keeps_suggestion_when_final_answer_is_onl
     ]
 
     answer, _, suggestion, quick_replies = await _service(
-        _unused_ollama_handler, anthropic_responses=responses
+        anthropic_responses=responses
     ).answer_copilot_question(project_id, "suggest something", [])
 
     assert suggestion is not None
@@ -584,7 +556,7 @@ async def test_answer_copilot_question_extracts_quick_replies() -> None:
     ]
 
     answer, _, _, quick_replies = await _service(
-        _unused_ollama_handler, anthropic_responses=responses
+        anthropic_responses=responses
     ).answer_copilot_question(uuid4(), "how should I detect this?", [])
 
     assert answer == "Would you like option A or option B?"
@@ -596,7 +568,7 @@ async def test_answer_copilot_question_omits_quick_replies_when_not_offered() ->
     responses = [message(text_block("No occurrences today."))]
 
     _, _, _, quick_replies = await _service(
-        _unused_ollama_handler, anthropic_responses=responses
+        anthropic_responses=responses
     ).answer_copilot_question(uuid4(), "any alerts?", [])
 
     assert quick_replies is None
@@ -625,7 +597,7 @@ async def test_answer_copilot_question_strips_every_quick_replies_block() -> Non
     ]
 
     answer, _, _, quick_replies = await _service(
-        _unused_ollama_handler, anthropic_responses=responses
+        anthropic_responses=responses
     ).answer_copilot_question(uuid4(), "how should I detect this?", [])
 
     assert "[[quick-replies]]" not in answer
@@ -651,7 +623,7 @@ async def test_answer_copilot_question_drops_unterminated_quick_replies_block() 
     ]
 
     answer, _, _, quick_replies = await _service(
-        _unused_ollama_handler, anthropic_responses=responses
+        anthropic_responses=responses
     ).answer_copilot_question(uuid4(), "suggest an automation", [])
 
     assert answer == "Which of these would be most useful?"
@@ -689,7 +661,7 @@ async def test_answer_copilot_question_handles_a_long_cross_table_suggestion_cha
     assert len(responses) < MAX_COPILOT_ITERATIONS
 
     answer, _, suggestion, _ = await _service(
-        _unused_ollama_handler, anthropic_responses=responses
+        anthropic_responses=responses
     ).answer_copilot_question(uuid4(), "detect hornet attacks", [])
 
     assert answer.startswith("Drafted.")
@@ -706,7 +678,7 @@ async def test_answer_copilot_question_always_includes_panel_suggestion_tools() 
     fake_client = FakeAnthropicClient([message(text_block("Answer."))])
 
     await _service(
-        _unused_ollama_handler, anthropic_client=fake_client
+        anthropic_client=fake_client
     ).answer_copilot_question(uuid4(), "any alerts?", [])
 
     tool_names = {tool["name"] for tool in fake_client.messages.calls[0]["tools"]}
@@ -735,7 +707,7 @@ async def test_answer_copilot_question_surfaces_panel_suggestion() -> None:
     ]
 
     answer, needs_context, suggestion, _ = await _service(
-        _unused_ollama_handler, anthropic_responses=responses
+        anthropic_responses=responses
     ).answer_copilot_question(project_id, "chart hive temperature", [])
 
     assert needs_context is None
@@ -755,7 +727,7 @@ async def test_answer_copilot_question_panel_suggestion_invalid_input_lets_model
     ]
 
     answer, _, suggestion, _ = await _service(
-        _unused_ollama_handler, anthropic_responses=responses
+        anthropic_responses=responses
     ).answer_copilot_question(uuid4(), "chart something", [])
 
     assert suggestion is None
@@ -766,7 +738,7 @@ async def test_answer_copilot_question_always_includes_dashboard_suggestion_tool
     fake_client = FakeAnthropicClient([message(text_block("Answer."))])
 
     await _service(
-        _unused_ollama_handler, anthropic_client=fake_client
+        anthropic_client=fake_client
     ).answer_copilot_question(uuid4(), "any alerts?", [])
 
     tool_names = {tool["name"] for tool in fake_client.messages.calls[0]["tools"]}
@@ -815,7 +787,7 @@ async def test_answer_copilot_question_surfaces_dashboard_suggestion() -> None:
     ]
 
     answer, needs_context, suggestion, _ = await _service(
-        _unused_ollama_handler, anthropic_responses=responses
+        anthropic_responses=responses
     ).answer_copilot_question(project_id, "suggest a dashboard", [])
 
     assert needs_context is None
@@ -836,7 +808,7 @@ async def test_answer_copilot_question_dashboard_suggestion_invalid_input_lets_m
     ]
 
     answer, _, suggestion, _ = await _service(
-        _unused_ollama_handler, anthropic_responses=responses
+        anthropic_responses=responses
     ).answer_copilot_question(uuid4(), "suggest a dashboard", [])
 
     assert suggestion is None
@@ -851,7 +823,7 @@ async def test_answer_copilot_question_forwards_dashboard_hint_into_system_promp
     fake_client = FakeAnthropicClient([message(text_block("Answer."))])
 
     await _service(
-        _unused_ollama_handler,
+        
         anthropic_client=fake_client,
         dashboard_service=FakeDashboardService([dashboard]),
     ).answer_copilot_question(uuid4(), "add a panel", [], dashboard.id)
@@ -866,7 +838,7 @@ async def test_answer_copilot_question_dashboard_id_none_omits_hint() -> None:
     fake_client = FakeAnthropicClient([message(text_block("Answer."))])
 
     await _service(
-        _unused_ollama_handler, anthropic_client=fake_client
+        anthropic_client=fake_client
     ).answer_copilot_question(uuid4(), "any alerts?", [], None)
 
     system_prompt = fake_client.messages.calls[0]["system"]
@@ -879,7 +851,7 @@ async def test_answer_copilot_question_unknown_dashboard_id_falls_back_silently(
     fake_client = FakeAnthropicClient([message(text_block("Answer."))])
 
     await _service(
-        _unused_ollama_handler,
+        
         anthropic_client=fake_client,
         dashboard_service=FakeDashboardService([]),
     ).answer_copilot_question(uuid4(), "add a panel", [], uuid4())

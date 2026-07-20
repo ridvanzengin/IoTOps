@@ -36,7 +36,7 @@ just the first showcase — more domain showcases are planned post-v1. See
 - Runtime: Docker containers running Telegraf (Collector + Automater
   services)
 - Async tasks: Celery workers
-- AI: local LLM (Ollama) for SQL generation/explanation
+- AI: Anthropic API (Claude) for both SQL generation and the Co-pilot chat
 
 ## Core principles
 

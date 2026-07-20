@@ -35,7 +35,7 @@ class AiGenerationError(Exception):
     # Co-pilot ones (e.g. an iteration-budget error had nothing to do with
     # SQL). Every call site already writes a complete, contextual message
     # of its own; the one site that's genuinely about SQL generation
-    # (AiService._generate_sql_from_prompt's Ollama HTTP passthrough)
+    # (AiService._generate_sql_from_prompt)
     # includes that framing itself instead.
     def __init__(self, message: str) -> None:
         self.message = message

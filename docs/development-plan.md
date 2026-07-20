@@ -490,16 +490,19 @@ Generate SQL from natural language.
 - Chart renders successfully.
 
 **Status: SQL generation shipped early (Milestone 3, `POST /api/ai/sql`,
-Ollama-backed). Slice 1 of the Co-pilot (Q&A over stored data) shipped
-2026-07-16.** The activity bar's reserved Co-pilot panel slot
-(`EventsContext.tsx`'s `ActivePanel`'s `{ kind: "copilot" }` case) now
-renders a real `CopilotChat.tsx` component instead of a placeholder.
+originally Ollama-backed, later migrated onto Anthropic — see below).
+Slice 1 of the Co-pilot (Q&A over stored data) shipped 2026-07-16.** The
+activity bar's reserved Co-pilot panel slot (`EventsContext.tsx`'s
+`ActivePanel`'s `{ kind: "copilot" }` case) now renders a real
+`CopilotChat.tsx` component instead of a placeholder.
 
-Unlike SQL generation, the Co-pilot chat uses a **separate model
-backend**: the user's own Anthropic API key, model `claude-haiku-4-5` (not
-Ollama) — a deliberate choice for this portfolio project, to demonstrate
-real Claude API usage (including tool calling) on a small budget. Existing
-SQL generation stays on Ollama, untouched.
+The Co-pilot chat uses the user's own Anthropic API key, model
+`claude-haiku-4-5` — a deliberate choice for this portfolio project, to
+demonstrate real Claude API usage (including tool calling) on a small
+budget. SQL generation originally stayed on a separate local Ollama model
+backend; it was later switched onto the same Anthropic client as the
+Co-pilot (see CHANGELOG.md), so there's now a single AI backend for the
+whole app.
 
 Architecture: real tool-calling (a manual iteration loop —
 `MAX_COPILOT_ITERATIONS = 10`, bumped from an original 4 once a real
@@ -861,7 +864,7 @@ described below was **not** built — the smart nudge alone was judged
 sufficient for a first version, since it only appears when actually
 relevant rather than nagging on every project regardless of whether its
 schema is already clear. Still not built: extending `ai_context` to the
-Ollama-backed `build_sql_prompt`/`build_query_rule_sql_prompt`, and the
+`build_sql_prompt`/`build_query_rule_sql_prompt` SQL-generation prompts, and the
 related pre-existing schema-scoping gap noted below.
 
 **Design**: a new `Project.ai_context: str = ""` field, capped at
@@ -917,7 +920,7 @@ required step.
 **Where it's used**: appended to the schema block in `build_copilot_system_prompt`
 (Q&A slice) and, once built, the future `suggest_*` tools — framed
 explicitly as user-provided domain context to trust over guessing from
-column names alone. Still not extended to the existing Ollama-backed
+column names alone. Still not extended to the existing
 `build_sql_prompt`/`build_query_rule_sql_prompt` — the same
 ambiguous-column-name problem applies there, but that's a separate,
 smaller addition not yet done.
