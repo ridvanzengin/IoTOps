@@ -116,12 +116,16 @@
   max-width: 90%;
 }
 
+/* Deliberately --chip*, not --accent* -- that's
+   .copilot-chat__message--user's own look, and a clickable option (pick a
+   project, pick a quick-reply) reading identically to a message the user
+   already sent was confusing. See --chip's own definition in index.css. */
 .copilot-chat__project-chip {
   padding: 6px 12px;
   border-radius: 999px;
-  border: 1px solid var(--accent-border);
-  background: var(--accent-bg);
-  color: var(--accent-h);
+  border: 1px solid var(--chip-border);
+  background: var(--chip-bg);
+  color: var(--chip);
   font: inherit;
   font-size: 13px;
   font-weight: 500;
@@ -129,7 +133,8 @@
 }
 
 .copilot-chat__project-chip:hover {
-  background: var(--accent-border);
+  background: var(--chip-border);
+  border-color: var(--chip);
 }
 
 .copilot-chat__input-row {
