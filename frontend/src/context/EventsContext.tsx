@@ -9,11 +9,11 @@ import { debounce } from "../utils/debounce";
 import type { EventRuleCount, Occurrence } from "../types/event";
 import type { Dashboard, Variable } from "../types/dashboard";
 import type { Project } from "../types/project";
-import type { CopilotIntent } from "../types/ai";
+import type { CopilotIntent, CopilotMessage, CopilotSuggestion, NeedsContext } from "../types/ai";
 
 export type ActivePanel =
   | { kind: "project"; projectId: string }
-  | { kind: "copilot"; intent?: CopilotIntent }
+  | { kind: "copilot"; intent?: CopilotIntent; dashboardId?: string; projectId?: string }
   | null;
 
 // What EventsPanel's filter chips can narrow the occurrence list to. Kept
@@ -22,6 +22,59 @@ export type ActivePanel =
 export type OccurrenceFilter = { kind: "rule"; ruleId: string } | { kind: "unresolved" };
 
 export const OCCURRENCES_PAGE_SIZE = 20;
+
+// The Co-pilot conversation itself -- lives here, not as CopilotChat's own
+// local useState, specifically so it survives that component unmounting.
+// CopilotChat unmounts whenever the events sidebar is shown instead (the
+// EventsPanel's activePanel ternary) or the panel is closed entirely
+// (EventsPanel returns null when activePanel is null) -- without this, both
+// of those silently threw away the whole conversation. `intent`/
+// `dashboardId` are captured once, when `project` is first set (see
+// CopilotChat's handleSelectProject), rather than tracked live from props --
+// once a conversation has real content, reopening the panel via a different
+// entry point (e.g. the plain Co-pilot icon after starting via "Suggest a
+// panel") must not silently redirect in-flight messages to a different
+// dashboard's context out from under the visible transcript. Reset only via
+// the explicit "New session" control (resetCopilotSession) or a hard page
+// reload -- never implicitly.
+export interface CopilotSessionState {
+  intent?: CopilotIntent;
+  dashboardId?: string;
+  // Frozen alongside intent/dashboardId (see the comment above): whether
+  // this session's project was auto-selected from an already-known
+  // projectId prop (e.g. "Suggest a panel" opened from inside a
+  // dashboard) rather than manually chosen from the chip picker -- used
+  // to suppress the now-redundant greeting/picker/echo-bubble UI for the
+  // former, without that suppression incorrectly also swallowing the
+  // manual-picker flow's own "you picked this project" echo bubble.
+  pickerSkipped?: boolean;
+  project: Project | null;
+  messages: CopilotMessage[];
+  needsContextByIndex: Record<number, NeedsContext>;
+  suggestionByIndex: Record<number, CopilotSuggestion>;
+  quickRepliesByIndex: Record<number, string[]>;
+  greetingDone: boolean;
+  ackDone: boolean;
+  input: string;
+  sending: boolean;
+  error: string | null;
+}
+
+const INITIAL_COPILOT_SESSION: CopilotSessionState = {
+  intent: undefined,
+  dashboardId: undefined,
+  pickerSkipped: false,
+  project: null,
+  messages: [],
+  needsContextByIndex: {},
+  suggestionByIndex: {},
+  quickRepliesByIndex: {},
+  greetingDone: false,
+  ackDone: false,
+  input: "",
+  sending: false,
+  error: null,
+};
 
 // Registered by DashboardEditor while it's mounted (see its own
 // registerDashboardVariables effect) so the globally-mounted events
@@ -76,8 +129,16 @@ interface EventsContextValue {
   // GET /api/event/occurrences.
   activeCount: number;
   activeDashboardVariables: ActiveDashboardVariables | null;
+  copilotSession: CopilotSessionState;
+  // `patch` may be a partial object or a function of the previous state
+  // (for updates that depend on it, e.g. appending to `messages`) -- same
+  // shape as a useState updater, just merged rather than replacing.
+  updateCopilotSession: (
+    patch: Partial<CopilotSessionState> | ((prev: CopilotSessionState) => Partial<CopilotSessionState>),
+  ) => void;
+  resetCopilotSession: () => void;
   openProjectPanel: (projectId: string) => void;
-  openCopilotPanel: (intent?: CopilotIntent) => void;
+  openCopilotPanel: (intent?: CopilotIntent, opts?: { dashboardId?: string; projectId?: string }) => void;
   closePanel: () => void;
   setOccurrenceFilter: (filter: OccurrenceFilter | null) => void;
   setTimeRange: (range: string) => void;
@@ -111,6 +172,7 @@ export function EventsProvider({ children }: { children: ReactNode }) {
   const [dashboardsByProject, setDashboardsByProject] = useState<Record<string, Dashboard[]>>({});
   const [unresolvedCounts, setUnresolvedCounts] = useState<Record<string, number>>({});
   const [activePanel, setActivePanel] = useState<ActivePanel>(null);
+  const [copilotSession, setCopilotSession] = useState<CopilotSessionState>(INITIAL_COPILOT_SESSION);
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
   const [occurrencesLoading, setOccurrencesLoading] = useState(false);
   const [occurrencesTotal, setOccurrencesTotal] = useState(0);
@@ -325,12 +387,42 @@ export function EventsProvider({ children }: { children: ReactNode }) {
     fetchCounts(projectId, timeRange, "");
   }
 
-  function openCopilotPanel(intent?: CopilotIntent) {
-    setActivePanel({ kind: "copilot", intent });
+  function openCopilotPanel(intent?: CopilotIntent, opts?: { dashboardId?: string; projectId?: string }) {
+    // A specific "Suggest X" entry point (as opposed to the plain icon,
+    // intent === undefined) naming a genuinely different session than the
+    // one already frozen into copilotSession overrides it -- e.g.
+    // clicking "Suggest an automation" while a "Suggest a panel"
+    // conversation is still active glitched without this (stale intent/
+    // dashboardId mixed with a fresh entry-point greeting). Reopening via
+    // the plain icon, or re-clicking the *same* entry point that's
+    // already active, preserves the existing conversation instead -- see
+    // CopilotSessionState's own comment on why intent/dashboardId freeze
+    // there rather than tracking live props.
+    const isDifferentSession =
+      intent !== undefined && (intent !== copilotSession.intent || opts?.dashboardId !== copilotSession.dashboardId);
+    if (isDifferentSession) {
+      setCopilotSession(INITIAL_COPILOT_SESSION);
+    }
+    setActivePanel({ kind: "copilot", intent, dashboardId: opts?.dashboardId, projectId: opts?.projectId });
     setOccurrences([]);
     setOccurrencesTotal(0);
     setOccurrencesOffset(0);
     setRuleCounts([]);
+  }
+
+  function updateCopilotSession(
+    patch: Partial<CopilotSessionState> | ((prev: CopilotSessionState) => Partial<CopilotSessionState>),
+  ) {
+    setCopilotSession((prev) => ({ ...prev, ...(typeof patch === "function" ? patch(prev) : patch) }));
+  }
+
+  function resetCopilotSession() {
+    setCopilotSession(INITIAL_COPILOT_SESSION);
+    // "New session" means the true default assistant -- not a re-run of
+    // whichever "Suggest X" button happened to open the panel originally,
+    // which is what merely clearing copilotSession while leaving
+    // activePanel's own intent/dashboardId in place would produce.
+    setActivePanel((prev) => (prev?.kind === "copilot" ? { kind: "copilot" } : prev));
   }
 
   function closePanel() {
@@ -436,6 +528,9 @@ export function EventsProvider({ children }: { children: ReactNode }) {
         ruleCounts,
         activeCount,
         activeDashboardVariables,
+        copilotSession,
+        updateCopilotSession,
+        resetCopilotSession,
         openProjectPanel,
         openCopilotPanel,
         closePanel,

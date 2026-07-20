@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from app.ai.models import AiVariableHint
 from app.ai.prompts import build_copilot_system_prompt, build_query_rule_sql_prompt, build_sql_prompt
@@ -262,3 +263,104 @@ def test_copilot_system_prompt_instructs_brevity() -> None:
     prompt = build_copilot_system_prompt(_schema(), now=now)
 
     assert "Be brief" in prompt
+
+
+def test_copilot_system_prompt_always_includes_panel_suggestion_tools_and_guidance() -> None:
+    # Same always-on principle as suggest_automation/list_existing_rules
+    # -- see the "Lesson learned" note in docs/development-plan.md --
+    # applied to the panel-suggestion tools from the start.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "suggest_panel" in prompt
+    assert "list_existing_panels" in prompt
+    assert "panel-suggestion request" in prompt
+
+
+def test_copilot_system_prompt_omits_dashboard_block_when_not_provided() -> None:
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "currently viewing dashboard" not in prompt
+
+
+def test_copilot_system_prompt_includes_dashboard_hint_when_provided() -> None:
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+    dashboard_id = uuid4()
+
+    prompt = build_copilot_system_prompt(
+        _schema(),
+        now=now,
+        dashboard_hint=(dashboard_id, "Apiary Overview", [AiVariableHint(name="hive_id", label="Hive")]),
+    )
+
+    assert "Apiary Overview" in prompt
+    assert str(dashboard_id) in prompt
+    assert "$hive_id" in prompt
+
+
+def test_copilot_system_prompt_panel_guidance_forbids_narrating_without_calling_suggest_panel() -> None:
+    # Regression: a live session had the model describe a specific panel
+    # ("I'll create an Environmental Summary panel...") and ask "does this
+    # look right?" with quick-replies, but never actually called
+    # suggest_panel -- no suggestion card, nothing to open. The narration
+    # sounded final enough that the user reasonably expected a card.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "Never describe a specific proposed panel in prose" in prompt
+    assert "leaves the user with nothing to open" in prompt
+
+
+def test_copilot_system_prompt_panel_guidance_forbids_generic_menu_for_vague_requests() -> None:
+    # Regression: a plain "I want to add a panel to dashboard" got a
+    # static menu of generic categories ("a metric not yet displayed? a
+    # comparison? a summary?") instead of the model actually looking at
+    # the data first, unlike an explicit "look at my telemetry" request
+    # which did produce a real, data-grounded analysis.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "do NOT open with a generic menu of question categories" in prompt
+    assert "here's what stands out" in prompt
+
+
+def test_copilot_system_prompt_panel_guidance_requires_refreshing_existing_panels_check() -> None:
+    # Regression: a long conversation called list_existing_panels once
+    # early on, then much later proposed a panel that duplicated one the
+    # user had since saved (via a separate conversation) -- the model
+    # never re-checked before finalizing.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "Re-call it right before you call suggest_panel" in prompt
+
+
+def test_copilot_system_prompt_panel_guidance_forbids_scope_qualifiers_in_titles() -> None:
+    # Regression: a live session titled a variable-filtered panel
+    # "Vibration Over Time (Selected Machine)" -- the dashboard's own
+    # variable selector already shows what's selected, so the qualifier
+    # is redundant noise, worse once repeated across several panels.
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+    prompt = build_copilot_system_prompt(_schema(), now=now)
+
+    assert "Vibration Over Time (Selected Machine)" in prompt
+    assert "naming convention" in prompt.lower()
+
+
+def test_copilot_system_prompt_dashboard_hint_without_variables_omits_variable_block() -> None:
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+    dashboard_id = uuid4()
+
+    prompt = build_copilot_system_prompt(
+        _schema(), now=now, dashboard_hint=(dashboard_id, "Apiary Overview", [])
+    )
+
+    assert "Apiary Overview" in prompt
+    assert "defines the following variables" not in prompt

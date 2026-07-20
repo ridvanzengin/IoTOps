@@ -8,11 +8,24 @@ from app.ai.models import (
     AutomaterRuleSuggestion,
     AutomaterRuleSuggestionState,
     CopilotSuggestion,
+    PanelSuggestion,
+    PanelSuggestionState,
     QueryRuleSuggestion,
     QueryRuleSuggestionState,
 )
 from app.automater.models import Condition, ConditionOperator, ResolveMode, RuleOperator, RuleSeverity
 from app.automater.service import AutomaterService
+from app.dashboard.models import (
+    BarChart,
+    Chart,
+    GaugeChart,
+    LineChart,
+    PieChart,
+    Query,
+    ScatterChart,
+    SeriesConfig,
+)
+from app.dashboard.service import DashboardService
 from app.event.models import OccurrenceStatus
 from app.event.service import EventService
 from app.query_rule.models import QueryRuleSchedule
@@ -189,6 +202,117 @@ SUGGEST_AUTOMATION_TOOL = {
     },
 }
 
+LIST_EXISTING_PANELS_TOOL = {
+    "name": "list_existing_panels",
+    "description": (
+        "Look up this project's existing dashboards and the panels already on each "
+        "one -- use this before proposing a new panel, so you don't duplicate an "
+        "existing chart, and so you learn each dashboard's real id (needed for "
+        "suggest_panel's dashboard_id) and the variables it already defines (needed "
+        "to know what's available to filter by, e.g. $hive_id). If the project has "
+        "more than one dashboard and it isn't already obvious which one the user "
+        "means, ask them (quick-replies with the dashboard names work well) before "
+        "calling suggest_panel -- don't guess."
+    ),
+    "input_schema": {"type": "object", "properties": {}},
+}
+
+SUGGEST_PANEL_TOOL = {
+    "name": "suggest_panel",
+    "description": (
+        "Propose a new dashboard panel/chart once you have enough information (from "
+        "list_existing_panels and query_telemetry) to make a grounded suggestion -- "
+        "never propose a chart's fields without having checked via query_telemetry "
+        "that the SQL actually returns those columns with sensible values first. "
+        "This does not create anything -- it hands the user a prefilled, reviewable "
+        "draft in the Panel Builder."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "dashboard_id": {
+                "type": "string",
+                "description": "The id of the dashboard this panel is added to. Use the id "
+                "already given to you for the dashboard currently open in this conversation "
+                "if one was mentioned; otherwise use an id you saw in list_existing_panels' "
+                "output, asking the user which dashboard first if more than one exists and "
+                "it isn't obvious which they mean.",
+            },
+            "title": {
+                "type": "string",
+                "description": "Short panel title describing what it shows (e.g. 'Vibration Over "
+                "Time', 'Vibration by Machine'). Never append a parenthetical qualifier like "
+                "'(Selected Machine)' -- the dashboard's own variable selector already shows what's "
+                "currently selected, so repeating it in every panel's title is redundant.",
+            },
+            "chart_type": {"type": "string", "enum": ["line", "bar", "scatter", "pie", "gauge"]},
+            "sql": {
+                "type": "string",
+                "description": "A single SELECT statement for the panel's query. Follow "
+                "query_telemetry's own SQL rules (single SELECT, no semicolon), but validate "
+                "it with query_telemetry first using literal ISO timestamp bounds, then "
+                "translate the final version to use these macros instead of literal values: "
+                "$__timeFrom / $__timeTo for time-bounding (e.g. `WHERE time >= $__timeFrom "
+                "AND time <= $__timeTo`), so the panel stays correct as the dashboard's own "
+                "time range control changes; and, only when the request is specifically about "
+                "'the selected/current X' rather than 'one series per X', $variable_name for "
+                "any variable list_existing_panels showed you the target dashboard already "
+                "defines (e.g. `WHERE hive_id = $hive_id`) -- do not invent variable names "
+                "that weren't listed, and do not use a variable when the request actually "
+                "wants one row/series per distinct value of that column (use a plain group-by "
+                "column for that instead, see x_axis/series_by below).",
+            },
+            "time_range": {
+                "type": "string",
+                "description": "Default time window, e.g. '15m', '1h', '6h', '24h', '7d'. "
+                "Defaults to '1h' if omitted.",
+            },
+            "x_axis": {
+                "type": "string",
+                "description": "Required when chart_type is line, bar, or scatter.",
+            },
+            "y_axis": {
+                "type": "string",
+                "description": "Required when chart_type is line, bar, or scatter -- the "
+                "primary series' value column.",
+            },
+            "series": {
+                "type": "array",
+                "description": "Optional additional series for line/bar/scatter, beyond "
+                "y_axis. Mutually exclusive with series_by.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "field": {"type": "string"},
+                        "label": {"type": "string"},
+                        "axis": {"type": "string", "enum": ["left", "right"]},
+                        "type": {
+                            "type": "string",
+                            "enum": ["line", "bar", "scatter"],
+                            "description": "Overrides chart_type for just this series; omit to inherit.",
+                        },
+                    },
+                    "required": ["field"],
+                },
+            },
+            "series_by": {
+                "type": "string",
+                "description": "Optional: split into one series per distinct value of this "
+                "column (e.g. one line per hive) -- use this, not a $variable, for 'per X' "
+                "requests. Mutually exclusive with series.",
+            },
+            "label_field": {"type": "string", "description": "Required when chart_type is pie."},
+            "value_field": {
+                "type": "string",
+                "description": "Required when chart_type is pie or gauge.",
+            },
+            "min": {"type": "number", "description": "For chart_type=gauge. Defaults to 0."},
+            "max": {"type": "number", "description": "For chart_type=gauge. Defaults to 100."},
+        },
+        "required": ["dashboard_id", "title", "chart_type", "sql"],
+    },
+}
+
 # Always the full set, in every conversation -- this used to split into a
 # 3-tool default and a 5-tool "suggest-automation intent" variant, gated
 # behind which button opened the panel. That meant a plain "I want to
@@ -197,13 +321,17 @@ SUGGEST_AUTOMATION_TOOL = {
 # perspective) said it couldn't create one after a long clarifying
 # conversation. The model's own judgment already keeps query_occurrences/
 # query_telemetry/flag_missing_context from firing on the wrong kind of
-# question; it's trusted to do the same for these two.
+# question; it's trusted to do the same for these four suggestion-related
+# tools (list_existing_rules/suggest_automation and their panel
+# equivalents below) -- never re-gate any of them behind an intent flag.
 COPILOT_TOOLS = [
     QUERY_OCCURRENCES_TOOL,
     QUERY_TELEMETRY_TOOL,
     FLAG_MISSING_CONTEXT_TOOL,
     LIST_EXISTING_RULES_TOOL,
     SUGGEST_AUTOMATION_TOOL,
+    LIST_EXISTING_PANELS_TOOL,
+    SUGGEST_PANEL_TOOL,
 ]
 
 _MAX_OCCURRENCES_LIMIT = 100
@@ -380,3 +508,102 @@ def _build_suggestion(project_id: UUID, kind: str, input_: dict[str, Any]) -> Co
         return QueryRuleSuggestion(label=f"New scheduled rule: {name}", state=state)
 
     raise ValueError(f"Unknown suggestion kind '{kind}' -- must be automater_rule or query_rule")
+
+
+def _describe_chart(chart: Chart) -> str:
+    if isinstance(chart, (LineChart, BarChart, ScatterChart)):
+        series_note = f", +{len(chart.series)} series" if chart.series else ""
+        return f"x={chart.x_axis}, y={chart.y_axis}{series_note}"
+    if isinstance(chart, PieChart):
+        return f"label={chart.label_field}, value={chart.value_field}"
+    return f"value={chart.value_field}"  # GaugeChart
+
+
+async def run_list_existing_panels(dashboard_service: DashboardService, project_id: UUID) -> str:
+    # DashboardService.list() has no project filter (same gap as
+    # AutomaterService.list(), see run_list_existing_rules above) --
+    # filter here.
+    dashboards = [d for d in await dashboard_service.list() if d.project_id == project_id]
+    if not dashboards:
+        return (
+            "This project has no dashboards yet -- a dashboard must exist before a "
+            "panel can be added to it. Mention that in your answer if relevant."
+        )
+
+    lines = []
+    for dashboard in dashboards:
+        variables = (
+            ", ".join(f"${v.name} ({v.label})" for v in dashboard.variables)
+            if dashboard.variables
+            else "none"
+        )
+        lines.append(f"Dashboard \"{dashboard.name}\" (id={dashboard.id}), variables: {variables}")
+        if not dashboard.panels:
+            lines.append("  - no panels yet")
+        for panel in dashboard.panels:
+            sql_gist = panel.query.sql if len(panel.query.sql) <= 200 else panel.query.sql[:200] + "..."
+            lines.append(
+                f"  - \"{panel.title}\" ({panel.chart.type}: {_describe_chart(panel.chart)}) "
+                f"sql=({sql_gist})"
+            )
+    return "\n".join(lines)
+
+
+def run_suggest_panel(input_: dict[str, Any]) -> tuple[str, CopilotSuggestion | None]:
+    try:
+        suggestion = _build_panel_suggestion(input_)
+    except (ValidationError, ValueError, KeyError, TypeError) as exc:
+        return f"Couldn't build that panel suggestion: {exc}. Adjust the fields and try again.", None
+    return (
+        "Drafted a panel -- mention in your answer that a draft is ready for review "
+        "below, and ask if they'd like any adjustments.",
+        suggestion,
+    )
+
+
+def _build_chart(chart_type: str, title: str, input_: dict[str, Any]) -> Chart:
+    if chart_type in ("line", "bar", "scatter"):
+        series = [
+            SeriesConfig(
+                field=s["field"], label=s.get("label"), axis=s.get("axis", "left"), type=s.get("type")
+            )
+            for s in input_.get("series", [])
+        ]
+        common = {
+            "title": title,
+            "x_axis": input_.get("x_axis", ""),
+            "y_axis": input_.get("y_axis", ""),
+            "series": series,
+            "series_by": input_.get("series_by"),
+        }
+        if chart_type == "line":
+            return LineChart(**common)
+        if chart_type == "bar":
+            return BarChart(**common)
+        return ScatterChart(**common)
+    if chart_type == "pie":
+        return PieChart(
+            title=title,
+            label_field=input_.get("label_field", ""),
+            value_field=input_.get("value_field", ""),
+        )
+    if chart_type == "gauge":
+        return GaugeChart(
+            title=title,
+            value_field=input_.get("value_field", ""),
+            min=input_.get("min", 0),
+            max=input_.get("max", 100),
+        )
+    raise ValueError(f"Unknown chart_type '{chart_type}' -- must be line, bar, scatter, pie, or gauge")
+
+
+def _build_panel_suggestion(input_: dict[str, Any]) -> CopilotSuggestion:
+    title = input_.get("title", "")
+    state = PanelSuggestionState(
+        dashboard_id=UUID(input_["dashboard_id"]),
+        title=title,
+        chart=_build_chart(input_.get("chart_type", ""), title, input_),
+        query=Query(sql=input_.get("sql", "")),
+        time_range=input_.get("time_range") or "1h",
+    )
+    return PanelSuggestion(label=f"New panel: {title}", state=state)

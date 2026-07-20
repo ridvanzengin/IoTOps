@@ -4,6 +4,7 @@ import { TIME_RANGES } from "../constants/timeRanges";
 import { hashColor } from "../utils/color";
 import { CopilotChat } from "./CopilotChat";
 import { OccurrenceCard } from "./OccurrenceCard";
+import { RefreshIcon } from "./icons";
 import "./EventsPanel.css";
 
 const WIDTH_STORAGE_KEY = "iotops:events-panel-width";
@@ -38,6 +39,7 @@ export function EventsPanel() {
     activeCount,
     projects,
     closePanel,
+    resetCopilotSession,
     setOccurrenceFilter,
     setTimeRange,
     setSearchQuery,
@@ -109,13 +111,30 @@ export function EventsPanel() {
       <div className="events-panel__resize-handle" onMouseDown={handleResizeStart} />
       <div className="events-panel__header">
         <span className="events-panel__title">{title}</span>
-        <button type="button" className="events-panel__close" onClick={closePanel} aria-label="Close panel">
-          ×
-        </button>
+        <div className="events-panel__header-actions">
+          {activePanel.kind === "copilot" && (
+            <button
+              type="button"
+              className="events-panel__new-session"
+              onClick={resetCopilotSession}
+              aria-label="New session"
+              title="Start a new Co-pilot session"
+            >
+              <RefreshIcon />
+            </button>
+          )}
+          <button type="button" className="events-panel__close" onClick={closePanel} aria-label="Close panel">
+            ×
+          </button>
+        </div>
       </div>
       {activePanel.kind === "copilot" ? (
         <div className="events-panel__body">
-          <CopilotChat key={activePanel.intent ?? "default"} intent={activePanel.intent} />
+          <CopilotChat
+            intent={activePanel.intent}
+            dashboardId={activePanel.dashboardId}
+            projectId={activePanel.projectId}
+          />
         </div>
       ) : (
         <div className="events-panel__body">

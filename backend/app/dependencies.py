@@ -139,6 +139,7 @@ async def get_ai_service() -> AiService:
         query_rule_service=await get_query_rule_service(),
         collector_service=get_collector_service(),
         plugin_registry=get_plugin_registry(),
+        dashboard_service=await get_dashboard_service(),
     )
 
 

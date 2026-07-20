@@ -26,14 +26,18 @@ export function generateQueryRuleSql(prompt: string, identifiers: string[] = [])
 // happens entirely server-side within this one request/response -- history
 // is a flat transcript of prior turns' questions/answers only, never the
 // internal tool_use/tool_result exchanges. No `intent` param: the backend
-// always has the full tool set available (including suggest_automation)
-// regardless of how the panel was opened -- see CopilotChat.tsx's own
-// `intent` prop, which only ever drives local greeting/ack/seed-chip text,
-// never anything sent over the wire.
+// always has the full tool set available (including suggest_automation/
+// suggest_panel) regardless of how the panel was opened -- see
+// CopilotChat.tsx's own `intent` prop, which only ever drives local
+// greeting/ack/seed-chip text, never anything sent over the wire.
+// `dashboardId` IS sent, though (when known) -- it lets the backend hint
+// the model with that dashboard's id/name/variables so suggest_panel
+// doesn't need a round-trip through list_existing_panels to discover it.
 export function askCopilot(
   projectId: string,
   question: string,
   history: CopilotMessage[] = [],
+  dashboardId?: string,
 ): Promise<{
   answer: string;
   needs_context: NeedsContext | null;
@@ -47,6 +51,6 @@ export function askCopilot(
     quick_replies: string[] | null;
   }>("/api/ai/copilot", {
     method: "POST",
-    body: JSON.stringify({ project_id: projectId, question, history }),
+    body: JSON.stringify({ project_id: projectId, question, history, dashboard_id: dashboardId }),
   });
 }

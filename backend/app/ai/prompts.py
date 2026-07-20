@@ -1,4 +1,5 @@
 from datetime import datetime
+from uuid import UUID
 
 from app.ai.models import AiVariableHint
 from app.telemetry.models import TelemetryTableSchema
@@ -179,11 +180,86 @@ def _rule_creation_guidance() -> str:
     )
 
 
+def _panel_suggestion_guidance() -> str:
+    # Sibling to _rule_creation_guidance above -- same "always on, model
+    # decides when it applies" reasoning (see COPILOT_TOOLS's own comment)
+    # applies here from the start, rather than repeating the mistake of
+    # gating it behind an intent flag and discovering the gap live.
+    return (
+        "\n\nIf the user wants to see, chart, or visualize something (e.g. 'show me...', "
+        "'chart the...', 'I want to see...', 'visualize...', 'add a panel', 'suggest "
+        "something worth monitoring') -- as opposed to asking a one-off question about a "
+        "value -- that's a panel-suggestion request: have a real conversation about it "
+        "using list_existing_panels, query_telemetry, and suggest_panel, don't just "
+        "describe the data in prose.\n"
+        "Even for a vague request with no specifics yet (e.g. just 'I want to add a "
+        "panel'), do NOT open with a generic menu of question categories like 'a metric "
+        "not yet displayed? a comparison? a summary?' -- that's a question you can answer "
+        "yourself. Call list_existing_panels and query_telemetry FIRST, then lead your "
+        "reply with what you actually found (real coverage gaps against the dashboard's "
+        "existing panels, real value ranges/patterns from the data), e.g. 'I looked at "
+        "your panels and current data -- here's what stands out:' followed by concrete, "
+        "data-grounded options (naming real ranges/patterns you observed), not generic "
+        "unmapped buckets. Only ask a clarifying question at that point if more than one "
+        "option is genuinely equally strong.\n"
+        "Before calling suggest_panel:\n"
+        "1. Call list_existing_panels so you don't propose a near-duplicate of a chart "
+        "that's already on a dashboard, and so you learn each dashboard's real id and "
+        "the variables it already defines. If a dashboard is already established for "
+        "this conversation (see above), use its id directly. Otherwise, if the project "
+        "has more than one dashboard and it isn't obvious which one the user means, ask "
+        "them which one (a quick-replies block of the dashboard names works well) "
+        "before calling suggest_panel -- don't guess. Its result can go stale over a "
+        "long conversation -- a panel can get saved (by this conversation or another one "
+        "entirely) between when you first checked and when you're about to propose. "
+        "Re-call it right before you call suggest_panel if there's been any real gap "
+        "since your last check (several turns, a topic change, especially 'add another "
+        "one') rather than trusting an earlier snapshot -- don't propose something that "
+        "duplicates a panel you'd have seen with a fresh check.\n"
+        "2. Call query_telemetry with literal ISO timestamp bounds to confirm the query "
+        "actually returns sensible columns and values before choosing a chart type and "
+        "field mapping.\n"
+        "3. Call suggest_panel. Translate the validated query to use $__timeFrom/"
+        "$__timeTo instead of the literal bounds you used to validate it, so the panel "
+        "tracks the dashboard's own time range control. Only reference a dashboard "
+        "variable (e.g. $hive_id) when the request is specifically about the currently "
+        "selected value of that variable -- for a 'one per X' / 'each X' request, use a "
+        "plain grouping column (x_axis or series_by) instead, never a variable. If it's "
+        "genuinely unclear which of those two the user means, ask rather than guess.\n"
+        "Panel title naming convention: describe what the chart shows (metric + any "
+        "grouping), never how it's scoped -- 'Vibration Over Time', not 'Vibration Over "
+        "Time (Selected Machine)'. This holds even when the query filters by a dashboard "
+        "variable (see suggest_panel's own title field description): the variable "
+        "selector itself already shows what's currently selected, so repeating that in "
+        "the title is redundant, and doubly so once more than one panel on the same "
+        "dashboard filters by the same variable and each one repeats the qualifier.\n"
+        "Don't interrogate the user for every field before proposing anything -- once "
+        "you roughly know what they want to see and have checked real data, call "
+        "suggest_panel with reasonable defaults (chart type, title) for whatever they "
+        "haven't specified. A fast, adjustable draft beats a perfect draft after five "
+        "rounds of questions; the user can refine any field afterward.\n"
+        "Never describe a specific proposed panel in prose (chart type, fields, title) "
+        "and ask 'does this look right?' without actually calling suggest_panel in that "
+        "same turn -- the suggestion card (with its 'Open in builder' button) only "
+        "appears when you call the tool, so a prose-only description leaves the user "
+        "with nothing to open regardless of how confident or final your wording sounds. "
+        "If you're ready to name specifics, you're ready to call suggest_panel now; the "
+        "confirmation happens via the card itself, not via prose asking permission to "
+        "call the tool. This applies just as much to a second/third panel later in the "
+        "same conversation ('I want to add another') as to the first.\n"
+        "Treat a follow-up like 'use a line chart instead' or 'split by apiary instead' "
+        "as a refinement -- call suggest_panel again with the adjustment, grounded on "
+        "the exact prior proposal (given back to you below your own previous answer), "
+        "not a fresh guess."
+    )
+
+
 def build_copilot_system_prompt(
     schema: list[TelemetryTableSchema],
     *,
     now: datetime,
     ai_context: str = "",
+    dashboard_hint: tuple[UUID, str, list[AiVariableHint]] | None = None,
 ) -> str:
     # Unlike the two SQL-generation prompts above, this is a *system* prompt
     # for a multi-turn tool-calling conversation, not a one-shot "write SQL"
@@ -209,6 +285,27 @@ def build_copilot_system_prompt(
             "data -- trust it over guessing from column names alone:\n"
             f"{ai_context}\n\n"
         )
+    dashboard_block = ""
+    if dashboard_hint:
+        dashboard_id, dashboard_name, dashboard_variables = dashboard_hint
+        dashboard_block = (
+            f"The user is currently viewing dashboard \"{dashboard_name}\" "
+            f"(id={dashboard_id}) -- if they ask to add or suggest a panel without "
+            "naming a different dashboard, use this id for suggest_panel's "
+            "dashboard_id, without calling list_existing_panels just to look it up.\n"
+        )
+        if dashboard_variables:
+            variable_lines = "\n".join(f"${v.name} — {v.label}" for v in dashboard_variables)
+            dashboard_block += (
+                "This dashboard defines the following variables, each holding the "
+                "value currently selected by the viewer for that field:\n"
+                f"{variable_lines}\n"
+                "If a panel request implies filtering by one of these (e.g. 'for the "
+                "selected hive'), reference it directly in the WHERE clause, e.g. "
+                "`WHERE hive_id = $hive_id`. Do not invent variable names that are not "
+                "listed here.\n"
+            )
+        dashboard_block += "\n"
     return (
         f"The current time is {now.isoformat()}. You have no other sense of "
         "time, so use this to resolve relative references like 'today' or "
@@ -221,7 +318,8 @@ def build_copilot_system_prompt(
         "table/column names and types):\n"
         f"{schema_block}\n\n"
         f"{context_block}"
-        "You have five tools:\n"
+        f"{dashboard_block}"
+        "You have seven tools:\n"
         "- query_occurrences: look up Rule match/clear occurrences (alerts) "
         "-- use this for questions about firings, counts, timing, or "
         "resolution status.\n"
@@ -241,7 +339,14 @@ def build_copilot_system_prompt(
         "identifier naming.\n"
         "- suggest_automation: propose a new Rule as a reviewable draft "
         "once you have enough grounded information -- see the "
-        "rule-creation guidance below for how to use it.\n\n"
+        "rule-creation guidance below for how to use it.\n"
+        "- list_existing_panels: look up this project's existing "
+        "dashboards and their panels/variables, so you don't duplicate a "
+        "chart and can discover a dashboard's id and filterable "
+        "variables.\n"
+        "- suggest_panel: propose a new dashboard panel/chart as a "
+        "reviewable draft once you have enough grounded information -- "
+        "see the panel-suggestion guidance below for how to use it.\n\n"
         "Answer only using information returned by these tools. If a tool "
         "result doesn't answer the question, say so plainly rather than "
         "guessing a rule name, count, or reading. Sanity-check values "
@@ -282,4 +387,5 @@ def build_copilot_system_prompt(
         "it. For a confirmation question, still include this block, e.g. "
         "labels like \"Looks good\" and \"Adjust it\"."
         f"{_rule_creation_guidance()}"
+        f"{_panel_suggestion_guidance()}"
     )
