@@ -123,38 +123,6 @@ table.docs-table td:first-child { color: var(--text-h); font-weight: 600; white-
   white-space: pre;
 }
 
-.docs-gotchas-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
-  gap: 12px;
-}
-
-.docs-gotcha {
-  display: flex;
-  gap: 12px;
-  background: color-mix(in srgb, var(--severity-medium) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--severity-medium) 40%, transparent);
-  border-radius: var(--radius);
-  padding: 14px 16px;
-}
-
-.docs-gotcha-mark {
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--severity-medium);
-  color: var(--bg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  font-size: 13px;
-}
-
-.docs-gotcha-title { font-weight: 700; color: var(--text-h); margin: 0 0 4px; font-size: 14px; }
-.docs-gotcha-body { margin: 0; font-size: 13.5px; color: var(--text); }
-
 .docs-footer {
   margin-top: 12px;
   padding-top: 16px;

@@ -33,6 +33,9 @@
   top: calc(100% + 4px);
   left: 0;
   min-width: 200px;
+  /* Anchored only by its left edge -- a trigger near a narrow viewport's
+     right edge could otherwise push this off-screen. */
+  max-width: calc(100vw - 32px);
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;

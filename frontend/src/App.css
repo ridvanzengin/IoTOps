@@ -17,6 +17,19 @@
   box-sizing: border-box;
 }
 
+@media (max-width: 640px) {
+  /* .mobile-topbar (Sidebar.tsx/css) is position:fixed at 52px tall --
+     push content below it instead of letting it cover the page's own
+     top content. */
+  .app-content {
+    padding-top: 52px;
+  }
+
+  .page {
+    padding: 16px;
+  }
+}
+
 .button {
   display: inline-flex;
   align-items: center;

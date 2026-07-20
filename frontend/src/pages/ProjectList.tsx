@@ -75,6 +75,7 @@ export function ProjectList() {
         </div>
       ) : (
         <div className="collector-card">
+          <div className="collector-table-wrapper">
           <table className="collector-table">
             <thead>
               <tr>
@@ -89,6 +90,7 @@ export function ProjectList() {
                   <td>{project.name}</td>
                   <td>{project.description}</td>
                   <td className="collector-table__actions">
+                    <div className="collector-table__actions-inner">
                     <Link className="button" to={`/projects/${project.id}/edit`}>
                       Edit
                     </Link>
@@ -118,11 +120,13 @@ export function ProjectList() {
                         </div>
                       )}
                     </div>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </main>

@@ -21,12 +21,13 @@ const SUGGEST_AUTOMATION_SEED_REPLY = "Analyze my telemetry and suggest an autom
 const SUGGEST_PANEL_SEED_REPLY = "Suggest a panel for this dashboard";
 const SUGGEST_DASHBOARD_SEED_REPLY = "Suggest a dashboard for this project";
 
-// Shown instead of the single-purpose seed chips above when the
+// GENERIC_ANALYZE_SEED_REPLY doubles as the "analyze-telemetry" intent's
+// own single seed chip (below) and as one of the four chips shown when the
 // conversation was opened generically (no intent, no known dashboard) --
-// four short-labeled entry points into the same underlying flows, rather
-// than making the user type out a request from scratch. Labels are short
-// (fit side by side); the actual sent message can be a little more
-// explicit than the label since only the model sees it.
+// short-labeled entry points into the same underlying flows, rather than
+// making the user type out a request from scratch. Labels are short (fit
+// side by side); the actual sent message can be a little more explicit
+// than the label since only the model sees it.
 const GENERIC_ANALYZE_SEED_REPLY = "Analyze my current telemetry and tell me what's notable";
 const GENERIC_SUGGEST_PANEL_SEED_REPLY = "Suggest a dashboard panel worth adding";
 
@@ -35,6 +36,9 @@ const GENERIC_SUGGEST_PANEL_SEED_REPLY = "Suggest a dashboard panel worth adding
 // when the project is already known upfront, this question is never put to
 // the user at all, so it doesn't need a "skip the question" variant here.
 function greetingText(intent?: CopilotIntent): string {
+  if (intent === "analyze-telemetry") {
+    return `Hi, I'm ${ASSISTANT_NAME}. Which project's telemetry should I take a look at?`;
+  }
   if (intent === "suggest-automation") {
     return `Hi, I'm ${ASSISTANT_NAME}. Which project would you like to set up an automation for?`;
   }
@@ -89,6 +93,9 @@ function renderAssistantContent(content: string): ReactNode {
 }
 
 function ackText(project: Project, intent?: CopilotIntent): string {
+  if (intent === "analyze-telemetry") {
+    return `Let's take a look at ${project.name}'s telemetry.`;
+  }
   if (intent === "suggest-automation") {
     return `Let's set up an automation for ${project.name}. What would you like to detect?`;
   }
@@ -431,6 +438,17 @@ export function CopilotChat({
                 />
               )}
             </div>
+            {ackDone && effectiveIntent === "analyze-telemetry" && messages.length === 0 && (
+              <div className="copilot-chat__project-chips">
+                <button
+                  type="button"
+                  className="copilot-chat__project-chip"
+                  onClick={() => sendMessage(GENERIC_ANALYZE_SEED_REPLY)}
+                >
+                  {GENERIC_ANALYZE_SEED_REPLY}
+                </button>
+              </div>
+            )}
             {ackDone && effectiveIntent === "suggest-automation" && messages.length === 0 && (
               <div className="copilot-chat__project-chips">
                 <button

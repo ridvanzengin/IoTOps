@@ -187,10 +187,14 @@ function buildXyOption(
     color: getChartColors(),
     tooltip: chart.tooltip ? { trigger: "axis" } : undefined,
     legend: chart.legend ? { top: 0, right: 0, textStyle: { fontSize: 11 } } : undefined,
+    // `right: 8` is a floor, not the actual reserved space -- containLabel
+    // grows it to fit the right axis's real label width when one exists,
+    // so a bigger fixed number here (previously 36) was just adding blank
+    // space on top of what the labels actually need.
     grid: {
       top: chart.legend ? 28 : 12,
       left: 4,
-      right: usesRightAxis ? 36 : 8,
+      right: 8,
       bottom: 26,
       containLabel: true,
     },
@@ -234,6 +238,14 @@ function buildXyOption(
             axisLabel: { fontSize: 11, color: getAxisLabelColor() },
             position: "right",
             splitLine: { show: false },
+            // Without this, each value axis independently auto-scales its
+            // own min/max/tick count from its own series' data range (e.g.
+            // temperature 0-50 vs humidity 0-80) -- the two axes' gridlines
+            // land at different heights even though only the left axis's
+            // splitLine is drawn, so the right axis's own labels don't line
+            // up with what's actually on the chart. Aligns this axis's
+            // ticks to the left axis's instead of computing its own.
+            alignTicks: true,
           },
         ]
       : {
@@ -292,24 +304,67 @@ function nearestCategoryValue(categories: unknown[], targetIso: string): unknown
   return nearest;
 }
 
-export interface EventOverlay {
-  series: NonNullable<EChartsOption["series"]>;
-  // A dedicated, hidden value axis fixed to [0, 1] -- every event dot
-  // plots at y=1 (top) regardless of what the panel's own data is doing,
-  // so markers form one consistent band above the chart instead of
-  // depending on (and potentially colliding with) the real data's own
-  // scale. Appended after whatever axes buildChartOption already
-  // produced, so it doesn't disturb their existing yAxisIndex values --
-  // the caller (ChartPreview) is responsible for actually appending it
-  // and pointing this overlay's series at its index.
-  yAxis: NonNullable<EChartsOption["yAxis"]> extends (infer T)[] ? T : never;
+interface EventMarker {
+  name: string;
+  xValue: number | unknown;
+  shape: string;
+  color: string;
 }
 
-// Match/clear events as scatter dots on a dedicated top-of-chart lane --
-// see the EventOverlay yAxis comment for why a fixed lane instead of
-// plotting at the real data's value. Pie/gauge charts have no natural
-// x-position, so they never get an overlay -- gated here, matching what
-// buildChartOption itself supports for line/bar/scatter.
+const EVENT_MARKER_RADIUS = 7;
+
+// Draws one event marker as a plain zrender shape at an already-resolved
+// pixel position -- kept separate from renderItem so the shape math reads
+// independently of the coordinate lookup around it.
+function eventMarkerShape(shape: string, cx: number, cy: number, color: string) {
+  const r = EVENT_MARKER_RADIUS;
+  const common = { style: { fill: color } };
+  switch (shape) {
+    case "circle":
+      return { type: "circle", shape: { cx, cy, r }, ...common };
+    case "rect": {
+      const size = r * 1.6;
+      return { type: "rect", shape: { x: cx - size / 2, y: cy - size / 2, width: size, height: size }, ...common };
+    }
+    case "diamond":
+    default:
+      return {
+        type: "polygon",
+        shape: {
+          points: [
+            [cx, cy - r],
+            [cx + r, cy],
+            [cx, cy + r],
+            [cx - r, cy],
+          ],
+        },
+        ...common,
+      };
+  }
+}
+
+export interface EventOverlay {
+  series: NonNullable<EChartsOption["series"]>;
+}
+
+// Match/clear events as marker shapes on a fixed top-of-chart lane. Drawn
+// as a `custom` series that positions each marker from the grid's own
+// pixel rect (`params.coordSys`) plus the x-axis's pixel mapping for that
+// event's timestamp -- deliberately not a real data point on any yAxis,
+// so a marker's vertical position never depends on (or can collide with)
+// the real data's scale. This also means the overlay never needs a
+// dedicated yAxis of its own: an earlier version added one (hidden,
+// fixed to [0, 1]) for the same fixed-lane effect, but ECharts stacks
+// *any* extra yAxis alongside the real left/right axes and reserves real
+// margin for it even with show:false -- confirmed empirically -- which
+// widened (and for a hidden axis pinned to the left, shifted) the
+// chart's side margins just from toggling the overlay on. Going through
+// pixels instead of an axis value sidesteps that entirely: toggling the
+// overlay can now never move the real axes.
+//
+// Pie/gauge charts have no natural x-position, so they never get an
+// overlay -- gated here, matching what buildChartOption itself supports
+// for line/bar/scatter.
 export function buildEventOverlay(chart: Chart, rows: Row[], events: Event[]): EventOverlay | null {
   if (events.length === 0) return null;
   if (chart.type !== "line" && chart.type !== "bar" && chart.type !== "scatter") return null;
@@ -322,32 +377,44 @@ export function buildEventOverlay(chart: Chart, rows: Row[], events: Event[]): E
     if (!ruleShapeIndex.has(event.rule_id)) ruleShapeIndex.set(event.rule_id, ruleShapeIndex.size);
   }
 
-  const data = events
+  const markers: EventMarker[] = events
     .map((event) => {
       const xValue = isTimeAxis ? new Date(event.matched_at).getTime() : nearestCategoryValue(categories!, event.matched_at);
       if (xValue === null || xValue === undefined || Number.isNaN(xValue)) return null;
       return {
         name: `${event.flag === "match" ? "Active" : "Resolved"}: ${event.rule_name}`,
-        value: [xValue, 1],
-        symbol: EVENT_SYMBOLS[(ruleShapeIndex.get(event.rule_id) ?? 0) % EVENT_SYMBOLS.length],
-        symbolSize: 14,
-        itemStyle: { color: EVENT_MARK_COLOR[event.flag] },
+        xValue,
+        shape: EVENT_SYMBOLS[(ruleShapeIndex.get(event.rule_id) ?? 0) % EVENT_SYMBOLS.length],
+        color: EVENT_MARK_COLOR[event.flag],
       };
     })
-    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+    .filter((entry): entry is EventMarker => entry !== null);
 
-  if (data.length === 0) return null;
+  if (markers.length === 0) return null;
 
   return {
     series: [
       {
-        type: "scatter",
+        type: "custom",
         name: "Events",
-        data,
-        tooltip: { trigger: "item" },
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        data: markers,
+        renderItem: (params, api) => {
+          const marker = markers[params.dataIndex];
+          const [pixelX] = api.coord([marker.xValue, 0]);
+          const coordSys = params.coordSys as { x: number; y: number; width: number; height: number };
+          // Above coordSys.y (the grid's top edge / the data's own top
+          // gridline), not below it -- markers belong in the top margin,
+          // clear of the highest data point, regardless of how close the
+          // real data happens to sit to the axis's current max.
+          const pixelY = coordSys.y - EVENT_MARKER_RADIUS - 3;
+          if (pixelX < coordSys.x || pixelX > coordSys.x + coordSys.width) return undefined;
+          return eventMarkerShape(marker.shape, pixelX, pixelY, marker.color);
+        },
+        tooltip: { trigger: "item", formatter: (params) => markers[(params as { dataIndex: number }).dataIndex]?.name ?? "" },
       },
     ],
-    yAxis: { type: "value", show: false, min: 0, max: 1 },
   };
 }
 

@@ -192,3 +192,88 @@
   color: var(--text-h);
 }
 
+/* Mobile: the sidebar becomes an off-canvas drawer (see Sidebar.tsx's
+   mobileOpen state) instead of a permanent flex sibling -- position:fixed
+   takes it out of .app-shell's flex flow entirely, so no width is
+   reserved for it when closed. .mobile-topbar (hamburger + brand) is what
+   opens it; hidden entirely above this breakpoint. */
+.mobile-topbar {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 52px;
+    padding: 0 12px;
+    box-sizing: border-box;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    z-index: 30;
+  }
+
+  .mobile-topbar__menu-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: none;
+    color: var(--text-h);
+    cursor: pointer;
+  }
+
+  .mobile-topbar__menu-btn:hover {
+    background: var(--bg-subtle);
+  }
+
+  .mobile-topbar__brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text-h);
+    text-decoration: none;
+  }
+
+  .mobile-topbar__brand-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+
+  .sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 39;
+  }
+
+  .sidebar--mobile {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 260px;
+    min-height: 100svh;
+    z-index: 40;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: var(--shadow);
+  }
+
+  .sidebar--mobile-open {
+    transform: translateX(0);
+  }
+}
+

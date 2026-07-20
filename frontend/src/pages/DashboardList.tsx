@@ -94,6 +94,7 @@ export function DashboardList() {
         </div>
       ) : (
         <div className="collector-card">
+          <div className="collector-table-wrapper">
           <table className="collector-table">
             <thead>
               <tr>
@@ -114,6 +115,7 @@ export function DashboardList() {
                   <td>{projectName(dashboard.project_id)}</td>
                   <td>{dashboard.panels.length}</td>
                   <td className="collector-table__actions">
+                    <div className="collector-table__actions-inner">
                     <div className="dropdown-menu">
                       <button
                         type="button"
@@ -140,11 +142,13 @@ export function DashboardList() {
                         </div>
                       )}
                     </div>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </main>

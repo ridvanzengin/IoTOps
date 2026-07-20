@@ -88,6 +88,7 @@ export function VariableList() {
         </div>
       ) : (
         <div className="collector-card">
+          <div className="collector-table-wrapper">
           <table className="collector-table">
             <thead>
               <tr>
@@ -112,6 +113,7 @@ export function VariableList() {
                       : "—"}
                   </td>
                   <td className="collector-table__actions">
+                    <div className="collector-table__actions-inner">
                     <Link className="button" to={`/dashboards/${dashboardId}/variables/${variable.name}/edit`}>
                       Edit
                     </Link>
@@ -122,11 +124,13 @@ export function VariableList() {
                     >
                       Delete
                     </button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </main>

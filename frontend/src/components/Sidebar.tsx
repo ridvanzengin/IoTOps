@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { useEvents } from "../context/EventsContext";
+import { useMediaQuery, MOBILE_QUERY } from "../hooks/useMediaQuery";
 import {
   AutomaterIcon,
   ChevronIcon,
@@ -10,6 +11,7 @@ import {
   GithubIcon,
   HomeIcon,
   LogoMark,
+  MenuIcon,
   ProjectIcon,
   ScheduleIcon,
   VisualizerIcon,
@@ -102,10 +104,20 @@ export function Sidebar() {
   const { activePanel, openCopilotPanel, closePanel } = useEvents();
   const copilotOpen = activePanel?.kind === "copilot";
   const [collapsed, setCollapsed] = useState(loadStoredCollapsed);
+  const isMobile = useMediaQuery(MOBILE_QUERY);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const { pathname } = useLocation();
 
   useEffect(() => {
     window.localStorage.setItem(COLLAPSED_STORAGE_KEY, collapsed ? "1" : "0");
   }, [collapsed]);
+
+  // Closing on navigation matches every off-canvas mobile nav convention --
+  // otherwise the drawer stays open over the new page until manually
+  // dismissed, which reads as stuck/broken.
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
 
   const navItems: NavItem[] = [
     { label: "Overview", to: "/", icon: HomeIcon, end: true },
@@ -121,57 +133,90 @@ export function Sidebar() {
     },
   ];
 
-  return (
-    <aside className={`sidebar${collapsed ? " sidebar--collapsed" : ""}`}>
-      <div className="sidebar__header">
-        <NavLink to="/" end className="sidebar__brand" title={collapsed ? "IoTOps" : undefined}>
-          <span className="sidebar__brand-mark">
-            <LogoMark className="sidebar__brand-icon" />
-          </span>
-          {!collapsed && <span>IoTOps</span>}
-        </NavLink>
-        <button
-          type="button"
-          className="sidebar__collapse-btn"
-          onClick={() => setCollapsed((value) => !value)}
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          <ChevronIcon className="sidebar__collapse-icon" />
-        </button>
-      </div>
-      <nav className="sidebar__nav">
-        {navItems.map((item) => renderNavItem(item, collapsed))}
+  // The desktop "collapsed" icon-rail shrink isn't a meaningful state once
+  // inside the mobile drawer -- it's either fully open (full width, full
+  // labels) or fully hidden, never a narrow icon-only rail on top of that.
+  const effectiveCollapsed = isMobile ? false : collapsed;
 
-        {!collapsed && <p className="sidebar__section-label">Reference</p>}
-        {REFERENCE_NAV_ITEMS.map((item) => renderNavItem(item, collapsed))}
-        {EXTERNAL_LINKS.map((item) => {
-          const Icon = item.icon;
-          return (
-            <a
-              key={item.label}
-              href={item.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="sidebar__link"
-              title={collapsed ? item.label : undefined}
-            >
-              <Icon className="sidebar__icon" />
-              {!collapsed && item.label}
-            </a>
-          );
-        })}
-      </nav>
-      <div className="sidebar__footer">
-        <a
-          href="https://ridvanzengin.github.io/"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="sidebar__attribution"
-          title={collapsed ? "Built by Rıdvan Zengin" : undefined}
-        >
-          {collapsed ? "RZ" : "Built by Rıdvan Zengin"}
-        </a>
-      </div>
-    </aside>
+  return (
+    <>
+      {isMobile && (
+        <div className="mobile-topbar">
+          <button
+            type="button"
+            className="mobile-topbar__menu-btn"
+            onClick={() => setMobileOpen(true)}
+            aria-label="Open menu"
+          >
+            <MenuIcon />
+          </button>
+          <NavLink to="/" end className="mobile-topbar__brand">
+            <span className="sidebar__brand-mark">
+              <LogoMark className="mobile-topbar__brand-icon" />
+            </span>
+            <span>IoTOps</span>
+          </NavLink>
+        </div>
+      )}
+      {isMobile && mobileOpen && (
+        <div className="sidebar-backdrop" onClick={() => setMobileOpen(false)} />
+      )}
+      <aside
+        className={`sidebar${effectiveCollapsed ? " sidebar--collapsed" : ""}${
+          isMobile ? ` sidebar--mobile${mobileOpen ? " sidebar--mobile-open" : ""}` : ""
+        }`}
+      >
+        <div className="sidebar__header">
+          <NavLink to="/" end className="sidebar__brand" title={effectiveCollapsed ? "IoTOps" : undefined}>
+            <span className="sidebar__brand-mark">
+              <LogoMark className="sidebar__brand-icon" />
+            </span>
+            {!effectiveCollapsed && <span>IoTOps</span>}
+          </NavLink>
+          <button
+            type="button"
+            className="sidebar__collapse-btn"
+            onClick={() => (isMobile ? setMobileOpen(false) : setCollapsed((value) => !value))}
+            title={isMobile ? "Close menu" : collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={isMobile ? "Close menu" : undefined}
+          >
+            {isMobile ? "×" : <ChevronIcon className="sidebar__collapse-icon" />}
+          </button>
+        </div>
+        <nav className="sidebar__nav">
+          {navItems.map((item) => renderNavItem(item, effectiveCollapsed))}
+
+          {!effectiveCollapsed && <p className="sidebar__section-label">Reference</p>}
+          {REFERENCE_NAV_ITEMS.map((item) => renderNavItem(item, effectiveCollapsed))}
+          {EXTERNAL_LINKS.map((item) => {
+            const Icon = item.icon;
+            return (
+              <a
+                key={item.label}
+                href={item.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="sidebar__link"
+                title={effectiveCollapsed ? item.label : undefined}
+              >
+                <Icon className="sidebar__icon" />
+                {!effectiveCollapsed && item.label}
+              </a>
+            );
+          })}
+        </nav>
+        <div className="sidebar__footer">
+          <a
+            href="https://ridvanzengin.github.io/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="sidebar__attribution"
+            title={effectiveCollapsed ? "Built by Rıdvan Zengin" : undefined}
+          >
+            {effectiveCollapsed ? "RZ" : "Built by Rıdvan Zengin"}
+          </a>
+        </div>
+      </aside>
+    </>
   );
 }

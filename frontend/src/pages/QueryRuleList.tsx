@@ -122,6 +122,7 @@ export function QueryRuleList() {
         </div>
       ) : (
         <div className="collector-card">
+          <div className="collector-table-wrapper">
           <table className="collector-table">
             <thead>
               <tr>
@@ -152,6 +153,7 @@ export function QueryRuleList() {
                     </span>
                   </td>
                   <td className="collector-table__actions">
+                    <div className="collector-table__actions-inner">
                     <button className="button" disabled={pendingKey === rule.id} onClick={() => toggleEnabled(rule)}>
                       {rule.enabled ? "Disable" : "Enable"}
                     </button>
@@ -182,11 +184,13 @@ export function QueryRuleList() {
                         </div>
                       )}
                     </div>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </main>

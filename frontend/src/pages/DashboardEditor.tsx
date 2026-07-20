@@ -15,6 +15,7 @@ import { RuleMultiSelect } from "../components/RuleMultiSelect";
 import type { RuleOption } from "../components/RuleMultiSelect";
 import { TypeaheadSelect } from "../components/TypeaheadSelect";
 import { useEvents } from "../context/EventsContext";
+import { useMediaQuery, MOBILE_QUERY } from "../hooks/useMediaQuery";
 import { DEFAULT_REFRESH_INTERVAL, REFRESH_INTERVALS } from "../constants/refreshIntervals";
 import { DEFAULT_TIME_RANGE, TIME_RANGES } from "../constants/timeRanges";
 import { filterEventsByVariables, resolveVariablesFrom } from "../utils/variables";
@@ -78,6 +79,28 @@ export function DashboardEditor() {
       .map((queryRule) => ({ id: queryRule.id, name: queryRule.name, sourceLabel: "Scheduled" }));
     return [...realTimeRules, ...scheduledRules];
   }, [automaters, queryRules, dashboard]);
+
+  const isMobile = useMediaQuery(MOBILE_QUERY);
+
+  // Below the mobile breakpoint, panels render as a simple full-width
+  // read-only stack instead of the interactive 12-column grid -- touch
+  // drag/resize isn't attempted (react-grid-layout's own touch support is
+  // real but flaky enough on mobile browsers that editing stays a desktop
+  // task). This is a derived, throwaway layout -- `layout`/`panel.position`
+  // (the real, saved multi-column data) is untouched, only this render
+  // path's `cols`/`layout` props differ. Each panel keeps its own stored
+  // height, stacked in the dashboard's existing panel order.
+  const mobileLayout: Layout[] = useMemo(() => {
+    if (!dashboard) return [];
+    let y = 0;
+    return dashboard.panels.map((panel) => {
+      const stored = layout.find((item) => item.i === panel.id);
+      const h = stored?.h ?? 8;
+      const item = { i: panel.id, x: 0, y, w: 1, h };
+      y += h;
+      return item;
+    });
+  }, [dashboard, layout]);
 
   useEffect(() => {
     listAutomaters()
@@ -461,8 +484,8 @@ export function DashboardEditor() {
           ) : (
             <ResponsiveGridLayout
               className="layout"
-              layout={layout}
-              cols={GRID_COLUMNS}
+              layout={isMobile ? mobileLayout : layout}
+              cols={isMobile ? 1 : GRID_COLUMNS}
               rowHeight={ROW_HEIGHT}
               // react-grid-layout defaults containerPadding to its margin
               // value ([10, 10]) when not set -- insetting every panel row
@@ -473,7 +496,16 @@ export function DashboardEditor() {
               draggableHandle=".dashboard-panel__header"
               draggableCancel=".dashboard-panel__menu-trigger, .dashboard-menu__list, .rule-multiselect"
               resizeHandles={["se"]}
-              onLayoutChange={setLayout}
+              isDraggable={!isMobile}
+              isResizable={!isMobile}
+              // The mobile branch's `layout` is a derived, throwaway
+              // single-column stack (see mobileLayout above) -- never let
+              // it overwrite the real saved layout in state, or switching
+              // back to desktop width (or hitting Save) would persist
+              // every panel's position as a stacked w:1 column.
+              onLayoutChange={(next) => {
+                if (!isMobile) setLayout(next);
+              }}
             >
               {dashboard.panels.map((panel) => (
                 <div key={panel.id} className="dashboard-panel">
