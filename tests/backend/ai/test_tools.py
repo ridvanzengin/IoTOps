@@ -6,12 +6,15 @@ from mongomock_motor import AsyncMongoMockClient
 
 from app.ai.tools import (
     run_flag_missing_context,
+    run_list_existing_panels,
     run_list_existing_rules,
     run_query_occurrences,
     run_query_telemetry,
     run_suggest_automation,
+    run_suggest_panel,
 )
 from app.automater.models import Automater, Condition, Rule
+from app.dashboard.models import Dashboard, LineChart, Panel, PanelPosition, Query, Variable
 from app.event.models import Event, EventFlag, OccurrenceStatus
 from app.event.repository import EventRepository, to_document
 from app.event.service import EventService
@@ -19,7 +22,7 @@ from app.query_rule.models import QueryRule, QueryRuleSchedule
 from app.shared.models import InputPlugin, OutputPlugin
 from app.telemetry.repository import TelemetryRepository
 from app.telemetry.service import TelemetryService
-from tests.backend.ai.fakes import FakeAutomaterService, FakeQueryRuleService
+from tests.backend.ai.fakes import FakeAutomaterService, FakeDashboardService, FakeQueryRuleService
 from tests.backend.telemetry.fakes import FakePool
 
 
@@ -303,6 +306,175 @@ def test_suggest_automation_returns_error_text_and_none_on_invalid_input() -> No
 def test_suggest_automation_returns_error_text_on_unknown_kind() -> None:
     ack, suggestion = run_suggest_automation(
         uuid4(), {"kind": "bogus", "name": "x", "severity": "low", "identifiers": []}
+    )
+
+    assert suggestion is None
+    assert "couldn't build" in ack.lower()
+
+
+def _panel(**overrides) -> Panel:
+    defaults: dict = {
+        "title": "Hive Temperature",
+        "chart": LineChart(title="Hive Temperature", x_axis="time", y_axis="temperature"),
+        "query": Query(sql="SELECT time, temperature FROM hive_metrics"),
+        "position": PanelPosition(x=0, y=0, width=6, height=8),
+    }
+    defaults.update(overrides)
+    return Panel(**defaults)
+
+
+def _dashboard(project_id, **overrides) -> Dashboard:
+    defaults: dict = {
+        "project_id": project_id,
+        "name": "Apiary Overview",
+        "variables": [],
+        "panels": [],
+    }
+    defaults.update(overrides)
+    return Dashboard(**defaults)
+
+
+async def test_list_existing_panels_reports_none_when_project_has_no_dashboards() -> None:
+    result = await run_list_existing_panels(FakeDashboardService(), uuid4())
+
+    assert "no dashboards" in result.lower()
+
+
+async def test_list_existing_panels_filters_dashboards_by_project() -> None:
+    project_id = uuid4()
+    other_dashboard = _dashboard(uuid4(), name="Other project's dashboard")
+    this_dashboard = _dashboard(project_id, name="Apiary Overview")
+    dashboard_service = FakeDashboardService([other_dashboard, this_dashboard])
+
+    result = await run_list_existing_panels(dashboard_service, project_id)
+
+    assert "Apiary Overview" in result
+    assert "Other project's dashboard" not in result
+
+
+async def test_list_existing_panels_includes_panel_and_variable_details() -> None:
+    project_id = uuid4()
+    dashboard = _dashboard(
+        project_id,
+        variables=[Variable(name="hive_id", label="Hive", table="hive_metrics", value_column="hive_id")],
+        panels=[_panel()],
+    )
+    dashboard_service = FakeDashboardService([dashboard])
+
+    result = await run_list_existing_panels(dashboard_service, project_id)
+
+    assert str(dashboard.id) in result
+    assert "$hive_id" in result
+    assert "Hive Temperature" in result
+    assert "x=time, y=temperature" in result
+
+
+async def test_list_existing_panels_reports_dashboard_with_no_panels_yet() -> None:
+    project_id = uuid4()
+    dashboard_service = FakeDashboardService([_dashboard(project_id, panels=[])])
+
+    result = await run_list_existing_panels(dashboard_service, project_id)
+
+    assert "no panels yet" in result
+
+
+def test_suggest_panel_builds_line_chart_suggestion() -> None:
+    dashboard_id = uuid4()
+
+    ack, suggestion = run_suggest_panel(
+        {
+            "dashboard_id": str(dashboard_id),
+            "title": "Hive Temperature",
+            "chart_type": "line",
+            "sql": "SELECT time, temperature FROM hive_metrics WHERE time >= $__timeFrom AND time <= $__timeTo",
+            "x_axis": "time",
+            "y_axis": "temperature",
+        }
+    )
+
+    assert isinstance(ack, str) and ack
+    assert suggestion is not None
+    assert suggestion.kind == "panel"
+    assert suggestion.state.dashboard_id == dashboard_id
+    assert suggestion.state.chart.type == "line"
+    assert suggestion.state.chart.x_axis == "time"
+    assert suggestion.state.chart.y_axis == "temperature"
+
+
+def test_suggest_panel_builds_pie_chart_suggestion() -> None:
+    _, suggestion = run_suggest_panel(
+        {
+            "dashboard_id": str(uuid4()),
+            "title": "Status Breakdown",
+            "chart_type": "pie",
+            "sql": "SELECT status, count(*) FROM hive_metrics GROUP BY status",
+            "label_field": "status",
+            "value_field": "count",
+        }
+    )
+
+    assert suggestion is not None
+    assert suggestion.state.chart.type == "pie"
+    assert suggestion.state.chart.label_field == "status"
+    assert suggestion.state.chart.value_field == "count"
+
+
+def test_suggest_panel_builds_gauge_chart_suggestion() -> None:
+    _, suggestion = run_suggest_panel(
+        {
+            "dashboard_id": str(uuid4()),
+            "title": "Current Weight",
+            "chart_type": "gauge",
+            "sql": "SELECT weight_kg FROM hive_metrics ORDER BY time DESC LIMIT 1",
+            "value_field": "weight_kg",
+            "min": 0,
+            "max": 100,
+        }
+    )
+
+    assert suggestion is not None
+    assert suggestion.state.chart.type == "gauge"
+    assert suggestion.state.chart.value_field == "weight_kg"
+
+
+def test_suggest_panel_returns_error_text_on_missing_axis_fields() -> None:
+    ack, suggestion = run_suggest_panel(
+        {
+            "dashboard_id": str(uuid4()),
+            "title": "Incomplete",
+            "chart_type": "line",
+            "sql": "SELECT time, temperature FROM hive_metrics",
+        }
+    )
+
+    assert suggestion is None
+    assert "couldn't build" in ack.lower()
+
+
+def test_suggest_panel_returns_error_text_on_invalid_dashboard_id() -> None:
+    ack, suggestion = run_suggest_panel(
+        {
+            "dashboard_id": "not-a-uuid",
+            "title": "Bad id",
+            "chart_type": "line",
+            "sql": "SELECT time, temperature FROM hive_metrics",
+            "x_axis": "time",
+            "y_axis": "temperature",
+        }
+    )
+
+    assert suggestion is None
+    assert "couldn't build" in ack.lower()
+
+
+def test_suggest_panel_returns_error_text_on_unknown_chart_type() -> None:
+    ack, suggestion = run_suggest_panel(
+        {
+            "dashboard_id": str(uuid4()),
+            "title": "Bogus",
+            "chart_type": "bogus",
+            "sql": "SELECT 1",
+        }
     )
 
     assert suggestion is None

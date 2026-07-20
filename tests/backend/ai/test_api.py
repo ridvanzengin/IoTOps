@@ -18,6 +18,7 @@ from tests.backend.ai.fakes import (
     FakeAnthropicClient,
     FakeAutomaterService,
     FakeCollectorService,
+    FakeDashboardService,
     FakeProjectService,
     FakeQueryRuleService,
     message,
@@ -50,6 +51,7 @@ def _client_with_handler(handler, anthropic_responses: list | None = None) -> Te
         query_rule_service=FakeQueryRuleService(),
         collector_service=FakeCollectorService(),
         plugin_registry=build_default_registry(),
+        dashboard_service=FakeDashboardService(),
     )
     app.dependency_overrides[get_ai_service] = lambda: service
     return TestClient(app)
@@ -269,6 +271,43 @@ def test_copilot_returns_suggestion_from_a_plain_conversation_with_no_intent() -
     body = response.json()
     assert body["suggestion"]["kind"] == "automater_rule"
     assert body["suggestion"]["state"]["table"] == "device_metrics"
+
+
+def test_copilot_returns_panel_suggestion_with_dashboard_id() -> None:
+    dashboard_id = "22222222-2222-2222-2222-222222222222"
+    client = _client_with_handler(
+        _unused_ollama_handler,
+        anthropic_responses=[
+            message(
+                tool_use_block(
+                    "suggest_panel",
+                    {
+                        "dashboard_id": dashboard_id,
+                        "title": "Hive Temperature",
+                        "chart_type": "line",
+                        "sql": "SELECT time, temperature FROM hive_metrics",
+                        "x_axis": "time",
+                        "y_axis": "temperature",
+                    },
+                )
+            ),
+            message(text_block("Here's a panel draft.")),
+        ],
+    )
+
+    response = client.post(
+        "/api/ai/copilot",
+        json={
+            "project_id": "11111111-1111-1111-1111-111111111111",
+            "question": "chart hive temperature",
+            "dashboard_id": dashboard_id,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["suggestion"]["kind"] == "panel"
+    assert body["suggestion"]["state"]["dashboard_id"] == dashboard_id
 
 
 def test_copilot_returns_502_on_anthropic_failure() -> None:

@@ -1,4 +1,5 @@
 import type { ConditionPayload, ResolveMode, RuleSeverity } from "./automater";
+import type { Chart, Query } from "./dashboard";
 import type { QueryRuleSchedule } from "./queryRule";
 
 export interface CopilotMessage {
@@ -12,9 +13,9 @@ export interface NeedsContext {
 }
 
 // Set for the lifetime of a suggestion-flow conversation, opened via a
-// "Suggest an automation" button rather than the plain Co-pilot icon --
-// see EventsContext.tsx's ActivePanel.
-export type CopilotIntent = "suggest-automation";
+// "Suggest an automation"/"Suggest a panel" button rather than the plain
+// Co-pilot icon -- see EventsContext.tsx's ActivePanel.
+export type CopilotIntent = "suggest-automation" | "suggest-panel";
 
 export interface AutomaterRuleSuggestionState {
   project_id: string;
@@ -42,9 +43,19 @@ export interface QueryRuleSuggestionState {
   schedule: QueryRuleSchedule;
 }
 
-// Discriminated on `kind` -- the route to prefill (/automaters/new vs.
-// /query-rules/new) is derived from it client-side rather than sent by
-// the backend, so that routing decision isn't duplicated in two layers.
+export interface PanelSuggestionState {
+  dashboard_id: string;
+  title: string;
+  chart: Chart;
+  query: Query;
+  time_range: string;
+}
+
+// Discriminated on `kind` -- the route to prefill (/automaters/new,
+// /query-rules/new, or /dashboards/{dashboard_id}/panels/new) is derived
+// from it client-side rather than sent by the backend, so that routing
+// decision isn't duplicated in two layers.
 export type CopilotSuggestion =
   | { kind: "automater_rule"; label: string; state: AutomaterRuleSuggestionState }
-  | { kind: "query_rule"; label: string; state: QueryRuleSuggestionState };
+  | { kind: "query_rule"; label: string; state: QueryRuleSuggestionState }
+  | { kind: "panel"; label: string; state: PanelSuggestionState };

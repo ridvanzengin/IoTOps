@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, model_validator
 
 from app.automater.models import Condition, ResolveMode, RuleSeverity
+from app.dashboard.models import BarChart, Chart, GaugeChart, LineChart, PieChart, Query, ScatterChart
 from app.query_rule.models import QueryRuleSchedule
 
 
@@ -43,6 +44,13 @@ class CopilotQuestionRequest(BaseModel):
     # and re-caps to the last 8 messages regardless of what's sent here
     # (see AiService.answer_copilot_question).
     history: list[CopilotMessage] = Field(default_factory=list)
+    # Set when the Co-pilot was opened from inside an already-open
+    # dashboard (e.g. its "Suggest a panel" menu item) -- lets the system
+    # prompt hint the model with that dashboard's id/name/variables so
+    # suggest_panel doesn't need a round-trip through list_existing_panels
+    # to discover it. None for every other entry point; suggest_panel
+    # still works without it, the model just has to look it up itself.
+    dashboard_id: UUID | None = None
 
 
 class NeedsContext(BaseModel):
@@ -101,6 +109,45 @@ class QueryRuleSuggestionState(BaseModel):
         return self
 
 
+class PanelSuggestionState(BaseModel):
+    # Mirrors PanelInput minus `position` (PanelBuilder.tsx's own
+    # findFreePosition already auto-places new panels -- no reason to make
+    # the model guess a grid slot) and `event_rule_ids` (not something the
+    # model should propose). Adds `dashboard_id`, which PanelInput doesn't
+    # need (panels are always addressed via their parent Dashboard's own
+    # id in the URL) but a suggestion does, since -- unlike a Rule
+    # suggestion, where which Automater/Collector to attach to is left to
+    # the user -- a panel has nowhere to go without a target dashboard.
+    dashboard_id: UUID
+    title: str
+    chart: Chart
+    query: Query
+    time_range: str = "1h"
+
+    @model_validator(mode="after")
+    def _validate_complete(self) -> "PanelSuggestionState":
+        # Chart's own field types don't enforce non-empty axis/field names
+        # (a real, in-progress PanelEditor.tsx draft legitimately has
+        # those blank before the user finishes it) -- a *suggestion*
+        # specifically needs its own completeness check, mirroring
+        # AutomaterRuleSuggestionState/QueryRuleSuggestionState's own
+        # validators, so an incomplete draft reads as a retryable tool
+        # error (see run_suggest_panel) rather than a suggestion card with
+        # blank chart fields.
+        if not self.query.sql:
+            raise ValueError("panel suggestion requires a non-empty sql query")
+        if isinstance(self.chart, (LineChart, BarChart, ScatterChart)):
+            if not self.chart.x_axis or not self.chart.y_axis:
+                raise ValueError("line/bar/scatter panel suggestion requires x_axis and y_axis")
+        elif isinstance(self.chart, PieChart):
+            if not self.chart.label_field or not self.chart.value_field:
+                raise ValueError("pie panel suggestion requires label_field and value_field")
+        elif isinstance(self.chart, GaugeChart):
+            if not self.chart.value_field:
+                raise ValueError("gauge panel suggestion requires value_field")
+        return self
+
+
 class AutomaterRuleSuggestion(BaseModel):
     kind: Literal["automater_rule"] = "automater_rule"
     label: str
@@ -113,13 +160,20 @@ class QueryRuleSuggestion(BaseModel):
     state: QueryRuleSuggestionState
 
 
+class PanelSuggestion(BaseModel):
+    kind: Literal["panel"] = "panel"
+    label: str
+    state: PanelSuggestionState
+
+
 # Discriminated on `kind` -- the frontend derives which route to prefill
-# (/automaters/new vs. /query-rules/new) from it rather than the backend
-# sending a route string, so that routing decision isn't duplicated in two
-# layers. See app/ai/tools.py's SUGGEST_AUTOMATION_TOOL and
+# (/automaters/new, /query-rules/new, or /dashboards/{dashboard_id}/
+# panels/new) from it rather than the backend sending a route string, so
+# that routing decision isn't duplicated in two layers. See
+# app/ai/tools.py's SUGGEST_AUTOMATION_TOOL/SUGGEST_PANEL_TOOL and
 # AiService._execute_copilot_tool.
 CopilotSuggestion = Annotated[
-    AutomaterRuleSuggestion | QueryRuleSuggestion, Field(discriminator="kind")
+    AutomaterRuleSuggestion | QueryRuleSuggestion | PanelSuggestion, Field(discriminator="kind")
 ]
 
 

@@ -11,19 +11,22 @@ from app.ai.prompts import build_copilot_system_prompt, build_query_rule_sql_pro
 from app.ai.tools import (
     COPILOT_TOOLS,
     run_flag_missing_context,
+    run_list_existing_panels,
     run_list_existing_rules,
     run_query_occurrences,
     run_query_telemetry,
     run_suggest_automation,
+    run_suggest_panel,
 )
 from app.automater.service import AutomaterService
 from app.collector.models import Collector
 from app.collector.service import CollectorService
+from app.dashboard.service import DashboardService
 from app.event.service import EventService
 from app.plugin.registry import PluginRegistry
 from app.project.service import ProjectService
 from app.query_rule.service import QueryRuleService
-from app.shared.exceptions import AiGenerationError, InvalidQueryError
+from app.shared.exceptions import AiGenerationError, EntityNotFoundError, InvalidQueryError
 from app.shared.validators import validate_select_only_sql
 from app.telemetry.models import TelemetryTableSchema
 from app.telemetry.service import TelemetryService
@@ -118,6 +121,7 @@ class AiService:
         query_rule_service: QueryRuleService,
         collector_service: CollectorService,
         plugin_registry: PluginRegistry,
+        dashboard_service: DashboardService,
     ) -> None:
         self._telemetry_service = telemetry_service
         self._http_client = http_client
@@ -138,6 +142,9 @@ class AiService:
         # project's tables -- see _project_schema.
         self._collector_service = collector_service
         self._plugin_registry = plugin_registry
+        # Only used by list_existing_panels and to resolve the optional
+        # dashboard_hint below -- see answer_copilot_question.
+        self._dashboard_service = dashboard_service
 
     async def generate_sql(
         self, nl_query: str, variables: list[AiVariableHint] | None = None
@@ -185,11 +192,25 @@ class AiService:
         project_id: UUID,
         question: str,
         history: list[CopilotMessage],
+        dashboard_id: UUID | None = None,
     ) -> tuple[str, NeedsContext | None, CopilotSuggestion | None, list[str] | None]:
         schema = await self._project_schema(project_id)
         project = await self._project_service.get(project_id)
         now = datetime.now(timezone.utc)
-        system = build_copilot_system_prompt(schema, now=now, ai_context=project.ai_context)
+        dashboard_hint = None
+        if dashboard_id is not None:
+            try:
+                dashboard = await self._dashboard_service.get(dashboard_id)
+                dashboard_hint = (
+                    dashboard.id,
+                    dashboard.name,
+                    [AiVariableHint(name=v.name, label=v.label) for v in dashboard.variables],
+                )
+            except EntityNotFoundError:
+                pass  # Stale/bad id -- fall through, model just won't get a hint.
+        system = build_copilot_system_prompt(
+            schema, now=now, ai_context=project.ai_context, dashboard_hint=dashboard_hint
+        )
         messages: list[dict] = [
             {"role": h.role, "content": h.content} for h in history[-8:]
         ] + [{"role": "user", "content": question}]
@@ -256,6 +277,10 @@ class AiService:
                     result_text, new_suggestion = run_suggest_automation(project_id, tool_use.input)
                     if new_suggestion is not None:
                         suggestion = new_suggestion
+                elif tool_use.name == "suggest_panel":
+                    result_text, new_suggestion = run_suggest_panel(tool_use.input)
+                    if new_suggestion is not None:
+                        suggestion = new_suggestion
                 else:
                     result_text = await self._execute_copilot_tool(
                         tool_use.name, tool_use.input, project_id
@@ -293,4 +318,6 @@ class AiService:
             return await run_list_existing_rules(
                 self._automater_service, self._query_rule_service, project_id
             )
+        if name == "list_existing_panels":
+            return await run_list_existing_panels(self._dashboard_service, project_id)
         return f"Unknown tool: {name}"

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { generateSql } from "../api/ai";
 import { addPanel, getDashboard, previewDashboardQuery, updatePanel } from "../api/dashboard";
 import { ApiError } from "../api/client";
@@ -9,6 +9,7 @@ import { defaultChartForType, PanelEditor } from "../components/PanelEditor";
 import { SchemaBrowser } from "../components/SchemaBrowser";
 import { DEFAULT_TIME_RANGE } from "../constants/timeRanges";
 import { resolveVariablesFrom } from "../utils/variables";
+import type { PanelSuggestionState } from "../types/ai";
 import type { Chart, Panel, PanelPosition, Variable } from "../types/dashboard";
 import type { TelemetrySqlQueryResult } from "../types/telemetry";
 import "./Collector.css";
@@ -64,6 +65,7 @@ function findFreePosition(panels: Panel[], width: number, height: number): Panel
 export function PanelBuilder() {
   const { dashboardId, panelId } = useParams<{ dashboardId: string; panelId?: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const isEdit = Boolean(panelId);
 
   const [title, setTitle] = useState("");
@@ -123,13 +125,40 @@ export function PanelBuilder() {
           setSql(panel.query.sql);
           setEventRuleIds(panel.event_rule_ids);
           runQuery(panel.query.sql, panel.time_range, values);
-        } else {
-          setPosition(findFreePosition(dashboard.panels, DEFAULT_POSITION.width, DEFAULT_POSITION.height));
+          return;
         }
+
+        // Co-pilot "Suggest a panel" prefill. Depends on location.state
+        // (see this effect's own dep array below), not mount-only: the
+        // Co-pilot panel is mounted once at the app-shell level and
+        // outlives route navigation, so a user can refine a suggestion
+        // and click "Open in builder" a second time while already on
+        // this route -- navigate() fires with a new state object but
+        // doesn't remount this component. A mount-only effect would
+        // silently keep showing the first draft's stale values (this
+        // exact bug already shipped once for AutomaterEditor.tsx/
+        // QueryRuleEditor.tsx's own suggestion prefill).
+        const suggestion = location.state as PanelSuggestionState | null;
+        if (suggestion) {
+          setTitle(suggestion.title);
+          setChart(suggestion.chart);
+          setTimeRange(suggestion.time_range);
+          setSql(suggestion.query.sql);
+          setPosition(findFreePosition(dashboard.panels, DEFAULT_POSITION.width, DEFAULT_POSITION.height));
+          // PanelEditor's chart field <select>s are populated only from
+          // the last query's result.columns -- run the suggested query
+          // immediately (same as the edit-mode branch above) so the
+          // suggested chart.series/x_axis/y_axis show as selected
+          // instead of blank.
+          runQuery(suggestion.query.sql, suggestion.time_range, values);
+          return;
+        }
+
+        setPosition(findFreePosition(dashboard.panels, DEFAULT_POSITION.width, DEFAULT_POSITION.height));
       })
       .catch(() => setError("Failed to load dashboard."));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dashboardId, panelId]);
+  }, [dashboardId, panelId, location.state]);
 
   async function generatePanelSql(prompt: string): Promise<string> {
     const { sql: generated } = await generateSql(

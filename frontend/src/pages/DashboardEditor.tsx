@@ -48,8 +48,14 @@ export function DashboardEditor() {
   const [titleMenuOpen, setTitleMenuOpen] = useState(false);
   const [automaters, setAutomaters] = useState<Automater[]>([]);
   const [queryRules, setQueryRules] = useState<QueryRule[]>([]);
-  const { projects, dashboardsByProject, setDefaultDashboard, registerDashboardVariables, clearDashboardVariables } =
-    useEvents();
+  const {
+    projects,
+    dashboardsByProject,
+    setDefaultDashboard,
+    registerDashboardVariables,
+    clearDashboardVariables,
+    openCopilotPanel,
+  } = useEvents();
 
   // Every Rule in this dashboard's project -- both real-time Rules
   // (flattened across that project's Automaters; Rule has no automater/
@@ -419,6 +425,16 @@ export function DashboardEditor() {
                     >
                       Variables
                     </Link>
+                    <button
+                      type="button"
+                      className="dashboard-menu__item"
+                      onClick={() => {
+                        setAddMenuOpen(false);
+                        openCopilotPanel("suggest-panel", { dashboardId: id!, projectId: dashboard.project_id });
+                      }}
+                    >
+                      Suggest a panel
+                    </button>
                   </div>
                 )}
               </div>

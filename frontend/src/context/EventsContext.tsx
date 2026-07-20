@@ -13,7 +13,7 @@ import type { CopilotIntent } from "../types/ai";
 
 export type ActivePanel =
   | { kind: "project"; projectId: string }
-  | { kind: "copilot"; intent?: CopilotIntent }
+  | { kind: "copilot"; intent?: CopilotIntent; dashboardId?: string; projectId?: string }
   | null;
 
 // What EventsPanel's filter chips can narrow the occurrence list to. Kept
@@ -77,7 +77,7 @@ interface EventsContextValue {
   activeCount: number;
   activeDashboardVariables: ActiveDashboardVariables | null;
   openProjectPanel: (projectId: string) => void;
-  openCopilotPanel: (intent?: CopilotIntent) => void;
+  openCopilotPanel: (intent?: CopilotIntent, opts?: { dashboardId?: string; projectId?: string }) => void;
   closePanel: () => void;
   setOccurrenceFilter: (filter: OccurrenceFilter | null) => void;
   setTimeRange: (range: string) => void;
@@ -325,8 +325,8 @@ export function EventsProvider({ children }: { children: ReactNode }) {
     fetchCounts(projectId, timeRange, "");
   }
 
-  function openCopilotPanel(intent?: CopilotIntent) {
-    setActivePanel({ kind: "copilot", intent });
+  function openCopilotPanel(intent?: CopilotIntent, opts?: { dashboardId?: string; projectId?: string }) {
+    setActivePanel({ kind: "copilot", intent, dashboardId: opts?.dashboardId, projectId: opts?.projectId });
     setOccurrences([]);
     setOccurrencesTotal(0);
     setOccurrencesOffset(0);

@@ -15,10 +15,20 @@ const TYPE_SPEED_MS = 16;
 // the button's own label doubles as the message it sends, so there's one
 // string to keep in sync, not a short label plus a separate long message.
 const SUGGEST_AUTOMATION_SEED_REPLY = "Analyze my telemetry and suggest an automation";
+const SUGGEST_PANEL_SEED_REPLY = "Suggest a panel for this dashboard";
 
-function greetingText(intent?: CopilotIntent): string {
+// `knownProjectId` means the project-chip picker is about to be skipped
+// (see the auto-select effect below) -- the greeting shouldn't ask a
+// question that's never actually put to the user.
+function greetingText(intent?: CopilotIntent, knownProjectId?: string): string {
+  if (intent === "suggest-panel" && knownProjectId) {
+    return `Hi, I'm ${ASSISTANT_NAME}.`;
+  }
   if (intent === "suggest-automation") {
     return `Hi, I'm ${ASSISTANT_NAME}. Which project would you like to set up an automation for?`;
+  }
+  if (intent === "suggest-panel") {
+    return `Hi, I'm ${ASSISTANT_NAME}. Which project would you like to suggest a panel for?`;
   }
   return `Hi, I'm ${ASSISTANT_NAME} — your IoTOps assistant. Which project do you need help with today?`;
 }
@@ -68,10 +78,16 @@ function ackText(project: Project, intent?: CopilotIntent): string {
   if (intent === "suggest-automation") {
     return `Let's set up an automation for ${project.name}. What would you like to detect?`;
   }
+  if (intent === "suggest-panel") {
+    return `Let's find a chart worth adding to your dashboard. What would you like to see?`;
+  }
   return `How can I help you with ${project.name}?`;
 }
 
-function suggestionRoute(kind: CopilotSuggestion["kind"]): string {
+// Only covers the two suggestion kinds with a static route -- "panel"
+// needs a runtime dashboard id and is handled directly in
+// handleOpenSuggestion instead (see there).
+function suggestionRoute(kind: "automater_rule" | "query_rule"): string {
   return kind === "automater_rule" ? "/automaters/new" : "/query-rules/new";
 }
 
@@ -111,7 +127,15 @@ function TypedLine({ text, onDone }: { text: string; onDone?: () => void }) {
 // component only ever sees the flat {role, content} transcript for the real
 // conversation -- the greeting/project-pick/acknowledgement above it is a
 // scripted, client-only sequence, never sent to the backend as history.
-export function CopilotChat({ intent }: { intent?: CopilotIntent }) {
+export function CopilotChat({
+  intent,
+  dashboardId,
+  projectId,
+}: {
+  intent?: CopilotIntent;
+  dashboardId?: string;
+  projectId?: string;
+}) {
   const { projects } = useEvents();
   const navigate = useNavigate();
   const [greetingDone, setGreetingDone] = useState(false);
@@ -135,6 +159,17 @@ export function CopilotChat({ intent }: { intent?: CopilotIntent }) {
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [messages, greetingDone, project, ackDone, sending]);
+
+  // Skips the project-chip picker when the caller already knows which
+  // project this conversation is about (e.g. "Suggest a panel", opened
+  // from inside an already-open dashboard) -- per development-plan.md's
+  // "shortcut" note for the panel-suggestion entry point specifically.
+  useEffect(() => {
+    if (!projectId || project) return;
+    const match = projects.find((candidate) => candidate.id === projectId);
+    if (match) handleSelectProject(match);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, projects]);
 
   function handleSelectProject(next: Project) {
     // A new project is a new conversation -- avoids a transcript that
@@ -160,6 +195,7 @@ export function CopilotChat({ intent }: { intent?: CopilotIntent }) {
         project.id,
         question,
         nextMessages.slice(-8),
+        dashboardId,
       );
       const answerIndex = nextMessages.length;
       // `answer` may carry a trailing machine-readable recap (stripped only
@@ -192,6 +228,10 @@ export function CopilotChat({ intent }: { intent?: CopilotIntent }) {
   }
 
   function handleOpenSuggestion(suggestion: CopilotSuggestion) {
+    if (suggestion.kind === "panel") {
+      navigate(`/dashboards/${suggestion.state.dashboard_id}/panels/new`, { state: suggestion.state });
+      return;
+    }
     navigate(suggestionRoute(suggestion.kind), { state: suggestion.state });
   }
 
@@ -206,9 +246,9 @@ export function CopilotChat({ intent }: { intent?: CopilotIntent }) {
       <div ref={listRef} className="copilot-chat__messages">
         <div className="copilot-chat__message copilot-chat__message--assistant">
           {greetingDone ? (
-            greetingText(intent)
+            greetingText(intent, projectId)
           ) : (
-            <TypedLine text={greetingText(intent)} onDone={() => setGreetingDone(true)} />
+            <TypedLine text={greetingText(intent, projectId)} onDone={() => setGreetingDone(true)} />
           )}
         </div>
 
@@ -249,6 +289,17 @@ export function CopilotChat({ intent }: { intent?: CopilotIntent }) {
                   onClick={() => sendMessage(SUGGEST_AUTOMATION_SEED_REPLY)}
                 >
                   {SUGGEST_AUTOMATION_SEED_REPLY}
+                </button>
+              </div>
+            )}
+            {ackDone && intent === "suggest-panel" && messages.length === 0 && (
+              <div className="copilot-chat__project-chips">
+                <button
+                  type="button"
+                  className="copilot-chat__project-chip"
+                  onClick={() => sendMessage(SUGGEST_PANEL_SEED_REPLY)}
+                >
+                  {SUGGEST_PANEL_SEED_REPLY}
                 </button>
               </div>
             )}

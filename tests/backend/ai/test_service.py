@@ -10,6 +10,7 @@ from mongomock_motor import AsyncMongoMockClient
 from app.ai.models import AiVariableHint
 from app.ai.service import MAX_COPILOT_ITERATIONS, AiService
 from app.collector.models import Collector
+from app.dashboard.models import Dashboard, Variable
 from app.event.models import Event, EventFlag
 from app.event.repository import EventRepository, to_document
 from app.event.service import EventService
@@ -22,6 +23,7 @@ from tests.backend.ai.fakes import (
     FakeAnthropicClient,
     FakeAutomaterService,
     FakeCollectorService,
+    FakeDashboardService,
     FakeProjectService,
     FakeQueryRuleService,
     message,
@@ -95,6 +97,7 @@ def _service(
     automater_service=None,
     query_rule_service=None,
     collector_service=None,
+    dashboard_service=None,
 ) -> AiService:
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     return AiService(
@@ -117,6 +120,7 @@ def _service(
         # this scoping).
         collector_service=collector_service or FakeCollectorService(),
         plugin_registry=build_default_registry(),
+        dashboard_service=dashboard_service or FakeDashboardService(),
     )
 
 
@@ -622,3 +626,114 @@ async def test_answer_copilot_question_handles_a_long_cross_table_suggestion_cha
 
     assert answer.startswith("Drafted.")
     assert suggestion is not None
+
+
+def _dashboard(project_id, **overrides) -> Dashboard:
+    defaults: dict = {"project_id": project_id, "name": "Apiary Overview", "variables": [], "panels": []}
+    defaults.update(overrides)
+    return Dashboard(**defaults)
+
+
+async def test_answer_copilot_question_always_includes_panel_suggestion_tools() -> None:
+    fake_client = FakeAnthropicClient([message(text_block("Answer."))])
+
+    await _service(
+        _unused_ollama_handler, anthropic_client=fake_client
+    ).answer_copilot_question(uuid4(), "any alerts?", [])
+
+    tool_names = {tool["name"] for tool in fake_client.messages.calls[0]["tools"]}
+    assert "suggest_panel" in tool_names
+    assert "list_existing_panels" in tool_names
+
+
+async def test_answer_copilot_question_surfaces_panel_suggestion() -> None:
+    project_id = uuid4()
+    dashboard_id = uuid4()
+    responses = [
+        message(
+            tool_use_block(
+                "suggest_panel",
+                {
+                    "dashboard_id": str(dashboard_id),
+                    "title": "Hive Temperature",
+                    "chart_type": "line",
+                    "sql": "SELECT time, temperature FROM hive_metrics WHERE time >= $__timeFrom AND time <= $__timeTo",
+                    "x_axis": "time",
+                    "y_axis": "temperature",
+                },
+            )
+        ),
+        message(text_block("I've drafted a panel for you.")),
+    ]
+
+    answer, needs_context, suggestion, _ = await _service(
+        _unused_ollama_handler, anthropic_responses=responses
+    ).answer_copilot_question(project_id, "chart hive temperature", [])
+
+    assert needs_context is None
+    assert suggestion is not None
+    assert suggestion.kind == "panel"
+    assert suggestion.state.dashboard_id == dashboard_id
+    # Same machine-readable recap mechanism as rule suggestions -- see
+    # test_answer_copilot_question_surfaces_automater_rule_suggestion.
+    assert answer.startswith("I've drafted a panel for you.")
+    assert "[[suggestion-context]]" in answer
+
+
+async def test_answer_copilot_question_panel_suggestion_invalid_input_lets_model_retry() -> None:
+    responses = [
+        message(tool_use_block("suggest_panel", {"dashboard_id": str(uuid4()), "title": "Bad", "chart_type": "line", "sql": "SELECT 1"})),
+        message(text_block("Let me try again.")),
+    ]
+
+    answer, _, suggestion, _ = await _service(
+        _unused_ollama_handler, anthropic_responses=responses
+    ).answer_copilot_question(uuid4(), "chart something", [])
+
+    assert suggestion is None
+    assert answer == "Let me try again."
+
+
+async def test_answer_copilot_question_forwards_dashboard_hint_into_system_prompt() -> None:
+    dashboard = _dashboard(
+        uuid4(),
+        variables=[Variable(name="hive_id", label="Hive", table="hive_metrics", value_column="hive_id")],
+    )
+    fake_client = FakeAnthropicClient([message(text_block("Answer."))])
+
+    await _service(
+        _unused_ollama_handler,
+        anthropic_client=fake_client,
+        dashboard_service=FakeDashboardService([dashboard]),
+    ).answer_copilot_question(uuid4(), "add a panel", [], dashboard.id)
+
+    system_prompt = fake_client.messages.calls[0]["system"]
+    assert dashboard.name in system_prompt
+    assert str(dashboard.id) in system_prompt
+    assert "$hive_id" in system_prompt
+
+
+async def test_answer_copilot_question_dashboard_id_none_omits_hint() -> None:
+    fake_client = FakeAnthropicClient([message(text_block("Answer."))])
+
+    await _service(
+        _unused_ollama_handler, anthropic_client=fake_client
+    ).answer_copilot_question(uuid4(), "any alerts?", [], None)
+
+    system_prompt = fake_client.messages.calls[0]["system"]
+    assert "currently viewing dashboard" not in system_prompt
+
+
+async def test_answer_copilot_question_unknown_dashboard_id_falls_back_silently() -> None:
+    # A stale/deleted dashboard id shouldn't break the conversation --
+    # just no hint gets added, same as omitting dashboard_id entirely.
+    fake_client = FakeAnthropicClient([message(text_block("Answer."))])
+
+    await _service(
+        _unused_ollama_handler,
+        anthropic_client=fake_client,
+        dashboard_service=FakeDashboardService([]),
+    ).answer_copilot_question(uuid4(), "add a panel", [], uuid4())
+
+    system_prompt = fake_client.messages.calls[0]["system"]
+    assert "currently viewing dashboard" not in system_prompt
