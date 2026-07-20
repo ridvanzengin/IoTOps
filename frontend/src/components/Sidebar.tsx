@@ -151,7 +151,9 @@ export function Sidebar() {
             <MenuIcon />
           </button>
           <NavLink to="/" end className="mobile-topbar__brand">
-            <LogoMark className="mobile-topbar__brand-icon" />
+            <span className="sidebar__brand-mark">
+              <LogoMark className="mobile-topbar__brand-icon" />
+            </span>
             <span>IoTOps</span>
           </NavLink>
         </div>
