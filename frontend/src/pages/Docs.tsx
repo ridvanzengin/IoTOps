@@ -121,8 +121,8 @@ const FEATURES: Feature[] = [
             chart's timeline.
           </li>
           <li>
-            <strong>AI SQL builder</strong> — describe what you want in natural language; the local LLM drafts the
-            query.
+            <strong>AI SQL builder</strong> — describe what you want in natural language; the Anthropic API
+            (Claude) drafts the query.
           </li>
         </ul>
       </>
@@ -134,9 +134,9 @@ const FEATURES: Feature[] = [
     route: "panel, all pages",
     body: (
       <p className="docs-p">
-        A chat panel (not a separate page) for natural-language SQL generation/explanation and dashboard/rule
-        suggestions, backed by a local LLM (Ollama) — nothing leaves the host. The AI drafts changes; it never
-        applies them without explicit user approval.
+        A chat panel (not a separate page) for natural-language Q&amp;A, SQL generation/explanation, and
+        automation/dashboard-panel/dashboard suggestions grounded in your live telemetry, backed by the
+        Anthropic API (Claude). It drafts changes; it never applies them without explicit user approval.
       </p>
     ),
   },
@@ -150,68 +150,6 @@ const FEATURES: Feature[] = [
         available from any page — searchable, paginated, filterable by time range, with either auto-clear or
         manual-resolve semantics depending on the Rule.
       </p>
-    ),
-  },
-];
-
-const GOTCHAS = [
-  {
-    title: "HTTP-sourced data can't fan out to both a Collector and an Automater",
-    body: (
-      <>
-        Unlike MQTT/Kafka/AMQP (broker-mediated, so every subscriber gets a full copy), an{" "}
-        <code className="docs-code">http_listener_v2</code> input is a plain point-to-point push target with no
-        broker in between. A single external webhook push only ever reaches one of the two listening containers.
-        If you need both raw storage <em>and</em> real-time rule evaluation on the same HTTP source today, you'll
-        need a workaround on the publisher side (push to both URLs) until this is fixed at the deploy-mechanics
-        level.
-      </>
-    ),
-  },
-  {
-    title: "Rule placeholders silently render empty if the field isn't in the input's tag_keys",
-    body: (
-      <>
-        Telegraf's JSON input parser drops any string-valued JSON key that isn't explicitly listed in the input's{" "}
-        <code className="docs-code">tag_keys</code>. If a Rule's <code className="docs-code">identifiers</code> or{" "}
-        <code className="docs-code">message</code> template references a column that isn't also a numeric field, it
-        vanishes before the rule processor ever sees it — you'll get something like{" "}
-        <code className="docs-code">"Hive  swarm risk"</code> instead of{" "}
-        <code className="docs-code">"Hive hive1 swarm risk"</code>, with no error anywhere. Make sure every
-        referenced string column is in the Collector/Automater's input <code className="docs-code">tag_keys</code>.
-      </>
-    ),
-  },
-  {
-    title: "No hot-reload in the default Docker Compose setup",
-    body: (
-      <>
-        <code className="docs-code">docker/backend/Dockerfile</code> and{" "}
-        <code className="docs-code">docker/frontend/Dockerfile</code> both <code className="docs-code">COPY</code>{" "}
-        source into the image at build time — there's no live bind-mount. After editing backend or frontend code,
-        rebuild and recreate the affected service (
-        <code className="docs-code">docker compose build backend frontend &amp;&amp; docker compose up -d backend frontend</code>
-        ) before checking your change; a plain page reload will serve stale code.
-      </>
-    ),
-  },
-  {
-    title: "AI features require a local Ollama instance",
-    body: (
-      <>
-        SQL generation/explanation and the AI Co-pilot's suggestions call a locally-running Ollama instance —
-        there's no cloud LLM fallback. If Ollama isn't running/reachable, those features degrade to unavailable
-        rather than failing the rest of the app.
-      </>
-    ),
-  },
-  {
-    title: "Single-tenant, no auth",
-    body: (
-      <>
-        There's no multi-user support, workspaces, or authentication layer yet — anyone who can reach the frontend
-        has full access. Treat a deployment as trusted-network-only until an auth provider ships.
-      </>
     ),
   },
 ];
@@ -261,7 +199,7 @@ export function Docs() {
               </span>
             </div>
             <div className="docs-stat">
-              <span className="docs-stat-value">380+</span>
+              <span className="docs-stat-value">550+</span>
               <span className="docs-stat-label">
                 Backend tests
                 <br />
@@ -269,11 +207,11 @@ export function Docs() {
               </span>
             </div>
             <div className="docs-stat">
-              <span className="docs-stat-value">v1.1</span>
+              <span className="docs-stat-value">v1.2</span>
               <span className="docs-stat-label">
                 Current milestone
                 <br />
-                Automation Engine
+                AI Assistant
               </span>
             </div>
           </div>
@@ -338,7 +276,7 @@ export function Docs() {
               </tr>
               <tr>
                 <td>AI</td>
-                <td>Local LLM via Ollama — SQL generation/explanation, suggestions</td>
+                <td>Anthropic API (Claude) — SQL generation/explanation, Co-pilot Q&amp;A and suggestions</td>
               </tr>
               <tr>
                 <td>Custom Telegraf plugins</td>
@@ -381,21 +319,6 @@ export function Docs() {
             <code className="docs-code">repository-structure.md</code>, and{" "}
             <code className="docs-code">development-plan.md</code> for the phased roadmap.
           </p>
-        </section>
-
-        <section className="docs-section">
-          <h2 className="docs-section-title">Known Limitations &amp; Gotchas</h2>
-          <div className="docs-gotchas-grid">
-            {GOTCHAS.map((gotcha) => (
-              <div className="docs-gotcha" key={gotcha.title}>
-                <div className="docs-gotcha-mark">!</div>
-                <div>
-                  <p className="docs-gotcha-title">{gotcha.title}</p>
-                  <p className="docs-gotcha-body">{gotcha.body}</p>
-                </div>
-              </div>
-            ))}
-          </div>
         </section>
 
         <div className="docs-footer">
