@@ -24,12 +24,6 @@ export function ChartPreview({ chart, rows, height = 260, events = [] }: ChartPr
     const base = buildChartOption(chart, rows);
     const overlay = buildEventOverlay(chart, rows, events);
     if (!overlay) return base;
-    // Append (not replace) whatever axes buildChartOption already built
-    // (a single object, or an array of 2 for a right-axis panel) -- the
-    // events axis's index is always the new last slot, so existing
-    // series' own yAxisIndex references stay correct.
-    const existingYAxis = Array.isArray(base.yAxis) ? base.yAxis : base.yAxis ? [base.yAxis] : [];
-    const eventsYAxisIndex = existingYAxis.length;
     const baseSeries: NonNullable<typeof base.series> = Array.isArray(base.series)
       ? base.series
       : base.series
@@ -53,11 +47,7 @@ export function ChartPreview({ chart, rows, height = 260, events = [] }: ChartPr
     return {
       ...base,
       legend,
-      yAxis: [...existingYAxis, overlay.yAxis],
-      series: [
-        ...baseSeries,
-        ...overlay.series.map((series: { name?: unknown }) => ({ ...series, yAxisIndex: eventsYAxisIndex })),
-      ],
+      series: [...baseSeries, ...overlay.series],
     };
   }, [chart, rows, events, theme]);
 
