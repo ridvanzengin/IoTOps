@@ -1,4 +1,5 @@
 import type { EChartsOption } from "echarts-for-react";
+import type { CustomSeriesRenderItemAPI, CustomSeriesRenderItemParams } from "echarts";
 import type { Chart, SeriesConfig } from "../types/dashboard";
 import type { Event } from "../types/event";
 
@@ -306,7 +307,10 @@ function nearestCategoryValue(categories: unknown[], targetIso: string): unknown
 
 interface EventMarker {
   name: string;
-  xValue: number | unknown;
+  // A category axis's tick value (whatever axisValues() pulled from the
+  // row) or a time axis's epoch-ms number -- kept as unknown rather than
+  // narrowed further since api.coord() below accepts either verbatim.
+  xValue: unknown;
   shape: string;
   color: string;
 }
@@ -383,7 +387,10 @@ export function buildEventOverlay(chart: Chart, rows: Row[], events: Event[]): E
       if (xValue === null || xValue === undefined || Number.isNaN(xValue)) return null;
       return {
         name: `${event.flag === "match" ? "Active" : "Resolved"}: ${event.rule_name}`,
-        xValue,
+        // The `!== null`/`!== undefined` checks above narrow xValue's
+        // static type to `{}` (TS's NonNullable<unknown>), not `unknown`
+        // -- cast back explicitly so this matches EventMarker.xValue.
+        xValue: xValue as unknown,
         shape: EVENT_SYMBOLS[(ruleShapeIndex.get(event.rule_id) ?? 0) % EVENT_SYMBOLS.length],
         color: EVENT_MARK_COLOR[event.flag],
       };
@@ -400,10 +407,14 @@ export function buildEventOverlay(chart: Chart, rows: Row[], events: Event[]): E
         xAxisIndex: 0,
         yAxisIndex: 0,
         data: markers,
-        renderItem: (params, api) => {
+        renderItem: (params: CustomSeriesRenderItemParams, api: CustomSeriesRenderItemAPI) => {
           const marker = markers[params.dataIndex];
-          const [pixelX] = api.coord([marker.xValue, 0]);
-          const coordSys = params.coordSys as { x: number; y: number; width: number; height: number };
+          const [pixelX] = api.coord([marker.xValue as string | number, 0]);
+          // CustomSeriesRenderItemParamsCoordSys's declared type is just
+          // `{ type: string }` -- echarts fills in the real cartesian2d
+          // rect (x/y/width/height) at runtime but doesn't type it that
+          // specifically, so this has to go through `unknown` first.
+          const coordSys = params.coordSys as unknown as { x: number; y: number; width: number; height: number };
           // Above coordSys.y (the grid's top edge / the data's own top
           // gridline), not below it -- markers belong in the top margin,
           // clear of the highest data point, regardless of how close the
@@ -412,7 +423,10 @@ export function buildEventOverlay(chart: Chart, rows: Row[], events: Event[]): E
           if (pixelX < coordSys.x || pixelX > coordSys.x + coordSys.width) return undefined;
           return eventMarkerShape(marker.shape, pixelX, pixelY, marker.color);
         },
-        tooltip: { trigger: "item", formatter: (params) => markers[(params as { dataIndex: number }).dataIndex]?.name ?? "" },
+        tooltip: {
+          trigger: "item",
+          formatter: (params: unknown) => markers[(params as { dataIndex: number }).dataIndex]?.name ?? "",
+        },
       },
     ],
   };
