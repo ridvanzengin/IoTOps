@@ -8,6 +8,9 @@ from app.ai.models import (
     AutomaterRuleSuggestion,
     AutomaterRuleSuggestionState,
     CopilotSuggestion,
+    DashboardPanelSuggestion,
+    DashboardSuggestion,
+    DashboardSuggestionState,
     PanelSuggestion,
     PanelSuggestionState,
     QueryRuleSuggestion,
@@ -24,6 +27,7 @@ from app.dashboard.models import (
     Query,
     ScatterChart,
     SeriesConfig,
+    Variable,
 )
 from app.dashboard.service import DashboardService
 from app.event.models import OccurrenceStatus
@@ -245,7 +249,19 @@ SUGGEST_PANEL_TOOL = {
                 "'(Selected Machine)' -- the dashboard's own variable selector already shows what's "
                 "currently selected, so repeating it in every panel's title is redundant.",
             },
-            "chart_type": {"type": "string", "enum": ["line", "bar", "scatter", "pie", "gauge"]},
+            "chart_type": {
+                "type": "string",
+                "enum": ["line", "bar", "scatter", "pie", "gauge"],
+                "description": "scatter means individual unconnected points over time (or over a "
+                "grouping column, like bar) -- e.g. noisy/sparse readings where a connected line "
+                "would misleadingly imply interpolation between them. It does NOT mean plotting "
+                "two arbitrary numeric metrics against each other (e.g. temperature vs irradiance) "
+                "-- this platform's chart types don't support that kind of true X-Y correlation "
+                "panel; x_axis for line/bar/scatter alike is always time or a grouping column, "
+                "never a second measured value. If a request is really asking to correlate two "
+                "metrics, pick whichever of them is more naturally the grouping dimension for "
+                "x_axis (or use time) rather than inventing an unsupported chart shape.",
+            },
             "sql": {
                 "type": "string",
                 "description": "A single SELECT statement for the panel's query. Follow "
@@ -269,7 +285,10 @@ SUGGEST_PANEL_TOOL = {
             },
             "x_axis": {
                 "type": "string",
-                "description": "Required when chart_type is line, bar, or scatter.",
+                "description": "Required when chart_type is line, bar, or scatter. Almost always "
+                "'time' (the whole point of this being a monitoring dashboard) -- or, for a bar/"
+                "scatter comparing entities, a grouping column like a machine/hive id. Never a "
+                "second continuous measured value (see chart_type's own description).",
             },
             "y_axis": {
                 "type": "string",
@@ -313,6 +332,83 @@ SUGGEST_PANEL_TOOL = {
     },
 }
 
+# One panel's worth of fields, shared by SUGGEST_DASHBOARD_TOOL's `panels`
+# array items below -- identical to SUGGEST_PANEL_TOOL's own per-panel
+# properties minus dashboard_id (a dashboard suggestion's panels don't
+# have one yet, the dashboard itself doesn't exist until the user
+# confirms).
+_DASHBOARD_PANEL_ITEM_SCHEMA = {
+    "type": "object",
+    "properties": {k: v for k, v in SUGGEST_PANEL_TOOL["input_schema"]["properties"].items() if k != "dashboard_id"},
+    "required": ["title", "chart_type", "sql"],
+}
+
+SUGGEST_DASHBOARD_TOOL = {
+    "name": "suggest_dashboard",
+    "description": (
+        "Propose a whole new starter dashboard -- a name, optionally a chain of "
+        "variables, and every panel worth having -- once you've surveyed the "
+        "project's data via list_existing_panels and query_telemetry. Unlike "
+        "suggest_panel, propose the full set of panels you found worth monitoring in "
+        "one call, not just the single strongest one -- the user reviews the whole "
+        "set at once and creates it in one action, never one panel at a time. This "
+        "does not create anything -- it hands the user a reviewable draft; nothing is "
+        "written until they confirm."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Short dashboard name."},
+            "description": {"type": "string"},
+            "variables": {
+                "type": "array",
+                "description": "Optional, ordered. Omit entirely for a flat overview dashboard "
+                "with no per-entity filtering -- only propose variables when the data has an "
+                "obvious per-entity grouping (e.g. a hive_id/machine_id column) and it's genuinely "
+                "useful to filter by it. REQUIRED if declared: at least one item in `panels` "
+                "must actually filter or group by a declared variable's name -- a variable with "
+                "no panel using it is rejected, since it'd be pure decoration on the dashboard. "
+                "For a chain, only the leaf actually needs a direct $name reference in some "
+                "panel's sql -- a chain parent (referenced via a later item's predicate_variable) "
+                "counts as used too, since it's still narrowing the leaf's own options. A later "
+                "item's predicate_variable must reference an "
+                "earlier item's name in THIS SAME array (e.g. Apiary at index 0, Hive at index 1 "
+                "with predicate_variable='apiary'), mirroring how they'd be chained one at a time "
+                "in the Variable Builder, just proposed together.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Token used in SQL as $name."},
+                        "label": {"type": "string"},
+                        "table": {"type": "string"},
+                        "value_column": {"type": "string"},
+                        "predicate_column": {
+                            "type": "string",
+                            "description": "Optional -- a same-table column to narrow this "
+                            "variable's own options by an earlier variable's selected value.",
+                        },
+                        "predicate_variable": {
+                            "type": "string",
+                            "description": "Optional -- pairs with predicate_column; must name an "
+                            "earlier item in this array.",
+                        },
+                    },
+                    "required": ["name", "label", "table", "value_column"],
+                },
+            },
+            "panels": {
+                "type": "array",
+                "description": "Every panel worth having on this dashboard -- aim for at least "
+                "4 (typically 4-6), not an exhaustive dump. Rejected if fewer than 3. Each item "
+                "follows the exact same rules as suggest_panel's own fields (SQL macros, title convention, "
+                "variable-vs-grouping-column choice) -- see suggest_panel's description.",
+                "items": _DASHBOARD_PANEL_ITEM_SCHEMA,
+            },
+        },
+        "required": ["name", "panels"],
+    },
+}
+
 # Always the full set, in every conversation -- this used to split into a
 # 3-tool default and a 5-tool "suggest-automation intent" variant, gated
 # behind which button opened the panel. That meant a plain "I want to
@@ -321,8 +417,8 @@ SUGGEST_PANEL_TOOL = {
 # perspective) said it couldn't create one after a long clarifying
 # conversation. The model's own judgment already keeps query_occurrences/
 # query_telemetry/flag_missing_context from firing on the wrong kind of
-# question; it's trusted to do the same for these four suggestion-related
-# tools (list_existing_rules/suggest_automation and their panel
+# question; it's trusted to do the same for these five suggestion-related
+# tools (list_existing_rules/suggest_automation and their panel/dashboard
 # equivalents below) -- never re-gate any of them behind an intent flag.
 COPILOT_TOOLS = [
     QUERY_OCCURRENCES_TOOL,
@@ -332,7 +428,22 @@ COPILOT_TOOLS = [
     SUGGEST_AUTOMATION_TOOL,
     LIST_EXISTING_PANELS_TOOL,
     SUGGEST_PANEL_TOOL,
+    SUGGEST_DASHBOARD_TOOL,
 ]
+
+def _validation_error_summary(exc: ValidationError) -> str:
+    # str(exc) on a raw ValidationError dumps the *entire* input value that
+    # failed to validate (every field, as repr'd Python objects) alongside
+    # each error's own message -- fine for a small, flat suggestion model,
+    # but for DashboardSuggestionState (a list of several panels plus a
+    # list of variables) that dump ballooned into a wall of noise the
+    # model had to parse to find the one relevant fact. Live-tested to
+    # actually cause the model to give up retrying and describe the
+    # dashboard in prose instead of calling the tool again. Extracting
+    # just each error's own message keeps the retryable signal short
+    # regardless of how large the surrounding suggestion is.
+    return "; ".join(err["msg"] for err in exc.errors(include_url=False))
+
 
 _MAX_OCCURRENCES_LIMIT = 100
 _TELEMETRY_ROW_LIMIT = 50
@@ -451,7 +562,9 @@ def run_suggest_automation(
     kind = input_.get("kind", "")
     try:
         suggestion = _build_suggestion(project_id, kind, input_)
-    except (ValidationError, ValueError, KeyError, TypeError) as exc:
+    except ValidationError as exc:
+        return f"Couldn't build that suggestion: {_validation_error_summary(exc)}. Adjust the fields and try again.", None
+    except (ValueError, KeyError, TypeError) as exc:
         return f"Couldn't build that suggestion: {exc}. Adjust the fields and try again.", None
 
     kind_label = "real-time" if kind == "automater_rule" else "scheduled"
@@ -552,7 +665,9 @@ async def run_list_existing_panels(dashboard_service: DashboardService, project_
 def run_suggest_panel(input_: dict[str, Any]) -> tuple[str, CopilotSuggestion | None]:
     try:
         suggestion = _build_panel_suggestion(input_)
-    except (ValidationError, ValueError, KeyError, TypeError) as exc:
+    except ValidationError as exc:
+        return f"Couldn't build that panel suggestion: {_validation_error_summary(exc)}. Adjust the fields and try again.", None
+    except (ValueError, KeyError, TypeError) as exc:
         return f"Couldn't build that panel suggestion: {exc}. Adjust the fields and try again.", None
     return (
         "Drafted a panel -- mention in your answer that a draft is ready for review "
@@ -607,3 +722,62 @@ def _build_panel_suggestion(input_: dict[str, Any]) -> CopilotSuggestion:
         time_range=input_.get("time_range") or "1h",
     )
     return PanelSuggestion(label=f"New panel: {title}", state=state)
+
+
+def run_suggest_dashboard(project_id: UUID, input_: dict[str, Any]) -> tuple[str, CopilotSuggestion | None]:
+    try:
+        suggestion = _build_dashboard_suggestion(project_id, input_)
+    except ValidationError as exc:
+        return (
+            f"Couldn't build that dashboard suggestion: {_validation_error_summary(exc)}. "
+            "Adjust the fields and try again.",
+            None,
+        )
+    # AttributeError: a `panels` item that isn't an object (e.g. a plain
+    # string panel name instead of {title, chart_type, sql, ...}) fails on
+    # the first `.get()` call while building it -- without this, that
+    # crashed the whole request instead of giving the model a retryable
+    # error message, since AttributeError isn't a ValueError/TypeError.
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        return f"Couldn't build that dashboard suggestion: {exc}. Adjust the fields and try again.", None
+
+    # Always plural -- DashboardSuggestionState's own validator already
+    # requires at least 3 panels, so the singular case can't occur here.
+    return (
+        f"Drafted a dashboard with {len(suggestion.state.panels)} panels -- mention in "
+        "your answer that a draft is ready for review below, and ask if they'd like "
+        "any adjustments.",
+        suggestion,
+    )
+
+
+def _build_dashboard_suggestion(project_id: UUID, input_: dict[str, Any]) -> CopilotSuggestion:
+    variables = [
+        Variable(
+            name=v["name"],
+            label=v["label"],
+            table=v["table"],
+            value_column=v["value_column"],
+            predicate_column=v.get("predicate_column"),
+            predicate_variable=v.get("predicate_variable"),
+        )
+        for v in input_.get("variables", [])
+    ]
+    panels = [
+        DashboardPanelSuggestion(
+            title=p.get("title", ""),
+            chart=_build_chart(p.get("chart_type", ""), p.get("title", ""), p),
+            query=Query(sql=p.get("sql", "")),
+            time_range=p.get("time_range") or "1h",
+        )
+        for p in input_.get("panels", [])
+    ]
+    name = input_.get("name", "")
+    state = DashboardSuggestionState(
+        project_id=project_id,
+        name=name,
+        description=input_.get("description", ""),
+        variables=variables,
+        panels=panels,
+    )
+    return DashboardSuggestion(label=f"New dashboard: {name}", state=state)

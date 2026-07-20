@@ -10,7 +10,7 @@ import { listAutomaters } from "../api/automater";
 import { listQueryRules } from "../api/queryRule";
 import { listEventsForOverlay } from "../api/event";
 import { ChartPreview } from "../components/ChartPreview";
-import { MoreIcon, PlusIcon } from "../components/icons";
+import { CopilotIcon, MoreIcon, PlusIcon, VariableIcon, VisualizerIcon } from "../components/icons";
 import { RuleMultiSelect } from "../components/RuleMultiSelect";
 import type { RuleOption } from "../components/RuleMultiSelect";
 import { TypeaheadSelect } from "../components/TypeaheadSelect";
@@ -411,20 +411,6 @@ export function DashboardEditor() {
                 </button>
                 {addMenuOpen && (
                   <div className="dashboard-menu__list">
-                    <Link
-                      className="dashboard-menu__item"
-                      to={`/dashboards/${id}/panels/new`}
-                      onClick={() => setAddMenuOpen(false)}
-                    >
-                      Add Panel
-                    </Link>
-                    <Link
-                      className="dashboard-menu__item"
-                      to={`/dashboards/${id}/variables`}
-                      onClick={() => setAddMenuOpen(false)}
-                    >
-                      Variables
-                    </Link>
                     <button
                       type="button"
                       className="dashboard-menu__item"
@@ -433,8 +419,25 @@ export function DashboardEditor() {
                         openCopilotPanel("suggest-panel", { dashboardId: id!, projectId: dashboard.project_id });
                       }}
                     >
-                      Suggest a panel
+                      <CopilotIcon width={14} height={14} />
+                      Ask AI
                     </button>
+                    <Link
+                      className="dashboard-menu__item"
+                      to={`/dashboards/${id}/panels/new`}
+                      onClick={() => setAddMenuOpen(false)}
+                    >
+                      <VisualizerIcon width={14} height={14} />
+                      Add Panel
+                    </Link>
+                    <Link
+                      className="dashboard-menu__item"
+                      to={`/dashboards/${id}/variables`}
+                      onClick={() => setAddMenuOpen(false)}
+                    >
+                      <VariableIcon width={14} height={14} />
+                      Variables
+                    </Link>
                   </div>
                 )}
               </div>

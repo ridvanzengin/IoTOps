@@ -162,7 +162,7 @@ async def test_generate_sql_wraps_transport_errors() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused")
 
-    with pytest.raises(AiGenerationError):
+    with pytest.raises(AiGenerationError, match="AI SQL generation failed"):
         await _service(handler).generate_sql("anything")
 
 
@@ -302,16 +302,57 @@ async def test_answer_copilot_question_raises_when_iterations_exhausted() -> Non
         ).answer_copilot_question(uuid4(), "keep asking forever", [])
 
 
+async def test_answer_copilot_question_returns_suggestion_built_before_iterations_exhausted() -> None:
+    # Regression: suggest_dashboard needs noticeably more round-trips than
+    # any single-suggestion tool, and a live session exhausted the budget
+    # on a turn that had *already* successfully built a suggestion a few
+    # iterations earlier -- the whole turn used to be discarded (a hard
+    # error) just because the model didn't also land a wrap-up sentence in
+    # time, throwing away a suggestion that cost several real Anthropic
+    # calls to ground. It should be returned instead.
+    project_id = uuid4()
+    responses = [
+        message(
+            tool_use_block(
+                "suggest_panel",
+                {
+                    "dashboard_id": str(uuid4()),
+                    "title": "Hive Temperature",
+                    "chart_type": "line",
+                    "sql": "SELECT time, temperature FROM hive_metrics",
+                    "x_axis": "time",
+                    "y_axis": "temperature",
+                },
+            )
+        ),
+    ] + [message(tool_use_block("query_occurrences", {})) for _ in range(MAX_COPILOT_ITERATIONS - 1)]
+
+    answer, needs_context, suggestion, quick_replies = await _service(
+        _unused_ollama_handler, anthropic_responses=responses
+    ).answer_copilot_question(project_id, "chart hive temperature", [])
+
+    assert needs_context is None
+    assert suggestion is not None
+    assert suggestion.kind == "panel"
+    assert "[[suggestion-context]]" in answer
+    assert quick_replies is None
+
+
 async def test_answer_copilot_question_wraps_anthropic_api_errors() -> None:
+    # Regression: AiGenerationError used to hardcode an "AI SQL generation
+    # failed" prefix on every message, including Co-pilot chat ones that
+    # have nothing to do with SQL -- actively misleading (a live session
+    # hit this for an iteration-budget error with no SQL involved at all).
     error = anthropic.APIConnectionError(
         message="connection refused",
         request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
     )
 
-    with pytest.raises(AiGenerationError):
+    with pytest.raises(AiGenerationError) as exc_info:
         await _service(
             _unused_ollama_handler, anthropic_responses=[error]
         ).answer_copilot_question(uuid4(), "anything", [])
+    assert "SQL" not in str(exc_info.value)
 
 
 async def test_answer_copilot_question_raises_on_empty_final_answer() -> None:
@@ -592,6 +633,33 @@ async def test_answer_copilot_question_strips_every_quick_replies_block() -> Non
     assert quick_replies == ["Option A", "Option B"]
 
 
+async def test_answer_copilot_question_drops_unterminated_quick_replies_block() -> None:
+    # Regression: a live session had a long automation-suggestion answer
+    # get cut off by the token budget partway through the quick-replies
+    # block ("...\n[[quick-replies]]\nHigh CO", no closing tag) -- the
+    # well-formed-only regex didn't match at all, so the raw
+    # "[[quick-replies]]\nHigh CO" markup leaked straight into the visible
+    # chat bubble instead of being parsed or dropped.
+    responses = [
+        message(
+            text_block(
+                "Which of these would be most useful?\n\n"
+                "[[quick-replies]]\n"
+                "High CO"
+            )
+        )
+    ]
+
+    answer, _, _, quick_replies = await _service(
+        _unused_ollama_handler, anthropic_responses=responses
+    ).answer_copilot_question(uuid4(), "suggest an automation", [])
+
+    assert answer == "Which of these would be most useful?"
+    assert "[[quick-replies]]" not in answer
+    assert "High CO" not in answer
+    assert quick_replies is None
+
+
 async def test_answer_copilot_question_handles_a_long_cross_table_suggestion_chain() -> None:
     # Regression: a real cross-table request ("weight loss + elevated
     # sound together") exhausted the old cap of 4 tool-call iterations in
@@ -689,6 +757,87 @@ async def test_answer_copilot_question_panel_suggestion_invalid_input_lets_model
     answer, _, suggestion, _ = await _service(
         _unused_ollama_handler, anthropic_responses=responses
     ).answer_copilot_question(uuid4(), "chart something", [])
+
+    assert suggestion is None
+    assert answer == "Let me try again."
+
+
+async def test_answer_copilot_question_always_includes_dashboard_suggestion_tool() -> None:
+    fake_client = FakeAnthropicClient([message(text_block("Answer."))])
+
+    await _service(
+        _unused_ollama_handler, anthropic_client=fake_client
+    ).answer_copilot_question(uuid4(), "any alerts?", [])
+
+    tool_names = {tool["name"] for tool in fake_client.messages.calls[0]["tools"]}
+    assert "suggest_dashboard" in tool_names
+
+
+async def test_answer_copilot_question_surfaces_dashboard_suggestion() -> None:
+    project_id = uuid4()
+    responses = [
+        message(
+            tool_use_block(
+                "suggest_dashboard",
+                {
+                    "name": "Apiary Overview",
+                    "variables": [
+                        {"name": "hive", "label": "Hive", "table": "hive_metrics", "value_column": "hive_id"}
+                    ],
+                    "panels": [
+                        {
+                            "title": "Hive Temperature",
+                            "chart_type": "line",
+                            "sql": "SELECT time, temperature FROM hive_metrics WHERE time >= $__timeFrom AND time <= $__timeTo",
+                            "x_axis": "time",
+                            "y_axis": "temperature",
+                        },
+                        {
+                            "title": "Hive Weight",
+                            "chart_type": "line",
+                            "sql": "SELECT time, weight_kg FROM hive_metrics WHERE time >= $__timeFrom AND time <= $__timeTo "
+                            "AND hive_id = $hive",
+                            "x_axis": "time",
+                            "y_axis": "weight_kg",
+                        },
+                        {
+                            "title": "Hive Humidity",
+                            "chart_type": "line",
+                            "sql": "SELECT time, humidity FROM hive_metrics WHERE time >= $__timeFrom AND time <= $__timeTo",
+                            "x_axis": "time",
+                            "y_axis": "humidity",
+                        },
+                    ],
+                },
+            )
+        ),
+        message(text_block("I've drafted a dashboard for you.")),
+    ]
+
+    answer, needs_context, suggestion, _ = await _service(
+        _unused_ollama_handler, anthropic_responses=responses
+    ).answer_copilot_question(project_id, "suggest a dashboard", [])
+
+    assert needs_context is None
+    assert suggestion is not None
+    assert suggestion.kind == "dashboard"
+    assert suggestion.state.project_id == project_id
+    assert suggestion.state.name == "Apiary Overview"
+    assert len(suggestion.state.panels) == 3
+    # Same machine-readable recap mechanism as every other suggestion type.
+    assert answer.startswith("I've drafted a dashboard for you.")
+    assert "[[suggestion-context]]" in answer
+
+
+async def test_answer_copilot_question_dashboard_suggestion_invalid_input_lets_model_retry() -> None:
+    responses = [
+        message(tool_use_block("suggest_dashboard", {"name": "Bad", "panels": []})),
+        message(text_block("Let me try again.")),
+    ]
+
+    answer, _, suggestion, _ = await _service(
+        _unused_ollama_handler, anthropic_responses=responses
+    ).answer_copilot_question(uuid4(), "suggest a dashboard", [])
 
     assert suggestion is None
     assert answer == "Let me try again."

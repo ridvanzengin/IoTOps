@@ -310,6 +310,60 @@ def test_copilot_returns_panel_suggestion_with_dashboard_id() -> None:
     assert body["suggestion"]["state"]["dashboard_id"] == dashboard_id
 
 
+def test_copilot_returns_dashboard_suggestion() -> None:
+    client = _client_with_handler(
+        _unused_ollama_handler,
+        anthropic_responses=[
+            message(
+                tool_use_block(
+                    "suggest_dashboard",
+                    {
+                        "name": "Apiary Overview",
+                        "panels": [
+                            {
+                                "title": "Hive Temperature",
+                                "chart_type": "line",
+                                "sql": "SELECT time, temperature FROM hive_metrics",
+                                "x_axis": "time",
+                                "y_axis": "temperature",
+                            },
+                            {
+                                "title": "Hive Weight",
+                                "chart_type": "line",
+                                "sql": "SELECT time, weight_kg FROM hive_metrics",
+                                "x_axis": "time",
+                                "y_axis": "weight_kg",
+                            },
+                            {
+                                "title": "Hive Humidity",
+                                "chart_type": "line",
+                                "sql": "SELECT time, humidity FROM hive_metrics",
+                                "x_axis": "time",
+                                "y_axis": "humidity",
+                            },
+                        ],
+                    },
+                )
+            ),
+            message(text_block("Here's a dashboard draft.")),
+        ],
+    )
+
+    response = client.post(
+        "/api/ai/copilot",
+        json={
+            "project_id": "11111111-1111-1111-1111-111111111111",
+            "question": "suggest a dashboard",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["suggestion"]["kind"] == "dashboard"
+    assert body["suggestion"]["state"]["name"] == "Apiary Overview"
+    assert len(body["suggestion"]["state"]["panels"]) == 3
+
+
 def test_copilot_returns_502_on_anthropic_failure() -> None:
     error = anthropic.APIConnectionError(
         message="connection refused",

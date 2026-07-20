@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from uuid import UUID
@@ -16,6 +17,7 @@ from app.ai.tools import (
     run_query_occurrences,
     run_query_telemetry,
     run_suggest_automation,
+    run_suggest_dashboard,
     run_suggest_panel,
 )
 from app.automater.service import AutomaterService
@@ -37,9 +39,35 @@ from app.telemetry.service import TelemetryService
 # Live-tested against a real cross-table request ("weight loss + elevated
 # sound together") that genuinely needed more round-trips than a
 # single-signal one -- 6 wasn't enough and exhausted with a hard error.
-# 10 gives real headroom; each iteration is one cheap Haiku call, so the
-# cost of a few extra unused iterations on simpler turns is negligible.
-MAX_COPILOT_ITERATIONS = 10
+# Bumped again for suggest_dashboard specifically: it needs noticeably
+# more round-trips than any single-suggestion tool (list_existing_panels,
+# then query_telemetry across however many candidate panels are worth
+# surveying, then suggest_dashboard, then prose) -- live-tested a real
+# exhaustion at 10 for a dashboard-suggestion turn. Each iteration is one
+# cheap Haiku call, so the cost of unused headroom on simpler turns is
+# negligible; see also the exhaustion fallback below, which returns an
+# already-built suggestion rather than discarding it even if the budget
+# does run out.
+MAX_COPILOT_ITERATIONS = 20
+
+# Root cause found via live logging (see the per-iteration log line below):
+# a suggest_dashboard call for a 4-6 panel dashboard (each panel needing a
+# title, chart_type, a full SQL string with WHERE/macros, x_axis, y_axis)
+# plus a variable chain routinely needs well over 500 tokens of tool-input
+# JSON alone. At the old max_tokens=500, the response got cut off mid-
+# generation -- observed directly: 17 of 19 suggest_dashboard calls in one
+# real turn had `name`/`description`/`variables` but no `panels` key at
+# all, since token budget ran out before the model reached that field.
+# The tool correctly rejected each truncated call (missing panels), so the
+# model just retried the same call, got truncated the same way, and burned
+# the entire iteration budget without ever landing a valid one -- this was
+# the real cause of the "iteration exhaustion" and "fewer panels than
+# expected" bugs chased over many rounds of prompt-wording changes, not
+# the wording itself. Sized well above what even a 6-panel dashboard with
+# a 2-level variable chain needs, with headroom for prose before/after.
+MAX_COPILOT_RESPONSE_TOKENS = 4096
+
+logger = logging.getLogger(__name__)
 
 # Marks a compact, machine-readable recap of a turn's suggestion, appended
 # to the *stored* answer text (not shown in the chat bubble -- see
@@ -60,6 +88,13 @@ _SUGGESTION_CONTEXT_END = "[[/suggestion-context]]"
 _QUICK_REPLIES_RE = re.compile(
     r"\n*\[\[quick-replies\]\]\s*\n(.*?)\n\[\[/quick-replies\]\]\s*", re.DOTALL
 )
+# Matches an opening marker with no closing one -- seen live when a long
+# answer got cut off by the token budget mid-block (e.g. "...\n[[quick-
+# replies]]\nHigh CO", truncated before finishing even the first label).
+# Without this, the raw "[[quick-replies]]" markup and whatever partial
+# text follows it leaks straight into the visible chat bubble instead of
+# being parsed or dropped.
+_UNTERMINATED_QUICK_REPLIES_RE = re.compile(r"\n*\[\[quick-replies\]\].*", re.DOTALL)
 
 _CODE_FENCE_RE = re.compile(r"```(?:sql)?", re.IGNORECASE)
 
@@ -67,7 +102,13 @@ _CODE_FENCE_RE = re.compile(r"```(?:sql)?", re.IGNORECASE)
 def _extract_quick_replies(text: str) -> tuple[str, list[str] | None]:
     matches = list(_QUICK_REPLIES_RE.finditer(text))
     if not matches:
-        return text, None
+        # No well-formed block -- but a truncated/unterminated one still
+        # shouldn't leak raw "[[quick-replies]]" markup (and whatever
+        # partial label text follows it) into the visible answer. Drop it
+        # and fall back to no quick replies for this turn rather than
+        # trying to salvage a possibly word-broken partial label.
+        stripped = _UNTERMINATED_QUICK_REPLIES_RE.sub("", text).strip()
+        return stripped, None
     # Use the *last* block's labels -- the system prompt places the real
     # quick-replies block "at the very end of the answer" (see
     # build_copilot_system_prompt), so if the model also echoes a stale
@@ -168,7 +209,7 @@ class AiService:
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            raise AiGenerationError(str(exc)) from exc
+            raise AiGenerationError(f"AI SQL generation failed: {exc}") from exc
 
         raw = response.json().get("response", "")
         sql = _strip_markdown_fences(raw)
@@ -217,11 +258,11 @@ class AiService:
         needs_context: NeedsContext | None = None
         suggestion: CopilotSuggestion | None = None
 
-        for _ in range(MAX_COPILOT_ITERATIONS):
+        for iteration in range(MAX_COPILOT_ITERATIONS):
             try:
                 response = await self._anthropic_client.messages.create(
                     model=self._anthropic_model,
-                    max_tokens=500,
+                    max_tokens=MAX_COPILOT_RESPONSE_TOKENS,
                     system=system,
                     tools=COPILOT_TOOLS,
                     messages=messages,
@@ -233,6 +274,12 @@ class AiService:
 
             messages.append({"role": "assistant", "content": response.content})
             tool_uses = [block for block in response.content if block.type == "tool_use"]
+            logger.info(
+                "copilot iteration %d/%d: %s",
+                iteration + 1,
+                MAX_COPILOT_ITERATIONS,
+                ", ".join(f"{t.name}({json.dumps(t.input)[:200]})" for t in tool_uses) or "final text",
+            )
             if not tool_uses:
                 answer = next(
                     (block.text for block in response.content if block.type == "text"), ""
@@ -281,6 +328,12 @@ class AiService:
                     result_text, new_suggestion = run_suggest_panel(tool_use.input)
                     if new_suggestion is not None:
                         suggestion = new_suggestion
+                elif tool_use.name == "suggest_dashboard":
+                    result_text, new_suggestion = run_suggest_dashboard(project_id, tool_use.input)
+                    if new_suggestion is not None:
+                        suggestion = new_suggestion
+                    else:
+                        logger.info("suggest_dashboard rejected: %s", result_text)
                 else:
                     result_text = await self._execute_copilot_tool(
                         tool_use.name, tool_use.input, project_id
@@ -289,6 +342,27 @@ class AiService:
                     {"type": "tool_result", "tool_use_id": tool_use.id, "content": result_text}
                 )
             messages.append({"role": "user", "content": tool_results})
+
+        logger.warning(
+            "copilot iteration budget (%d) exhausted; suggestion built=%s",
+            MAX_COPILOT_ITERATIONS,
+            suggestion is not None,
+        )
+        if suggestion is not None:
+            # Same reasoning as the quick-replies-only case above -- a
+            # suggestion already built from a real tool call this turn
+            # (and the several real Anthropic calls that went into
+            # grounding it) shouldn't be thrown away just because the
+            # model didn't *also* land a wrap-up sentence within the
+            # iteration budget. This is the common shape of a
+            # suggest_dashboard exhaustion specifically: it needs
+            # noticeably more round-trips than any single-suggestion tool
+            # (list_existing_panels, several query_telemetry calls across
+            # several candidate panels, suggest_dashboard, then prose) and
+            # was live-tested hitting this exact limit.
+            recap = json.dumps(suggestion.model_dump(mode="json"))
+            answer = f"Here's a draft for you to review.{_SUGGESTION_CONTEXT_START}{recap}{_SUGGESTION_CONTEXT_END}"
+            return answer, needs_context, suggestion, None
 
         raise AiGenerationError(
             "The AI couldn't finish answering within the allotted steps -- try a more "

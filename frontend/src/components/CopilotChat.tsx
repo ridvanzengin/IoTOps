@@ -3,9 +3,12 @@ import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { askCopilot } from "../api/ai";
 import { ApiError } from "../api/client";
+import { addPanel, createDashboard } from "../api/dashboard";
 import { useEvents } from "../context/EventsContext";
+import { DEFAULT_POSITION, findFreePosition } from "../utils/panelLayout";
 import type { Project } from "../types/project";
-import type { CopilotIntent, CopilotSuggestion } from "../types/ai";
+import type { CopilotIntent, CopilotSuggestion, DashboardSuggestionState } from "../types/ai";
+import type { PanelPosition, Variable } from "../types/dashboard";
 import "./CopilotChat.css";
 
 const ASSISTANT_NAME = "ARIA";
@@ -16,12 +19,13 @@ const TYPE_SPEED_MS = 16;
 // string to keep in sync, not a short label plus a separate long message.
 const SUGGEST_AUTOMATION_SEED_REPLY = "Analyze my telemetry and suggest an automation";
 const SUGGEST_PANEL_SEED_REPLY = "Suggest a panel for this dashboard";
+const SUGGEST_DASHBOARD_SEED_REPLY = "Suggest a dashboard for this project";
 
-// Shown instead of the two single-purpose seed chips above when the
+// Shown instead of the single-purpose seed chips above when the
 // conversation was opened generically (no intent, no known dashboard) --
-// three short-labeled entry points into the same underlying flows, rather
+// four short-labeled entry points into the same underlying flows, rather
 // than making the user type out a request from scratch. Labels are short
-// (fit three side by side); the actual sent message can be a little more
+// (fit side by side); the actual sent message can be a little more
 // explicit than the label since only the model sees it.
 const GENERIC_ANALYZE_SEED_REPLY = "Analyze my current telemetry and tell me what's notable";
 const GENERIC_SUGGEST_PANEL_SEED_REPLY = "Suggest a dashboard panel worth adding";
@@ -35,7 +39,10 @@ function greetingText(intent?: CopilotIntent): string {
     return `Hi, I'm ${ASSISTANT_NAME}. Which project would you like to set up an automation for?`;
   }
   if (intent === "suggest-panel") {
-    return `Hi, I'm ${ASSISTANT_NAME}. Which project would you like to suggest a panel for?`;
+    return `Hi, I'm ${ASSISTANT_NAME}. Which project should I suggest a panel for?`;
+  }
+  if (intent === "suggest-dashboard") {
+    return `Hi, I'm ${ASSISTANT_NAME}. Which project should I suggest a dashboard for?`;
   }
   return `Hi, I'm ${ASSISTANT_NAME} — your IoTOps assistant. Which project do you need help with today?`;
 }
@@ -88,14 +95,35 @@ function ackText(project: Project, intent?: CopilotIntent): string {
   if (intent === "suggest-panel") {
     return `Let's find a chart worth adding to your dashboard. What would you like to see?`;
   }
+  if (intent === "suggest-dashboard") {
+    return `Let's build a starter dashboard for ${project.name}. I'll take a look at the data and propose one.`;
+  }
   return `How can I help you with ${project.name}?`;
 }
 
 // Only covers the two suggestion kinds with a static route -- "panel"
 // needs a runtime dashboard id and is handled directly in
-// handleOpenSuggestion instead (see there).
+// handleOpenSuggestion instead (see there); "dashboard" has no route at
+// all (see handleCreateDashboardSuggestion) and is deliberately excluded
+// from handleOpenSuggestion's own parameter type so it can never reach
+// this function.
 function suggestionRoute(kind: "automater_rule" | "query_rule"): string {
   return kind === "automater_rule" ? "/automaters/new" : "/query-rules/new";
+}
+
+// "Apiary → Hive (filtered by Apiary)" -- readable, not raw JSON, so the
+// user can actually evaluate what they're about to confirm. A variable's
+// predicate_variable is a token (matches an earlier item's `name`), so
+// look up that earlier item's own label for a nicer join.
+function describeVariableChain(variables: Variable[]): string {
+  if (variables.length === 0) return "None — flat overview, no per-entity filtering.";
+  return variables
+    .map((variable) => {
+      if (!variable.predicate_variable) return variable.label;
+      const parent = variables.find((candidate) => candidate.name === variable.predicate_variable);
+      return `${variable.label} (filtered by ${parent?.label ?? variable.predicate_variable})`;
+    })
+    .join(" → ");
 }
 
 // Reveals `text` one character at a time, like the assistant is typing it
@@ -126,6 +154,39 @@ function TypedLine({ text, onDone }: { text: string; onDone?: () => void }) {
       {!done && <span className="copilot-chat__typing-cursor" />}
     </>
   );
+}
+
+// A dashboard suggestion can take a real while (list_existing_panels, then
+// several query_telemetry calls, then suggest_dashboard -- easily 30-60s+
+// of actual round-trip time) -- a static "Thinking..." bubble that never
+// changes for that long reads as hung, not working. Cycling label text
+// plus a slow color shift are both purely cosmetic (there's no way to know
+// which real step the model is on from here), but give continuous visual
+// feedback that something is still happening.
+// Generic on purpose -- this indicator shows during every Co-pilot flow
+// (Q&A, automation suggestions, panel suggestions, dashboard suggestions),
+// not just dashboard/panel ones, so phrasing like "Checking existing
+// panels" or "Visualizing" read as wrong/broken outside that one flow.
+const THINKING_PHRASES = [
+  "Thinking",
+  "Analyzing your data",
+  "Checking existing setup",
+  "Drafting a proposal",
+  "Almost there",
+];
+const THINKING_PHRASE_INTERVAL_MS = 2200;
+
+function ThinkingIndicator() {
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setIndex((prev) => (prev + 1) % THINKING_PHRASES.length);
+    }, THINKING_PHRASE_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, []);
+
+  return <span className="copilot-chat__thinking">{THINKING_PHRASES[index]}...</span>;
 }
 
 // Self-contained-looking, but the actual conversation state lives in
@@ -263,12 +324,61 @@ export function CopilotChat({
     navigate(`/projects/${project.id}/edit`, { state: { focusField: "ai_context" } });
   }
 
-  function handleOpenSuggestion(suggestion: CopilotSuggestion) {
+  function handleOpenSuggestion(suggestion: Exclude<CopilotSuggestion, { kind: "dashboard" }>) {
     if (suggestion.kind === "panel") {
       navigate(`/dashboards/${suggestion.state.dashboard_id}/panels/new`, { state: suggestion.state });
       return;
     }
     navigate(suggestionRoute(suggestion.kind), { state: suggestion.state });
+  }
+
+  // Unlike every other suggestion kind, there's no existing form to
+  // navigate into and prefill -- the dashboard doesn't exist yet, and per
+  // the product decision behind this feature, review already happened by
+  // reading the card (variable chain + panel list) and refining in chat,
+  // not by handing the user a further editable form. So this creates the
+  // dashboard for real directly: first the shell + variables (one call,
+  // relying on Variable's own chain-order validation accepting a whole
+  // ordered list at once, same as DashboardService already enforces), then
+  // every proposed panel in sequence (not parallel, so each panel's
+  // position is computed against the ones already placed earlier in this
+  // same batch -- addPanel's response isn't needed for that, the position
+  // is decided client-side up front). Panels are bulk-created without a
+  // per-panel review gate on purpose -- unlike variables, a panel is
+  // read-only with no side effects, trivially deleted/edited afterward via
+  // the dashboard's own panel menu.
+  async function handleCreateDashboardSuggestion(state: DashboardSuggestionState) {
+    if (sending) return;
+    updateCopilotSession({ sending: true, error: null });
+    try {
+      const dashboard = await createDashboard({
+        project_id: state.project_id,
+        name: state.name,
+        description: state.description,
+        variables: state.variables,
+        panels: [],
+        layout: {},
+      });
+      let placed: { position: PanelPosition }[] = [];
+      for (const panel of state.panels) {
+        const position = findFreePosition(placed, DEFAULT_POSITION.width, DEFAULT_POSITION.height);
+        placed = [...placed, { position }];
+        await addPanel(dashboard.id, {
+          title: panel.title,
+          chart: panel.chart,
+          query: panel.query,
+          time_range: panel.time_range,
+          refresh_interval: 0,
+          position,
+          event_rule_ids: [],
+        });
+      }
+      navigate(`/dashboards/${dashboard.id}`);
+    } catch (err) {
+      updateCopilotSession({ error: err instanceof ApiError ? err.message : "Failed to create dashboard." });
+    } finally {
+      updateCopilotSession({ sending: false });
+    }
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -343,6 +453,17 @@ export function CopilotChat({
                 </button>
               </div>
             )}
+            {ackDone && effectiveIntent === "suggest-dashboard" && messages.length === 0 && (
+              <div className="copilot-chat__project-chips">
+                <button
+                  type="button"
+                  className="copilot-chat__project-chip"
+                  onClick={() => sendMessage(SUGGEST_DASHBOARD_SEED_REPLY)}
+                >
+                  {SUGGEST_DASHBOARD_SEED_REPLY}
+                </button>
+              </div>
+            )}
             {ackDone && !effectiveIntent && messages.length === 0 && (
               <div className="copilot-chat__project-chips">
                 <button
@@ -366,50 +487,90 @@ export function CopilotChat({
                 >
                   Suggest a dashboard panel
                 </button>
+                <button
+                  type="button"
+                  className="copilot-chat__project-chip"
+                  onClick={() => sendMessage(SUGGEST_DASHBOARD_SEED_REPLY)}
+                >
+                  Suggest a dashboard
+                </button>
               </div>
             )}
           </>
         )}
 
-        {messages.map((message, index) => (
-          <Fragment key={index}>
-            <div className={`copilot-chat__message copilot-chat__message--${message.role}`}>
-              {message.role === "assistant" ? renderAssistantContent(message.content) : message.content}
-            </div>
-            {needsContextByIndex[index] && (
-              <button type="button" className="copilot-chat__context-nudge" onClick={handleAddContext}>
-                I wasn't sure what <code>{needsContextByIndex[index].column}</code> means — add context →
-              </button>
-            )}
-            {quickRepliesByIndex[index] && index === messages.length - 1 && !sending && (
-              <div className="copilot-chat__project-chips">
-                {quickRepliesByIndex[index].map((label) => (
-                  <button
-                    key={label}
-                    type="button"
-                    className="copilot-chat__project-chip"
-                    onClick={() => sendMessage(label)}
-                  >
-                    {label}
-                  </button>
-                ))}
+        {messages.map((message, index) => {
+          const suggestion = suggestionByIndex[index];
+          return (
+            <Fragment key={index}>
+              <div className={`copilot-chat__message copilot-chat__message--${message.role}`}>
+                {message.role === "assistant" ? renderAssistantContent(message.content) : message.content}
               </div>
-            )}
-            {suggestionByIndex[index] && (
-              <div className="copilot-chat__suggestion-card">
-                <span className="copilot-chat__suggestion-label">{suggestionByIndex[index].label}</span>
-                <button
-                  type="button"
-                  className="copilot-chat__suggestion-action"
-                  onClick={() => handleOpenSuggestion(suggestionByIndex[index])}
-                >
-                  Open in builder →
+              {needsContextByIndex[index] && (
+                <button type="button" className="copilot-chat__context-nudge" onClick={handleAddContext}>
+                  I wasn't sure what <code>{needsContextByIndex[index].column}</code> means — add context →
                 </button>
-              </div>
-            )}
-          </Fragment>
-        ))}
-        {sending && <div className="copilot-chat__message copilot-chat__message--assistant">Thinking...</div>}
+              )}
+              {quickRepliesByIndex[index] && index === messages.length - 1 && !sending && (
+                <div className="copilot-chat__project-chips">
+                  {quickRepliesByIndex[index].map((label) => (
+                    <button
+                      key={label}
+                      type="button"
+                      className="copilot-chat__project-chip"
+                      onClick={() => sendMessage(label)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {suggestion &&
+                (suggestion.kind === "dashboard" ? (
+                  <div className="copilot-chat__suggestion-card copilot-chat__suggestion-card--dashboard">
+                    <span className="copilot-chat__suggestion-label">{suggestion.label}</span>
+                    <div className="copilot-chat__suggestion-detail">
+                      <strong>Variables:</strong> {describeVariableChain(suggestion.state.variables)}
+                    </div>
+                    <ul className="copilot-chat__suggestion-panel-list">
+                      {suggestion.state.panels.map((panel, panelIndex) => (
+                        <li key={panelIndex}>
+                          {panel.title}{" "}
+                          <span className="copilot-chat__suggestion-panel-type">({panel.chart.type})</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <button
+                      type="button"
+                      className="copilot-chat__suggestion-action"
+                      disabled={sending}
+                      onClick={() => handleCreateDashboardSuggestion(suggestion.state)}
+                    >
+                      {sending
+                        ? "Creating..."
+                        : `Create dashboard (${suggestion.state.panels.length} panel${suggestion.state.panels.length === 1 ? "" : "s"}) →`}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="copilot-chat__suggestion-card">
+                    <span className="copilot-chat__suggestion-label">{suggestion.label}</span>
+                    <button
+                      type="button"
+                      className="copilot-chat__suggestion-action"
+                      onClick={() => handleOpenSuggestion(suggestion)}
+                    >
+                      Open in builder →
+                    </button>
+                  </div>
+                ))}
+            </Fragment>
+          );
+        })}
+        {sending && (
+          <div className="copilot-chat__message copilot-chat__message--assistant">
+            <ThinkingIndicator />
+          </div>
+        )}
       </div>
 
       {error && <p className="collector-page__error">{error}</p>}

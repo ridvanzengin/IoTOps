@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -22,6 +24,8 @@ from app.shared.exceptions import (
     QueryExecutionError,
 )
 from app.telemetry.api import router as telemetry_router
+
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="IoTOps")
 

@@ -5,12 +5,14 @@ from uuid import uuid4
 from mongomock_motor import AsyncMongoMockClient
 
 from app.ai.tools import (
+    SUGGEST_PANEL_TOOL,
     run_flag_missing_context,
     run_list_existing_panels,
     run_list_existing_rules,
     run_query_occurrences,
     run_query_telemetry,
     run_suggest_automation,
+    run_suggest_dashboard,
     run_suggest_panel,
 )
 from app.automater.models import Automater, Condition, Rule
@@ -479,3 +481,335 @@ def test_suggest_panel_returns_error_text_on_unknown_chart_type() -> None:
 
     assert suggestion is None
     assert "couldn't build" in ack.lower()
+
+
+def _dashboard_panel(**overrides) -> dict:
+    defaults: dict = {
+        "title": "Hive Temperature",
+        "chart_type": "line",
+        "sql": "SELECT time, temperature FROM hive_metrics WHERE time >= $__timeFrom AND time <= $__timeTo",
+        "x_axis": "time",
+        "y_axis": "temperature",
+    }
+    defaults.update(overrides)
+    return defaults
+
+
+def test_suggest_dashboard_builds_suggestion_with_variables_and_panels() -> None:
+    project_id = uuid4()
+
+    ack, suggestion = run_suggest_dashboard(
+        project_id,
+        {
+            "name": "Apiary Overview",
+            "description": "Starter dashboard",
+            "variables": [
+                {"name": "apiary", "label": "Apiary", "table": "hive_metrics", "value_column": "apiary_id"},
+                {
+                    "name": "hive",
+                    "label": "Hive",
+                    "table": "hive_metrics",
+                    "value_column": "hive_id",
+                    "predicate_column": "apiary_id",
+                    "predicate_variable": "apiary",
+                },
+            ],
+            "panels": [
+                _dashboard_panel(title="Hive Temperature"),
+                _dashboard_panel(
+                    title="Weight by Hive",
+                    chart_type="bar",
+                    sql="SELECT hive_id, avg(weight_kg) AS weight_kg FROM hive_metrics "
+                    "WHERE hive_id = $hive GROUP BY hive_id",
+                    x_axis="hive_id",
+                    y_axis="weight_kg",
+                ),
+                _dashboard_panel(title="Humidity Over Time", y_axis="humidity"),
+            ],
+        },
+    )
+
+    assert isinstance(ack, str) and "3 panels" in ack
+    assert suggestion is not None
+    assert suggestion.kind == "dashboard"
+    assert suggestion.state.project_id == project_id
+    assert suggestion.state.name == "Apiary Overview"
+    assert [v.name for v in suggestion.state.variables] == ["apiary", "hive"]
+    assert suggestion.state.variables[1].predicate_variable == "apiary"
+    assert len(suggestion.state.panels) == 3
+    assert suggestion.state.panels[1].chart.type == "bar"
+
+
+def test_suggest_dashboard_builds_flat_overview_with_no_variables() -> None:
+    ack, suggestion = run_suggest_dashboard(
+        uuid4(),
+        {
+            "name": "Overview",
+            "panels": [_dashboard_panel(title="A"), _dashboard_panel(title="B"), _dashboard_panel(title="C")],
+        },
+    )
+
+    assert "3 panels" in ack
+    assert suggestion is not None
+    assert suggestion.state.variables == []
+
+
+def test_suggest_dashboard_returns_error_text_on_broken_predicate_chain() -> None:
+    ack, suggestion = run_suggest_dashboard(
+        uuid4(),
+        {
+            "name": "Broken",
+            "variables": [
+                {
+                    "name": "hive",
+                    "label": "Hive",
+                    "table": "hive_metrics",
+                    "value_column": "hive_id",
+                    "predicate_column": "apiary_id",
+                    "predicate_variable": "apiary",  # never defined
+                }
+            ],
+            "panels": [
+                _dashboard_panel(title="A", sql="SELECT time, temperature FROM hive_metrics WHERE hive_id = $hive"),
+                _dashboard_panel(title="B"),
+                _dashboard_panel(title="C"),
+            ],
+        },
+    )
+
+    assert suggestion is None
+    assert "couldn't build" in ack.lower()
+
+
+def test_suggest_dashboard_returns_error_text_on_panel_referencing_undeclared_variable() -> None:
+    # Regression: a live session had the model describe "a Machine filter
+    # variable" in its own prose and write every panel's sql against
+    # $machine_id, but the actual variables list was empty -- nothing
+    # caught the mismatch, so the dashboard was created with every panel
+    # silently returning no data ($machine_id was never substituted,
+    # Postgres saw the literal token in the WHERE clause).
+    ack, suggestion = run_suggest_dashboard(
+        uuid4(),
+        {
+            "name": "Machine Monitoring",
+            "panels": [
+                _dashboard_panel(
+                    title="Current Draw Over Time",
+                    sql="SELECT time, current_draw_amps FROM machine_telemetry "
+                    "WHERE time >= $__timeFrom AND time <= $__timeTo AND machine_id = $machine_id",
+                    x_axis="time",
+                    y_axis="current_draw_amps",
+                ),
+                _dashboard_panel(title="Motor Temperature"),
+                _dashboard_panel(title="Vibration Over Time", y_axis="vibration_mm_s"),
+            ],
+        },
+    )
+
+    assert suggestion is None
+    assert "couldn't build" in ack.lower()
+    assert "$machine_id" in ack
+    assert "undeclared" in ack.lower()
+
+
+def test_suggest_dashboard_allows_panel_referencing_a_declared_variable() -> None:
+    _, suggestion = run_suggest_dashboard(
+        uuid4(),
+        {
+            "name": "Machine Monitoring",
+            "variables": [
+                {"name": "machine_id", "label": "Machine", "table": "machine_telemetry", "value_column": "machine_id"}
+            ],
+            "panels": [
+                _dashboard_panel(
+                    title="Current Draw Over Time",
+                    sql="SELECT time, current_draw_amps FROM machine_telemetry "
+                    "WHERE time >= $__timeFrom AND time <= $__timeTo AND machine_id = $machine_id",
+                    x_axis="time",
+                    y_axis="current_draw_amps",
+                ),
+                _dashboard_panel(title="Motor Temperature"),
+                _dashboard_panel(title="Vibration Over Time", y_axis="vibration_mm_s"),
+            ],
+        },
+    )
+
+    assert suggestion is not None
+
+
+def test_suggest_dashboard_returns_error_text_on_declared_but_unused_variable() -> None:
+    # Regression: a live session declared a "Panel Array" variable but
+    # every proposed panel was a flat fleet-wide overview that never
+    # actually filtered or grouped by it -- a purely decorative variable
+    # that read as broken to the user, not helpful.
+    ack, suggestion = run_suggest_dashboard(
+        uuid4(),
+        {
+            "name": "Solar Array Operations",
+            "variables": [
+                {"name": "array", "label": "Panel Array", "table": "solar_metrics", "value_column": "panel_array_id"}
+            ],
+            "panels": [
+                _dashboard_panel(title="Power Output", y_axis="power_kw"),
+                _dashboard_panel(title="Panel Temperature", y_axis="panel_temp_c"),
+                _dashboard_panel(title="Inverter Efficiency", y_axis="efficiency"),
+            ],
+        },
+    )
+
+    assert suggestion is None
+    assert "couldn't build" in ack.lower()
+    assert "$array" in ack
+    assert "no panel actually uses" in ack
+
+
+def test_suggest_dashboard_allows_chain_parent_variable_used_only_indirectly() -> None:
+    # A chain parent (Apiary, narrowing Hive's own options via
+    # predicate_variable) is doing real work on the dashboard even without
+    # its own direct $apiary reference in any panel's sql -- only the leaf
+    # (Hive) needs to be directly referenced for the whole chain to count
+    # as used, not every link.
+    _, suggestion = run_suggest_dashboard(
+        uuid4(),
+        {
+            "name": "Apiary Overview",
+            "variables": [
+                {"name": "apiary", "label": "Apiary", "table": "hive_metrics", "value_column": "apiary_id"},
+                {
+                    "name": "hive",
+                    "label": "Hive",
+                    "table": "hive_metrics",
+                    "value_column": "hive_id",
+                    "predicate_column": "apiary_id",
+                    "predicate_variable": "apiary",
+                },
+            ],
+            "panels": [
+                _dashboard_panel(title="Hive Temperature", sql=_dashboard_panel()["sql"] + " AND hive_id = $hive"),
+                _dashboard_panel(title="Apiary Overview Panel"),
+                _dashboard_panel(title="Humidity Over Time", y_axis="humidity"),
+            ],
+        },
+    )
+
+    assert suggestion is not None
+    assert [v.name for v in suggestion.state.variables] == ["apiary", "hive"]
+
+
+def test_suggest_dashboard_returns_error_text_on_empty_panels() -> None:
+    ack, suggestion = run_suggest_dashboard(uuid4(), {"name": "No panels", "panels": []})
+
+    assert suggestion is None
+    assert "couldn't build" in ack.lower()
+
+
+def test_suggest_dashboard_returns_error_text_on_single_panel() -> None:
+    # Regression: a live session had the model exhaust its iteration
+    # budget partway through building a dashboard, and the turn's
+    # exhaustion fallback surfaced whatever suggest_dashboard call had
+    # last succeeded -- a single panel -- as if it were a considered
+    # final proposal. A one- or two-panel "dashboard" defeats the entire
+    # point of this tool over suggest_panel, so it's rejected outright
+    # rather than silently accepted.
+    ack, suggestion = run_suggest_dashboard(
+        uuid4(), {"name": "Too Small", "panels": [_dashboard_panel()]}
+    )
+
+    assert suggestion is None
+    assert "couldn't build" in ack.lower()
+    assert "at least 3 panels" in ack
+
+
+def test_suggest_dashboard_builds_suggestion_with_exactly_three_panels() -> None:
+    _, suggestion = run_suggest_dashboard(
+        uuid4(),
+        {
+            "name": "Just Enough",
+            "panels": [_dashboard_panel(title="A"), _dashboard_panel(title="B"), _dashboard_panel(title="C")],
+        },
+    )
+
+    assert suggestion is not None
+    assert len(suggestion.state.panels) == 3
+
+
+def test_suggest_dashboard_returns_error_text_on_incomplete_panel() -> None:
+    ack, suggestion = run_suggest_dashboard(
+        uuid4(),
+        {
+            "name": "Incomplete",
+            "panels": [
+                {"title": "Incomplete", "chart_type": "line", "sql": "SELECT time FROM hive_metrics"},
+                _dashboard_panel(title="Complete"),
+                _dashboard_panel(title="Also Complete"),
+            ],
+        },
+    )
+
+    assert suggestion is None
+    assert "couldn't build" in ack.lower()
+
+
+def test_suggest_dashboard_returns_error_text_on_unknown_chart_type() -> None:
+    ack, suggestion = run_suggest_dashboard(
+        uuid4(),
+        {
+            "name": "Bogus",
+            "panels": [
+                _dashboard_panel(chart_type="bogus"),
+                _dashboard_panel(title="B"),
+                _dashboard_panel(title="C"),
+            ],
+        },
+    )
+
+    assert suggestion is None
+    assert "couldn't build" in ack.lower()
+
+
+def test_suggest_dashboard_returns_error_text_instead_of_crashing_on_non_object_panel() -> None:
+    # Regression: a panels item that isn't an object (e.g. the model sent
+    # a bare panel name/string instead of {title, chart_type, sql, ...})
+    # used to raise an uncaught AttributeError ('str' has no attribute
+    # 'get'), crashing the whole request instead of giving the model a
+    # retryable error.
+    ack, suggestion = run_suggest_dashboard(
+        uuid4(), {"name": "Bad Shape", "panels": ["Total Power Output Over Time"]}
+    )
+
+    assert suggestion is None
+    assert "couldn't build" in ack.lower()
+
+
+def test_suggest_dashboard_error_names_the_specific_incomplete_panel() -> None:
+    # Regression: a bare ValueError raised deep inside a list of several
+    # panels got wrapped by Pydantic with a dump of the *entire*
+    # DashboardSuggestionState (every panel, every variable) as noise
+    # around the one relevant fact -- live-tested to actually cause the
+    # model to give up retrying suggest_dashboard and describe the
+    # dashboard in prose instead. The error must name which panel (by
+    # position + title) is incomplete, and stay short regardless of how
+    # many other panels are in the list.
+    panels = [_dashboard_panel(title=f"Panel {i}") for i in range(4)]
+    panels.append({"title": "Panel Temperature Trends", "chart_type": "line", "sql": "SELECT 1"})
+
+    ack, suggestion = run_suggest_dashboard(uuid4(), {"name": "System Overview", "panels": panels})
+
+    assert suggestion is None
+    assert "panel 4" in ack
+    assert "Panel Temperature Trends" in ack
+    assert len(ack) < 300
+
+
+def test_suggest_panel_tool_schema_clarifies_scatter_is_not_xy_correlation() -> None:
+    # Live feedback: the model proposed a scatter panel plotting two
+    # arbitrary continuous metrics against each other (irradiance vs
+    # panel temperature) -- this platform's chart types don't support
+    # that (PanelEditor.tsx groups scatter with line/bar as one XY family
+    # sharing the same x_axis convention, always time or a grouping
+    # column). The tool schema itself -- not just prose guidance -- must
+    # say so, since chart_type/x_axis are filled directly from this
+    # schema's own field descriptions.
+    properties = SUGGEST_PANEL_TOOL["input_schema"]["properties"]
+    assert "true X-Y correlation" in properties["chart_type"]["description"]
+    assert "second continuous measured value" in properties["x_axis"]["description"]
