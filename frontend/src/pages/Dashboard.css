@@ -40,6 +40,22 @@
   margin-top: -12px;
 }
 
+@media (max-width: 640px) {
+  /* Same no-wrap overflow risk as .collector-page__header -- title +
+     variable dropdowns on the left, time range/refresh/Save on the
+     right, all in one row with no fallback. Wrapping still works fine
+     under position:sticky (it only pins to the top, doesn't care about
+     the element's own height). */
+  .dashboard-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .dashboard-toolbar__left,
+  .dashboard-toolbar__actions {
+    flex-wrap: wrap;
+  }
+}
+
 .dashboard-toolbar__left {
   display: flex;
   align-items: baseline;

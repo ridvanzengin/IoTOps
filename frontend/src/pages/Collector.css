@@ -21,6 +21,16 @@
   margin-bottom: 24px;
 }
 
+@media (max-width: 640px) {
+  /* Shared by every list/editor page's header (title + action buttons) --
+     wrap instead of overflowing once there's no room for both on one
+     line. */
+  .collector-page__header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+}
+
 .collector-page__header-actions {
   display: flex;
   align-items: center;
@@ -107,10 +117,46 @@
   border-bottom: none;
 }
 
-.collector-table__actions {
+/* Deliberately NOT display:flex on the <td> itself -- overriding a table
+   cell's display to flex doesn't just change its own internal layout, it
+   can desync its row-height/border-bottom from sibling <td>s in the same
+   <tr> (live-tested: the Actions column's row divider lines visibly
+   drifted from the rest of the table's, once other columns wrapped to a
+   different number of lines per row). Keeping the <td> a plain table-cell
+   preserves normal row-height sharing; .collector-table__actions-inner
+   (a block-level child, so it's still full-width) owns the actual flex
+   alignment of whatever's inside (buttons, a dropdown-menu, or both).*/
+.collector-table__actions-inner {
   display: flex;
   justify-content: flex-end;
+  /* stretch (the default -- set explicitly here for clarity): when a
+     .dropdown-menu sits next to a sibling .button, the trigger (no
+     explicit height of its own -- see .dropdown-menu__trigger's own
+     comment in App.css) stretches to match the button's height, same as
+     it did before this wrapper existed. When the dropdown-menu is the
+     only child (no sibling button), stretch has nothing taller to match
+     against, so it just renders at its own natural size -- correct
+     either way. */
+  align-items: stretch;
   gap: 8px;
+}
+
+/* Only scrolls below the mobile breakpoint (not on desktop, where these
+   tables already fit and .collector-card is deliberately overflow:visible
+   so row-action .dropdown-menu__list popovers can extend past its edges --
+   see .collector-card's own comment above). overflow-x:auto on a narrower
+   ancestor implicitly makes overflow-y 'auto' too (a real CSS quirk, not a
+   choice), so a dropdown from the last visible row could get clipped
+   here on mobile -- an accepted, narrower tradeoff vs. an 8-column table
+   overflowing the whole page layout. */
+.collector-table-wrapper {
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .collector-table-wrapper {
+    overflow-x: auto;
+  }
 }
 
 .collector-table__link {
@@ -180,6 +226,13 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 24px;
+}
+
+@media (max-width: 640px) {
+  .wizard-steps {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
 }
 
 .wizard-step {

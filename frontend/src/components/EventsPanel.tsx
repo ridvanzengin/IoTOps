@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { OCCURRENCES_PAGE_SIZE, useEvents } from "../context/EventsContext";
 import { TIME_RANGES } from "../constants/timeRanges";
 import { hashColor } from "../utils/color";
+import { useMediaQuery, MOBILE_QUERY } from "../hooks/useMediaQuery";
 import { CopilotChat } from "./CopilotChat";
 import { OccurrenceCard } from "./OccurrenceCard";
 import { RefreshIcon } from "./icons";
@@ -52,6 +53,12 @@ export function EventsPanel() {
   // it survive a full reload/new session too.
   const [width, setWidth] = useState(loadStoredWidth);
   const resizingRef = useRef(false);
+  // Below MOBILE_QUERY, the panel is a full-screen overlay (see
+  // EventsPanel.css) instead of a resizable docked panel -- the stored/
+  // dragged width (min 280px) would already exceed most phone widths on
+  // its own, so the resize handle is dropped entirely rather than trying
+  // to make drag-resize work via touch for a dimension that doesn't apply.
+  const isMobile = useMediaQuery(MOBILE_QUERY);
 
   const projectId = activePanel?.kind === "project" ? activePanel.projectId : null;
 
@@ -107,8 +114,11 @@ export function EventsPanel() {
   const pageEnd = Math.min(occurrencesOffset + OCCURRENCES_PAGE_SIZE, occurrencesTotal);
 
   return (
-    <aside className="events-panel" style={{ width }}>
-      <div className="events-panel__resize-handle" onMouseDown={handleResizeStart} />
+    <aside
+      className={`events-panel${isMobile ? " events-panel--mobile" : ""}`}
+      style={isMobile ? undefined : { width }}
+    >
+      {!isMobile && <div className="events-panel__resize-handle" onMouseDown={handleResizeStart} />}
       <div className="events-panel__header">
         <span className="events-panel__title">{title}</span>
         <div className="events-panel__header-actions">

@@ -80,6 +80,7 @@ export function CollectorList() {
         </div>
       ) : (
         <div className="collector-card">
+          <div className="collector-table-wrapper">
           <table className="collector-table">
             <thead>
               <tr>
@@ -102,6 +103,7 @@ export function CollectorList() {
                   <td>{collector.inputs.map((input) => input.plugin_type).join(", ")}</td>
                   <td>{collector.outputs.map((output) => output.plugin_type).join(", ")}</td>
                   <td className="collector-table__actions">
+                    <div className="collector-table__actions-inner">
                     {collector.status === "running" ? (
                       <button
                         className="button"
@@ -146,11 +148,13 @@ export function CollectorList() {
                         </div>
                       )}
                     </div>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </main>

@@ -68,6 +68,10 @@
   left: 0;
   right: 0;
   min-width: 220px;
+  /* min-width can still push the panel past a narrow viewport's edge when
+     the trigger itself sits close to it (left:0/right:0 alone don't
+     prevent that) -- cap it so it never extends off-screen. */
+  max-width: calc(100vw - 32px);
   max-height: 260px;
   overflow-y: auto;
   background: var(--bg);

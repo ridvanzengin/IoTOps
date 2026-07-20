@@ -198,3 +198,15 @@ export function RefreshIcon(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+// Hamburger menu -- opens the mobile Sidebar drawer (see Sidebar.tsx's
+// mobileOpen state). Only rendered below the app's mobile breakpoint.
+export function MenuIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <line x1="4" y1="7" x2="20" y2="7" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <line x1="4" y1="17" x2="20" y2="17" />
+    </Icon>
+  );
+}

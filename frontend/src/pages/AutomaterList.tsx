@@ -217,6 +217,7 @@ export function AutomaterList() {
                 </div>
 
                 {isExpanded && (
+                  <div className="collector-table-wrapper">
                   <table className="collector-table automater-list__rules-table">
                     <colgroup>
                       <col style={{ width: "16%" }} />
@@ -253,6 +254,7 @@ export function AutomaterList() {
                               </span>
                             </td>
                             <td className="collector-table__actions">
+                              <div className="collector-table__actions-inner">
                               <button
                                 className="button"
                                 disabled={pendingKey === `rule-${rule.id}`}
@@ -296,12 +298,14 @@ export function AutomaterList() {
                                   </div>
                                 )}
                               </div>
+                              </div>
                             </td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             );

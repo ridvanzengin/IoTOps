@@ -8,6 +8,18 @@
   flex-direction: column;
 }
 
+/* Mobile: full-screen overlay instead of a resizable docked panel -- the
+   inline width style is dropped in EventsPanel.tsx (isMobile ? undefined
+   : {width}) so this can own sizing entirely. */
+.events-panel--mobile {
+  position: fixed;
+  inset: 0;
+  width: 100% !important;
+  height: 100%;
+  z-index: 45;
+  border-left: none;
+}
+
 .events-panel__resize-handle {
   position: absolute;
   top: 0;
