@@ -581,24 +581,12 @@
   content: "→";
 }
 
-.home-panel-card__progress,
-.home-badge-soon {
+.home-panel-card__progress {
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-}
-
-.home-panel-card__progress {
   color: var(--text);
-}
-
-.home-badge-soon {
-  color: var(--accent-h);
-  background: var(--accent-bg);
-  border-radius: 999px;
-  padding: 3px 10px;
-  white-space: nowrap;
 }
 
 .home-copilot {

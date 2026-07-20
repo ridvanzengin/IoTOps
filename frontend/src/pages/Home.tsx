@@ -15,6 +15,7 @@ import {
 } from "../components/icons";
 import { useEvents } from "../context/EventsContext";
 import { colorAtIndex, initials } from "../utils/color";
+import type { CopilotIntent } from "../types/ai";
 import type { Automater } from "../types/automater";
 import type { Collector } from "../types/collector";
 import type { Project } from "../types/project";
@@ -94,32 +95,30 @@ export function Home() {
 
   const hasAutomation = automaters.length > 0 || queryRules.length > 0;
 
-  function panelSuggestionLink(): string {
-    for (const project of projects) {
-      const dashboards = dashboardsByProject[project.id] ?? [];
-      if (dashboards.length > 0) return `/dashboards/${dashboards[0].id}/panels/new`;
-    }
-    return "/dashboards/new";
-  }
-
-  const aiSuggestions = [
+  const aiSuggestions: { key: string; label: string; detail: string; intent: CopilotIntent }[] = [
     {
-      key: "realtime",
-      label: "New Realtime Automation Suggestion",
-      detail: "Stream telemetry looks ready for a rule — turn a live condition into an event.",
-      to: "/automaters/new",
+      key: "analyze",
+      label: "Analyze my telemetry",
+      detail: "Ask the Co-pilot to look at what's currently being ingested and call out what's notable.",
+      intent: "analyze-telemetry",
     },
     {
-      key: "scheduled",
-      label: "New Scheduled Rule Suggestion",
-      detail: "Run a periodic SQL check across stored telemetry for slower-moving conditions.",
-      to: "/query-rules/new",
+      key: "automation",
+      label: "Suggest an Automation",
+      detail: "Ask the Co-pilot to turn a live streaming condition into a real-time rule.",
+      intent: "suggest-automation",
     },
     {
       key: "panel",
-      label: "New Dashboard Panel Suggestion",
-      detail: "Surface a metric that's being collected but doesn't have a panel yet.",
-      to: panelSuggestionLink(),
+      label: "Suggest a Dashboard Panel",
+      detail: "Ask the Co-pilot to surface a metric that's being collected but doesn't have a panel yet.",
+      intent: "suggest-panel",
+    },
+    {
+      key: "dashboard",
+      label: "Suggest a New Dashboard",
+      detail: "Ask the Co-pilot to propose a starter dashboard from a project's existing telemetry.",
+      intent: "suggest-dashboard",
     },
   ];
 
@@ -234,10 +233,10 @@ export function Home() {
       <section className="home-command">
         <div className="home-command__content">
           <p className="home-command__eyebrow">Operations overview</p>
-          <h1>Telemetry, automation, events, and dashboards in one loop.</h1>
+          <h1>Telemetry, automation, events, dashboards, and an AI Co-pilot in one loop.</h1>
           <p className="home-command__copy">
-            Ingest device data, visualize the stored signal, and let rules surface the states that
-            need a human decision.
+            Ingest device data, visualize the stored signal, let rules surface the states that need a
+            human decision, and ask the Co-pilot when you need an answer or a suggestion.
           </p>
           <div className="home-command__actions">
             <Link className="button button--primary" to="/projects/new">
@@ -377,9 +376,15 @@ export function Home() {
             </div>
             <div className="home-suggestions-list">
               {aiSuggestions.map((suggestion) => (
-                <Link key={suggestion.key} className="home-next-action" to={suggestion.to} title={suggestion.detail}>
+                <button
+                  key={suggestion.key}
+                  type="button"
+                  className="home-next-action"
+                  title={suggestion.detail}
+                  onClick={() => openCopilotPanel(suggestion.intent)}
+                >
                   {suggestion.label}
-                </Link>
+                </button>
               ))}
             </div>
           </section>
@@ -452,15 +457,14 @@ export function Home() {
         <div className="home-panel-card home-panel-card--copilot">
           <div className="home-panel-card__header">
             <h2>AI Co-pilot</h2>
-            <span className="home-badge-soon">Coming soon</span>
           </div>
           <div className="home-copilot">
             <CopilotIcon className="home-copilot__icon" />
             <div className="home-copilot__body">
               <p className="home-copilot__lead">
-                Ask it to explain a metric spike, draft a rule in plain English, or summarize what changed
-                across your projects today — a persistent assistant that understands your telemetry,
-                automation, dashboards, and event history.
+                Ask questions about your telemetry, automation, dashboards, and event history, or ask it to
+                suggest a new automation, dashboard panel, or dashboard grounded in what's actually being
+                ingested — it drafts changes but never applies them without your approval.
               </p>
               <button type="button" className="button" onClick={() => openCopilotPanel()}>
                 Open Co-pilot

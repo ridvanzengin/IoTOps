@@ -12,10 +12,11 @@ export interface NeedsContext {
   reason: string;
 }
 
-// Set for the lifetime of a suggestion-flow conversation, opened via a
-// "Suggest an automation"/"Suggest a panel"/"Suggest a dashboard" button
-// rather than the plain Co-pilot icon -- see EventsContext.tsx's ActivePanel.
-export type CopilotIntent = "suggest-automation" | "suggest-panel" | "suggest-dashboard";
+// Set for the lifetime of a suggestion-flow conversation, opened via an
+// "Analyze my telemetry"/"Suggest an automation"/"Suggest a panel"/"Suggest
+// a dashboard" button rather than the plain Co-pilot icon -- see
+// EventsContext.tsx's ActivePanel.
+export type CopilotIntent = "analyze-telemetry" | "suggest-automation" | "suggest-panel" | "suggest-dashboard";
 
 export interface AutomaterRuleSuggestionState {
   project_id: string;
