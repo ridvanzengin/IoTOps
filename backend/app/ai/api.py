@@ -8,14 +8,20 @@ from app.ai.models import (
     SqlGenerationResponse,
 )
 from app.ai.service import AiService
-from app.dependencies import block_in_demo_mode, get_ai_service
+from app.dependencies import get_ai_service
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
-_ai_disabled_in_demo = Depends(block_in_demo_mode("AI features are disabled in this demo environment."))
+# No block_in_demo_mode gate here, unlike every mutating route elsewhere --
+# these run for real in the public demo now that the AI backend defaults to
+# Gemini's free tier (see Settings.ai_provider), not a paid Anthropic key
+# that public traffic could burn through. AiService itself (constructed
+# with demo=settings.demo -- see get_ai_service) degrades to a friendly
+# "AI features are limited in this demo" message if the free tier gets
+# rate-limited or is otherwise unreachable, rather than failing outright.
 
 
-@router.post("/sql", response_model=SqlGenerationResponse, dependencies=[_ai_disabled_in_demo])
+@router.post("/sql", response_model=SqlGenerationResponse)
 async def generate_sql(
     payload: SqlGenerationRequest,
     service: AiService = Depends(get_ai_service),
@@ -24,9 +30,7 @@ async def generate_sql(
     return SqlGenerationResponse(sql=sql)
 
 
-@router.post(
-    "/query-rule-sql", response_model=SqlGenerationResponse, dependencies=[_ai_disabled_in_demo]
-)
+@router.post("/query-rule-sql", response_model=SqlGenerationResponse)
 async def generate_query_rule_sql(
     payload: QueryRuleSqlGenerationRequest,
     service: AiService = Depends(get_ai_service),
@@ -35,7 +39,7 @@ async def generate_query_rule_sql(
     return SqlGenerationResponse(sql=sql)
 
 
-@router.post("/copilot", response_model=CopilotAnswerResponse, dependencies=[_ai_disabled_in_demo])
+@router.post("/copilot", response_model=CopilotAnswerResponse)
 async def answer_copilot_question(
     payload: CopilotQuestionRequest,
     service: AiService = Depends(get_ai_service),

@@ -19,7 +19,11 @@ redis==5.3.1
 # (app/query_rule/service.py) -- real day-of-week/month-boundary handling
 # isn't worth hand-rolling. Small, pure-Python, no C extension.
 croniter==6.2.4
-# Official Anthropic SDK -- powers the AI Co-pilot chat (app/ai/service.py's
-# answer_copilot_question), which uses a real Claude model (not the
-# Ollama-backed SQL generation the rest of app/ai/ uses).
+# Official Anthropic SDK -- default backend for every AI feature
+# (app/ai/providers/anthropic_provider.py). See google-genai below for the
+# free-tier alternative, selected via Settings.ai_provider.
 anthropic==0.116.0
+# Official Google Gen AI SDK -- Gemini-backed alternative to Anthropic
+# (app/ai/providers/gemini_provider.py), for when the Anthropic budget runs
+# out. Not used unless AI_PROVIDER=gemini in .env.
+google-genai==2.12.1

@@ -4,7 +4,11 @@ import anthropic
 import docker
 import redis.asyncio as async_redis
 from fastapi import Request
+from google import genai
 
+from app.ai.chat_provider import ChatProvider
+from app.ai.providers.anthropic_provider import AnthropicChatProvider
+from app.ai.providers.gemini_provider import GeminiChatProvider
 from app.ai.service import AiService
 from app.automater.docker import AutomaterDockerManager
 from app.automater.repository import AutomaterRepository
@@ -23,7 +27,7 @@ from app.project.repository import ProjectRepository
 from app.project.service import ProjectService
 from app.query_rule.repository import QueryRuleRepository
 from app.query_rule.service import QueryRuleService
-from app.shared.exceptions import DemoModeError
+from app.shared.exceptions import AiGenerationError, DemoModeError
 from app.telemetry.repository import TelemetryRepository
 from app.telemetry.service import TelemetryService
 
@@ -31,6 +35,7 @@ _registry: PluginRegistry | None = None
 _docker_manager: CollectorDockerManager | None = None
 _automater_docker_manager: AutomaterDockerManager | None = None
 _anthropic_client: anthropic.AsyncAnthropic | None = None
+_gemini_client: genai.Client | None = None
 _async_redis_client: async_redis.Redis | None = None
 _firing_redis_client: async_redis.Redis | None = None
 
@@ -121,13 +126,13 @@ async def get_ai_service() -> AiService:
         telemetry_service=await get_telemetry_service(),
         event_service=get_event_service(),
         project_service=await get_project_service(),
-        anthropic_client=get_anthropic_client(),
-        anthropic_model=settings.anthropic_model,
+        chat_provider=get_chat_provider(),
         automater_service=get_automater_service(),
         query_rule_service=await get_query_rule_service(),
         collector_service=get_collector_service(),
         plugin_registry=get_plugin_registry(),
         dashboard_service=await get_dashboard_service(),
+        demo=settings.demo,
     )
 
 
@@ -136,6 +141,37 @@ def get_anthropic_client() -> anthropic.AsyncAnthropic:
     if _anthropic_client is None:
         _anthropic_client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     return _anthropic_client
+
+
+def get_gemini_client() -> genai.Client:
+    global _gemini_client
+    if _gemini_client is None:
+        # Unlike anthropic.AsyncAnthropic (accepts an empty key, only fails
+        # on the first real call -- see AiGenerationError's own "not
+        # validated at startup" precedent), genai.Client raises a raw
+        # ValueError immediately if constructed with an empty key. Left
+        # unguarded, that ValueError has no exception_handler in main.py,
+        # so it would surface as an unhandled 500 with a full traceback
+        # instead of a clean, actionable error -- catch it here and raise
+        # the same AiGenerationError type every other AI failure already
+        # uses, so it gets the existing 502 handling for free.
+        if not settings.gemini_api_key:
+            raise AiGenerationError(
+                "GEMINI_API_KEY is not set -- required because AI_PROVIDER=gemini."
+            )
+        _gemini_client = genai.Client(api_key=settings.gemini_api_key)
+    return _gemini_client
+
+
+def get_chat_provider() -> ChatProvider:
+    # The one place that reads Settings.ai_provider -- AiService and its
+    # tool-calling loop are written against ChatProvider only, with no
+    # awareness of which concrete backend they got.
+    if settings.ai_provider == "anthropic":
+        return AnthropicChatProvider(get_anthropic_client(), settings.anthropic_model)
+    if settings.ai_provider == "gemini":
+        return GeminiChatProvider(get_gemini_client(), settings.gemini_model)
+    raise ValueError(f"Unknown AI_PROVIDER '{settings.ai_provider}' -- expected 'anthropic' or 'gemini'")
 
 
 def get_event_service() -> EventService:
@@ -175,20 +211,21 @@ def block_in_demo_mode(
     allow_seed_token: bool = False,
 ):
     # A dependency factory, not a plain dependency -- lets a route override
-    # the message (see the AI routes, which use a more specific reason)
-    # while every other mutating route just uses the default. Wire via
-    # `dependencies=[Depends(block_in_demo_mode())]` on each mutating route
-    # decorator -- per-route, not router-level, since every router here
-    # mixes GET/read-only-POST routes with mutating ones.
+    # the default message while every other mutating route just uses it.
+    # Wire via `dependencies=[Depends(block_in_demo_mode())]` on each
+    # mutating route decorator -- per-route, not router-level, since every
+    # router here mixes GET/read-only-POST routes with mutating ones. The
+    # AI routes (app/ai/api.py) deliberately don't use this at all -- see
+    # that module's own comment for why.
     #
     # allow_seed_token=True opts a specific route into the demo-showcase
     # seed-token bypass below -- only set on the create/update routes
     # examples/demo/seed.py's idempotent-by-name provisioning actually
     # calls (or would plausibly call as it grows: more projects, updates to
     # existing ones). Every delete/stop-deployment route and everything
-    # outside project/collector/automater/query_rule/dashboard (AI routes,
-    # event resolution) deliberately leaves this False, so a leaked token
-    # still can't delete or stop anything, demo mode or not.
+    # outside project/collector/automater/query_rule/dashboard (event
+    # resolution) deliberately leaves this False, so a leaked token still
+    # can't delete or stop anything, demo mode or not.
     def _guard(request: Request) -> None:
         if not settings.demo:
             return

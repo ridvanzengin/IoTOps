@@ -4,8 +4,7 @@ import re
 from datetime import datetime, timezone
 from uuid import UUID
 
-import anthropic
-
+from app.ai.chat_provider import ChatProvider, ChatProviderError
 from app.ai.models import AiVariableHint, CopilotMessage, CopilotSuggestion, NeedsContext
 from app.ai.prompts import build_copilot_system_prompt, build_query_rule_sql_prompt, build_sql_prompt
 from app.ai.tools import (
@@ -80,6 +79,15 @@ logger = logging.getLogger(__name__)
 # development-plan.md's "One real technical gotcha" note.
 _SUGGESTION_CONTEXT_START = "\n\n[[suggestion-context]]"
 _SUGGESTION_CONTEXT_END = "[[/suggestion-context]]"
+
+# Shown instead of the real ChatProviderError detail when AiService._demo is
+# True -- deliberately vaguer than the self-hosted message (no raw exception
+# text), both because a public demo visitor can't act on that detail anyway
+# and because it shouldn't leak provider/key specifics.
+_DEMO_PROVIDER_UNAVAILABLE_MESSAGE = (
+    "AI features in this demo run on a free-tier budget and are temporarily "
+    "limited -- please try again in a moment."
+)
 
 # Lets the model offer a small set of clickable choices (see
 # build_copilot_system_prompt's own instructions for the exact format)
@@ -156,25 +164,24 @@ class AiService:
         telemetry_service: TelemetryService,
         event_service: EventService,
         project_service: ProjectService,
-        anthropic_client: anthropic.AsyncAnthropic,
-        anthropic_model: str,
+        chat_provider: ChatProvider,
         automater_service: AutomaterService,
         query_rule_service: QueryRuleService,
         collector_service: CollectorService,
         plugin_registry: PluginRegistry,
         dashboard_service: DashboardService,
+        demo: bool = False,
     ) -> None:
         self._telemetry_service = telemetry_service
         # Both the NL-to-SQL generation below (generate_sql/
         # generate_query_rule_sql) and the Co-pilot chat further down
-        # (answer_copilot_question) go through the same Anthropic client --
-        # there used to be a separate Ollama-backed HTTP passthrough for
-        # SQL generation specifically, retired in favor of a single API
-        # backend for everything the AI does.
+        # (answer_copilot_question) go through the same chat_provider --
+        # Anthropic or Gemini, picked once at startup by Settings.ai_provider
+        # (see app/dependencies.py's get_chat_provider) -- neither this
+        # service nor its tool-calling loop knows or cares which.
         self._event_service = event_service
         self._project_service = project_service
-        self._anthropic_client = anthropic_client
-        self._anthropic_model = anthropic_model
+        self._chat_provider = chat_provider
         # Only used by the list_existing_rules tool -- see
         # _execute_copilot_tool.
         self._automater_service = automater_service
@@ -186,6 +193,17 @@ class AiService:
         # Only used by list_existing_panels and to resolve the optional
         # dashboard_hint below -- see answer_copilot_question.
         self._dashboard_service = dashboard_service
+        # Settings.demo, threaded through by get_ai_service -- when a
+        # ChatProvider call fails (network, auth, rate limit -- the free
+        # Gemini tier this demo runs on is genuinely rate-limited under
+        # real public traffic, unlike a self-hosted deployment's own paid
+        # key), the public demo shows a friendly "this is a demo" message
+        # instead of a raw/technical one. AI routes no longer block outright
+        # in demo mode (see app/ai/api.py) now that the default backend is
+        # free -- this is what replaces that blanket block for the one
+        # failure mode that's actually still likely: the free tier being
+        # temporarily exhausted.
+        self._demo = demo
 
     async def generate_sql(
         self, nl_query: str, variables: list[AiVariableHint] | None = None
@@ -203,12 +221,13 @@ class AiService:
 
     async def _generate_sql_from_prompt(self, prompt: str) -> str:
         try:
-            response = await self._anthropic_client.messages.create(
-                model=self._anthropic_model,
-                max_tokens=SQL_GENERATION_MAX_TOKENS,
+            response = await self._chat_provider.create_message(
                 messages=[{"role": "user", "content": prompt}],
+                max_tokens=SQL_GENERATION_MAX_TOKENS,
             )
-        except anthropic.APIError as exc:
+        except ChatProviderError as exc:
+            if self._demo:
+                raise AiGenerationError(_DEMO_PROVIDER_UNAVAILABLE_MESSAGE) from exc
             raise AiGenerationError(f"AI SQL generation failed: {exc}") from exc
 
         raw = next((block.text for block in response.content if block.type == "text"), "")
@@ -260,14 +279,15 @@ class AiService:
 
         for iteration in range(MAX_COPILOT_ITERATIONS):
             try:
-                response = await self._anthropic_client.messages.create(
-                    model=self._anthropic_model,
+                response = await self._chat_provider.create_message(
+                    messages=messages,
                     max_tokens=MAX_COPILOT_RESPONSE_TOKENS,
                     system=system,
                     tools=COPILOT_TOOLS,
-                    messages=messages,
                 )
-            except anthropic.APIError as exc:
+            except ChatProviderError as exc:
+                if self._demo:
+                    raise AiGenerationError(_DEMO_PROVIDER_UNAVAILABLE_MESSAGE) from exc
                 raise AiGenerationError(
                     "The AI didn't return an answer -- try rephrasing the question."
                 ) from exc

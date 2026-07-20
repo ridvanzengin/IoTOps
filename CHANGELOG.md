@@ -12,6 +12,48 @@ just "fixed a typo"), that's kept; blow-by-blow debugging steps aren't.
 
 ## 2026-07-20
 
+**Gemini added as a free-tier alternative AI backend, switchable via
+`AI_PROVIDER`.** `AiService`'s tool-calling loop and SQL generation now go
+through a small `ChatProvider` interface (`app/ai/chat_provider.py`)
+instead of the Anthropic SDK directly -- `AnthropicChatProvider` is a
+pure passthrough (zero translation, zero regression risk); `GeminiChatProvider`
+(`google-genai`) does the real work: translating our Anthropic-shaped tool
+schemas/message history into Gemini's `Content`/`Part`/`FunctionCall`
+structures and back. Two real bugs found live-testing it against the real
+API (neither catchable by mocked tests alone): (1) "thinking" Gemini
+models sign every function-call with an opaque `thought_signature` and
+reject a later turn that replays the call without it -- a direct 400
+`INVALID_ARGUMENT` repro'd and fixed by carrying the signature through
+`ToolUseBlock`. (2) Gemini sometimes wraps a substituted variable token in
+its own quotes (`WHERE machine_id = '$machine_id'`) despite prompt
+guidance saying not to -- since the substituted value is already a quoted
+string literal, this double-quoted into `''press-03''`, a syntax error
+with no hint that quoting was the problem. Fixed structurally in
+`substitute_macros` (strips a redundant quote pair around the token before
+substituting) rather than relying on prompt compliance, since it's now
+proven inconsistent across two different model providers.
+
+**The public demo's AI routes no longer block outright** (`POST
+/api/ai/sql`, `/query-rule-sql`, `/copilot` used to hard-403 whenever
+`DEMO=true`, back when AI needed a paid Anthropic key public traffic
+could burn through). Now that the default backend is free, they run for
+real; `AiService` gained a `demo` flag so a genuine provider failure
+(free-tier rate limit, most likely) shows a friendly "AI features in this
+demo are temporarily limited" message instead of a raw error. The
+suggest_*/query_*/list_existing_* tools were already provably read-only
+or in-memory-only (never call a repository's create/update/delete) --
+actually persisting anything still goes through the same
+`POST /api/dashboard`/`/api/automater/rules`/etc. routes, which remain
+gated.
+
+**SQL-generation prompts didn't know how to write "latest reading per
+entity" queries** -- live-tested via `/api/ai/sql`: a "latest weight per
+hive" request generated `GROUP BY hive_id HAVING time = MAX(time)`,
+invalid SQL (a non-aggregated column in HAVING) that Postgres rejects.
+Added explicit `DISTINCT ON` guidance to both `build_sql_prompt` and
+`build_query_rule_sql_prompt`, naming the invalid pattern directly so the
+model recognizes and avoids it.
+
 **Ollama retired -- every AI feature now runs on the same Anthropic
 client.** SQL generation (`POST /api/ai/sql`, `POST /api/ai/query-rule-sql`,
 backing the Panel Builder and Query Rule editor's NL-to-SQL boxes) used to

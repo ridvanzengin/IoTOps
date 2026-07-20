@@ -63,6 +63,20 @@ def test_prompt_omits_variable_section_when_none_provided() -> None:
     assert "dashboard defines the following variables" not in prompt
 
 
+def test_prompt_instructs_distinct_on_for_latest_per_entity_requests() -> None:
+    # Regression: live-tested via /api/ai/sql -- a "latest weight per hive"
+    # style request generated `SELECT hive_id, weight_kg FROM hive_weight
+    # ... GROUP BY hive_id HAVING time = MAX(time)`, which Postgres rejects
+    # ("column must appear in the GROUP BY clause or be used in an
+    # aggregate function") since weight_kg is neither aggregated nor
+    # grouped, and HAVING time = MAX(time) doesn't fix that. DISTINCT ON
+    # is the correct, valid pattern for "one row per entity, newest first".
+    prompt = build_sql_prompt("show the latest weight per hive", _schema())
+
+    assert "DISTINCT ON" in prompt
+    assert "HAVING time = MAX(time)" in prompt  # named explicitly as the invalid pattern to avoid
+
+
 def test_query_rule_prompt_includes_schema_and_request() -> None:
     prompt = build_query_rule_sql_prompt("stations with sustained high wind", _schema())
 
@@ -86,6 +100,19 @@ def test_query_rule_prompt_instructs_one_row_per_matching_entity() -> None:
 
     assert "GROUP BY" in prompt
     assert "HAVING" in prompt
+
+
+def test_query_rule_prompt_instructs_distinct_on_for_latest_reading_requests() -> None:
+    # Companion to build_sql_prompt's own regression (see
+    # test_prompt_instructs_distinct_on_for_latest_per_entity_requests) --
+    # a Query Rule asking about each entity's LATEST reading specifically
+    # is exactly the request shape rule 2's own "GROUP BY entity, HAVING
+    # aggregate" pattern doesn't cover (time isn't an aggregate), so it
+    # needs its own explicit DISTINCT-ON-subquery guidance too.
+    prompt = build_query_rule_sql_prompt("alert if the most recent temperature is above 90", _schema())
+
+    assert "DISTINCT ON" in prompt
+    assert "HAVING time = MAX(time)" in prompt
 
 
 def test_query_rule_prompt_encourages_cross_table_conditions() -> None:

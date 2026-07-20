@@ -27,14 +27,29 @@ class Settings(BaseSettings):
     docker_network: str = "iotops"
     telegraf_image: str = "telegraf:1.32-alpine"
     automater_telegraf_image: str = "custom-telegraf:latest"
-    # User's own Anthropic API key -- backs both the AI Co-pilot chat
-    # (app/ai/service.py's answer_copilot_question) and NL-to-SQL
-    # generation (generate_sql/generate_query_rule_sql), the only AI
-    # backend in the app now. Empty by default; set via .env. Not
+    # Which ChatProvider backs every AI feature (Co-pilot chat and NL-to-SQL
+    # generation alike) -- "anthropic" or "gemini". See
+    # app/dependencies.py's get_chat_provider. Only the matching provider's
+    # own api_key/model below actually needs a real value; the other pair
+    # is simply unused. Anthropic remains the default since it's the
+    # better-tested path; Gemini (AI Studio) has a genuine free tier for
+    # when the Anthropic budget is exhausted.
+    ai_provider: str = "gemini"
+    # User's own Anthropic API key. Empty by default; set via .env. Not
     # validated at startup -- a missing/invalid key surfaces as an
     # AiGenerationError on the first AI request.
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-haiku-4-5"
+    # User's own Gemini API key, from https://aistudio.google.com/apikey
+    # (the free tier). gemini-2.0-flash supports function calling well
+    # enough for suggest_dashboard's multi-tool-call turns. Unlike
+    # anthropic_api_key above, this one IS effectively validated at
+    # startup-of-first-use: google-genai's Client raises immediately if
+    # constructed with an empty key (not deferred to the first real API
+    # call the way Anthropic's SDK behaves) -- only matters if
+    # ai_provider=gemini with this left blank.
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.0-flash"
     # False by default -- full read/write functionality out of the box for
     # local dev and self-hosters. The public demo deployment sets DEMO=true
     # explicitly in its own environment; this is not the repo's default.

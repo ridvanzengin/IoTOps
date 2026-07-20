@@ -605,10 +605,15 @@ Only JSON datasets.
 
 # AI Integration
 
-One model backend (Anthropic, `claude-haiku-4-5`, the user's own API key)
-for every AI feature -- there used to be a separate local Ollama instance
-for SQL generation specifically, retired in favor of a single API backend
-for everything the AI does:
+One AI backend at a time for every AI feature (SQL generation and the
+Co-pilot chat alike) -- there used to be a separate local Ollama instance
+for SQL generation specifically, retired in favor of a single interface
+(`ChatProvider`, `app/ai/chat_provider.py`) that both go through. Two
+implementations, picked by `Settings.ai_provider`: Anthropic
+(`claude-haiku-4-5`, the user's own key) and Gemini (`gemini-2.0-flash`
+by default, a free-tier alternative for when the Anthropic budget runs
+out) -- `AiService` and its tool-calling loop don't know or care which is
+active.
 
 - **`POST /api/ai/sql`** and **`POST /api/ai/query-rule-sql`** —
   implemented. Ground the prompt with the live telemetry schema and
