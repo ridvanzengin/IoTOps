@@ -2,11 +2,10 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
-import anthropic
-import httpx
 import pytest
 from mongomock_motor import AsyncMongoMockClient
 
+from app.ai.chat_provider import ChatProviderError
 from app.ai.models import AiVariableHint
 from app.ai.service import MAX_COPILOT_ITERATIONS, AiService
 from app.collector.models import Collector
@@ -20,7 +19,7 @@ from app.shared.models import InputPlugin, OutputPlugin
 from app.telemetry.repository import TelemetryRepository
 from app.telemetry.service import TelemetryService
 from tests.backend.ai.fakes import (
-    FakeAnthropicClient,
+    FakeChatProvider,
     FakeAutomaterService,
     FakeCollectorService,
     FakeDashboardService,
@@ -87,19 +86,19 @@ async def _event_service_with_occurrence(project_id, rule_name: str = "swarm-ale
 def _service(
     anthropic_responses: list | None = None,
     event_service: EventService | None = None,
-    anthropic_client=None,
+    chat_provider=None,
     ai_context: str = "",
     automater_service=None,
     query_rule_service=None,
     collector_service=None,
     dashboard_service=None,
+    demo: bool = False,
 ) -> AiService:
     return AiService(
         telemetry_service=_telemetry_service(),
         event_service=event_service or _event_service(),
         project_service=FakeProjectService(ai_context),
-        anthropic_client=anthropic_client or FakeAnthropicClient(anthropic_responses or []),
-        anthropic_model="claude-haiku-4-5",
+        chat_provider=chat_provider or FakeChatProvider(anthropic_responses or []),
         automater_service=automater_service or FakeAutomaterService(),
         query_rule_service=query_rule_service or FakeQueryRuleService(),
         # Empty by default -- no collector means no table is "in scope"
@@ -112,6 +111,7 @@ def _service(
         collector_service=collector_service or FakeCollectorService(),
         plugin_registry=build_default_registry(),
         dashboard_service=dashboard_service or FakeDashboardService(),
+        demo=demo,
     )
 
 
@@ -121,14 +121,6 @@ async def test_generate_sql_strips_markdown_fences() -> None:
     sql = await _service(anthropic_responses=responses).generate_sql("show me all metrics")
 
     assert sql == "SELECT * FROM device_metrics"
-
-
-async def test_generate_sql_sends_configured_model() -> None:
-    fake_client = FakeAnthropicClient([message(text_block("SELECT 1"))])
-
-    await _service(anthropic_client=fake_client).generate_sql("count rows")
-
-    assert fake_client.messages.calls[0]["model"] == "claude-haiku-4-5"
 
 
 async def test_generate_sql_rejects_non_select_response() -> None:
@@ -141,25 +133,35 @@ async def test_generate_sql_rejects_non_select_response() -> None:
         await _service(anthropic_responses=responses).generate_sql("delete everything")
 
 
-async def test_generate_sql_wraps_api_errors() -> None:
-    error = anthropic.APIConnectionError(
-        message="connection refused",
-        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
-    )
-
+async def test_generate_sql_wraps_provider_errors() -> None:
     with pytest.raises(AiGenerationError, match="AI SQL generation failed"):
-        await _service(anthropic_responses=[error]).generate_sql("anything")
+        await _service(anthropic_responses=[ChatProviderError("connection refused")]).generate_sql("anything")
+
+
+async def test_generate_sql_shows_a_friendly_message_on_provider_failure_in_demo_mode() -> None:
+    # Regression: the public demo now runs AI features for real on
+    # Gemini's free tier instead of blocking them outright (see
+    # app/ai/api.py) -- when that free tier is genuinely unreachable
+    # (rate-limited being the realistic case), a visitor should see a
+    # friendly "this is a demo" message, not the raw provider exception
+    # text (which isn't actionable for them, and shouldn't leak detail).
+    with pytest.raises(AiGenerationError) as exc_info:
+        await _service(
+            anthropic_responses=[ChatProviderError("429 RESOURCE_EXHAUSTED")], demo=True
+        ).generate_sql("anything")
+    assert "demo" in str(exc_info.value).lower()
+    assert "RESOURCE_EXHAUSTED" not in str(exc_info.value)
 
 
 async def test_generate_sql_forwards_variable_hints_into_prompt() -> None:
-    fake_client = FakeAnthropicClient([message(text_block("SELECT 1"))])
+    fake_provider = FakeChatProvider([message(text_block("SELECT 1"))])
 
-    await _service(anthropic_client=fake_client).generate_sql(
+    await _service(chat_provider=fake_provider).generate_sql(
         "temperature for the selected hive",
         variables=[AiVariableHint(name="hive_id", label="Hive")],
     )
 
-    assert "$hive_id" in fake_client.messages.calls[0]["messages"][0]["content"]
+    assert "$hive_id" in fake_provider.calls[0]["messages"][0]["content"]
 
 
 async def test_generate_query_rule_sql_strips_markdown_fences() -> None:
@@ -175,16 +177,16 @@ async def test_generate_query_rule_sql_strips_markdown_fences() -> None:
 
 
 async def test_generate_query_rule_sql_uses_the_query_rule_prompt() -> None:
-    fake_client = FakeAnthropicClient([message(text_block("SELECT 1"))])
+    fake_provider = FakeChatProvider([message(text_block("SELECT 1"))])
 
-    await _service(anthropic_client=fake_client).generate_query_rule_sql(
+    await _service(chat_provider=fake_provider).generate_query_rule_sql(
         "devices with high average temperature"
     )
 
     # The query-rule-specific framing, not the Panel/dashboard one -- a
     # cheap way to confirm this went through build_query_rule_sql_prompt,
     # not build_sql_prompt, without re-testing the prompt's own content.
-    assert "scheduled monitoring rule" in fake_client.messages.calls[0]["messages"][0]["content"]
+    assert "scheduled monitoring rule" in fake_provider.calls[0]["messages"][0]["content"]
 
 
 async def test_generate_query_rule_sql_rejects_non_select_response() -> None:
@@ -203,24 +205,21 @@ async def test_generate_query_rule_sql_gives_actionable_message_on_invalid_sql()
         )
 
 
-async def test_generate_query_rule_sql_wraps_api_errors() -> None:
-    error = anthropic.APIConnectionError(
-        message="connection refused",
-        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
-    )
-
+async def test_generate_query_rule_sql_wraps_provider_errors() -> None:
     with pytest.raises(AiGenerationError):
-        await _service(anthropic_responses=[error]).generate_query_rule_sql("anything")
+        await _service(anthropic_responses=[ChatProviderError("connection refused")]).generate_query_rule_sql(
+            "anything"
+        )
 
 
 async def test_generate_query_rule_sql_forwards_identifiers_hint_into_prompt() -> None:
-    fake_client = FakeAnthropicClient([message(text_block("SELECT 1"))])
+    fake_provider = FakeChatProvider([message(text_block("SELECT 1"))])
 
-    await _service(anthropic_client=fake_client).generate_query_rule_sql(
+    await _service(chat_provider=fake_provider).generate_query_rule_sql(
         "average humidity per hive", identifiers=["hive_id"]
     )
 
-    assert "hive_id" in fake_client.messages.calls[0]["messages"][0]["content"]
+    assert "hive_id" in fake_provider.calls[0]["messages"][0]["content"]
 
 
 async def test_answer_copilot_question_returns_final_text_with_no_tool_calls() -> None:
@@ -239,7 +238,7 @@ async def test_answer_copilot_question_returns_final_text_with_no_tool_calls() -
 async def test_answer_copilot_question_executes_tool_call_then_returns_final_answer() -> None:
     project_id = uuid4()
     event_service = await _event_service_with_occurrence(project_id, rule_name="swarm-alert")
-    fake_client = FakeAnthropicClient(
+    fake_client = FakeChatProvider(
         [
             message(tool_use_block("query_occurrences", {"rule_name": "swarm-alert"})),
             message(text_block("swarm-alert fired once today.")),
@@ -247,7 +246,7 @@ async def test_answer_copilot_question_executes_tool_call_then_returns_final_ans
     )
 
     answer, needs_context, suggestion, quick_replies = await _service(
-        event_service=event_service, anthropic_client=fake_client
+        event_service=event_service, chat_provider=fake_client
     ).answer_copilot_question(project_id, "why did swarm-alert fire?", [])
 
     assert answer == "swarm-alert fired once today."
@@ -255,7 +254,7 @@ async def test_answer_copilot_question_executes_tool_call_then_returns_final_ans
     assert suggestion is None
     assert quick_replies is None
     # Second round-trip's messages must carry the tool_result from the first.
-    second_call_messages = fake_client.messages.calls[1]["messages"]
+    second_call_messages = fake_client.calls[1]["messages"]
     tool_result_messages = [
         m for m in second_call_messages if m["role"] == "user" and isinstance(m["content"], list)
     ]
@@ -310,21 +309,25 @@ async def test_answer_copilot_question_returns_suggestion_built_before_iteration
     assert quick_replies is None
 
 
-async def test_answer_copilot_question_wraps_anthropic_api_errors() -> None:
+async def test_answer_copilot_question_wraps_provider_errors() -> None:
     # Regression: AiGenerationError used to hardcode an "AI SQL generation
     # failed" prefix on every message, including Co-pilot chat ones that
     # have nothing to do with SQL -- actively misleading (a live session
     # hit this for an iteration-budget error with no SQL involved at all).
-    error = anthropic.APIConnectionError(
-        message="connection refused",
-        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
-    )
-
     with pytest.raises(AiGenerationError) as exc_info:
         await _service(
-            anthropic_responses=[error]
+            anthropic_responses=[ChatProviderError("connection refused")]
         ).answer_copilot_question(uuid4(), "anything", [])
     assert "SQL" not in str(exc_info.value)
+
+
+async def test_answer_copilot_question_shows_a_friendly_message_on_provider_failure_in_demo_mode() -> None:
+    with pytest.raises(AiGenerationError) as exc_info:
+        await _service(
+            anthropic_responses=[ChatProviderError("429 RESOURCE_EXHAUSTED")], demo=True
+        ).answer_copilot_question(uuid4(), "anything", [])
+    assert "demo" in str(exc_info.value).lower()
+    assert "RESOURCE_EXHAUSTED" not in str(exc_info.value)
 
 
 async def test_answer_copilot_question_raises_on_empty_final_answer() -> None:
@@ -355,15 +358,15 @@ async def test_answer_copilot_question_surfaces_flag_missing_context() -> None:
 
 
 async def test_answer_copilot_question_forwards_ai_context_into_system_prompt() -> None:
-    fake_client = FakeAnthropicClient([message(text_block("Answer."))])
+    fake_client = FakeChatProvider([message(text_block("Answer."))])
 
     await _service(
         
-        anthropic_client=fake_client,
+        chat_provider=fake_client,
         ai_context="val1 is coolant temperature in Celsius",
     ).answer_copilot_question(uuid4(), "what is val1?", [])
 
-    system_prompt = fake_client.messages.calls[0]["system"]
+    system_prompt = fake_client.calls[0]["system"]
     assert "val1 is coolant temperature in Celsius" in system_prompt
 
 
@@ -375,15 +378,15 @@ async def test_answer_copilot_question_scopes_schema_to_project_collectors() -> 
     # the model asking about vehicle theft for a hive-theft question. Scope
     # to exactly the tables this project's own Collectors cover.
     project_id = uuid4()
-    fake_client = FakeAnthropicClient([message(text_block("Answer."))])
+    fake_client = FakeChatProvider([message(text_block("Answer."))])
 
     await _service(
         
-        anthropic_client=fake_client,
+        chat_provider=fake_client,
         collector_service=FakeCollectorService([_collector(project_id, table="device_metrics")]),
     ).answer_copilot_question(project_id, "what tables can you see?", [])
 
-    system_prompt = fake_client.messages.calls[0]["system"]
+    system_prompt = fake_client.calls[0]["system"]
     assert "device_metrics" in system_prompt
     assert "vehicle_metrics" not in system_prompt
 
@@ -391,11 +394,11 @@ async def test_answer_copilot_question_scopes_schema_to_project_collectors() -> 
 async def test_answer_copilot_question_ignores_other_projects_collectors() -> None:
     project_id = uuid4()
     other_project_id = uuid4()
-    fake_client = FakeAnthropicClient([message(text_block("Answer."))])
+    fake_client = FakeChatProvider([message(text_block("Answer."))])
 
     await _service(
         
-        anthropic_client=fake_client,
+        chat_provider=fake_client,
         collector_service=FakeCollectorService(
             [
                 _collector(project_id, table="device_metrics"),
@@ -404,7 +407,7 @@ async def test_answer_copilot_question_ignores_other_projects_collectors() -> No
         ),
     ).answer_copilot_question(project_id, "what tables can you see?", [])
 
-    system_prompt = fake_client.messages.calls[0]["system"]
+    system_prompt = fake_client.calls[0]["system"]
     assert "device_metrics" in system_prompt
     assert "vehicle_metrics" not in system_prompt
 
@@ -417,13 +420,13 @@ async def test_answer_copilot_question_always_includes_suggestion_tools() -> Non
     # at all, and the model correctly (from its own perspective) said it
     # couldn't create one. Every conversation gets the full tool set now,
     # regardless of how it started.
-    fake_client = FakeAnthropicClient([message(text_block("Answer."))])
+    fake_client = FakeChatProvider([message(text_block("Answer."))])
 
     await _service(
-        anthropic_client=fake_client
+        chat_provider=fake_client
     ).answer_copilot_question(uuid4(), "any alerts?", [])
 
-    tool_names = {tool["name"] for tool in fake_client.messages.calls[0]["tools"]}
+    tool_names = {tool["name"] for tool in fake_client.calls[0]["tools"]}
     assert "suggest_automation" in tool_names
     assert "list_existing_rules" in tool_names
 
@@ -675,13 +678,13 @@ def _dashboard(project_id, **overrides) -> Dashboard:
 
 
 async def test_answer_copilot_question_always_includes_panel_suggestion_tools() -> None:
-    fake_client = FakeAnthropicClient([message(text_block("Answer."))])
+    fake_client = FakeChatProvider([message(text_block("Answer."))])
 
     await _service(
-        anthropic_client=fake_client
+        chat_provider=fake_client
     ).answer_copilot_question(uuid4(), "any alerts?", [])
 
-    tool_names = {tool["name"] for tool in fake_client.messages.calls[0]["tools"]}
+    tool_names = {tool["name"] for tool in fake_client.calls[0]["tools"]}
     assert "suggest_panel" in tool_names
     assert "list_existing_panels" in tool_names
 
@@ -735,13 +738,13 @@ async def test_answer_copilot_question_panel_suggestion_invalid_input_lets_model
 
 
 async def test_answer_copilot_question_always_includes_dashboard_suggestion_tool() -> None:
-    fake_client = FakeAnthropicClient([message(text_block("Answer."))])
+    fake_client = FakeChatProvider([message(text_block("Answer."))])
 
     await _service(
-        anthropic_client=fake_client
+        chat_provider=fake_client
     ).answer_copilot_question(uuid4(), "any alerts?", [])
 
-    tool_names = {tool["name"] for tool in fake_client.messages.calls[0]["tools"]}
+    tool_names = {tool["name"] for tool in fake_client.calls[0]["tools"]}
     assert "suggest_dashboard" in tool_names
 
 
@@ -820,41 +823,41 @@ async def test_answer_copilot_question_forwards_dashboard_hint_into_system_promp
         uuid4(),
         variables=[Variable(name="hive_id", label="Hive", table="hive_metrics", value_column="hive_id")],
     )
-    fake_client = FakeAnthropicClient([message(text_block("Answer."))])
+    fake_client = FakeChatProvider([message(text_block("Answer."))])
 
     await _service(
         
-        anthropic_client=fake_client,
+        chat_provider=fake_client,
         dashboard_service=FakeDashboardService([dashboard]),
     ).answer_copilot_question(uuid4(), "add a panel", [], dashboard.id)
 
-    system_prompt = fake_client.messages.calls[0]["system"]
+    system_prompt = fake_client.calls[0]["system"]
     assert dashboard.name in system_prompt
     assert str(dashboard.id) in system_prompt
     assert "$hive_id" in system_prompt
 
 
 async def test_answer_copilot_question_dashboard_id_none_omits_hint() -> None:
-    fake_client = FakeAnthropicClient([message(text_block("Answer."))])
+    fake_client = FakeChatProvider([message(text_block("Answer."))])
 
     await _service(
-        anthropic_client=fake_client
+        chat_provider=fake_client
     ).answer_copilot_question(uuid4(), "any alerts?", [], None)
 
-    system_prompt = fake_client.messages.calls[0]["system"]
+    system_prompt = fake_client.calls[0]["system"]
     assert "currently viewing dashboard" not in system_prompt
 
 
 async def test_answer_copilot_question_unknown_dashboard_id_falls_back_silently() -> None:
     # A stale/deleted dashboard id shouldn't break the conversation --
     # just no hint gets added, same as omitting dashboard_id entirely.
-    fake_client = FakeAnthropicClient([message(text_block("Answer."))])
+    fake_client = FakeChatProvider([message(text_block("Answer."))])
 
     await _service(
         
-        anthropic_client=fake_client,
+        chat_provider=fake_client,
         dashboard_service=FakeDashboardService([]),
     ).answer_copilot_question(uuid4(), "add a panel", [], uuid4())
 
-    system_prompt = fake_client.messages.calls[0]["system"]
+    system_prompt = fake_client.calls[0]["system"]
     assert "currently viewing dashboard" not in system_prompt

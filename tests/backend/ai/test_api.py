@@ -1,12 +1,12 @@
 from unittest.mock import AsyncMock
 
-import anthropic
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 from mongomock_motor import AsyncMongoMockClient
 
+from app.ai.chat_provider import ChatProviderError
 from app.ai.service import AiService
+from app.config import settings
 from app.dependencies import get_ai_service
 from app.event.repository import EventRepository
 from app.event.service import EventService
@@ -15,7 +15,7 @@ from app.plugin.registry import build_default_registry
 from app.telemetry.repository import TelemetryRepository
 from app.telemetry.service import TelemetryService
 from tests.backend.ai.fakes import (
-    FakeAnthropicClient,
+    FakeChatProvider,
     FakeAutomaterService,
     FakeCollectorService,
     FakeDashboardService,
@@ -35,20 +35,20 @@ def _event_service() -> EventService:
     )
 
 
-def _client(anthropic_responses: list | None = None) -> TestClient:
+def _client(anthropic_responses: list | None = None, demo: bool = False) -> TestClient:
     pool = FakePool(tables=["device_metrics"], schema={"device_metrics": []})
     telemetry_service = TelemetryService(repository=TelemetryRepository(pool))
     service = AiService(
         telemetry_service=telemetry_service,
         event_service=_event_service(),
         project_service=FakeProjectService(),
-        anthropic_client=FakeAnthropicClient(anthropic_responses or []),
-        anthropic_model="claude-haiku-4-5",
+        chat_provider=FakeChatProvider(anthropic_responses or []),
         automater_service=FakeAutomaterService(),
         query_rule_service=FakeQueryRuleService(),
         collector_service=FakeCollectorService(),
         plugin_registry=build_default_registry(),
         dashboard_service=FakeDashboardService(),
+        demo=demo,
     )
     app.dependency_overrides[get_ai_service] = lambda: service
     return TestClient(app)
@@ -58,6 +58,20 @@ def _client(anthropic_responses: list | None = None) -> TestClient:
 def _clear_overrides():
     yield
     app.dependency_overrides.clear()
+
+
+def test_ai_routes_are_not_blocked_in_demo_mode(monkeypatch) -> None:
+    # Regression: these three routes used to hard-block with a 403
+    # DemoModeError whenever settings.demo was True, back when AI features
+    # needed a paid Anthropic key public traffic could burn through. Now
+    # that the default backend is Gemini's free tier, they run for real in
+    # the public demo instead -- see app/ai/api.py's own comment.
+    monkeypatch.setattr(settings, "demo", True)
+    client = _client(anthropic_responses=[message(text_block("SELECT * FROM device_metrics"))])
+
+    response = client.post("/api/ai/sql", json={"prompt": "show me all metrics"})
+
+    assert response.status_code == 200
 
 
 def test_generate_sql_returns_200() -> None:
@@ -79,16 +93,30 @@ def test_generate_sql_rejects_non_select_returns_502() -> None:
     assert response.status_code == 502
 
 
-def test_generate_sql_returns_502_on_anthropic_failure() -> None:
-    error = anthropic.APIConnectionError(
-        message="connection refused",
-        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
-    )
+def test_generate_sql_returns_502_on_provider_failure() -> None:
+    error = ChatProviderError("connection refused")
     client = _client(anthropic_responses=[error])
 
     response = client.post("/api/ai/sql", json={"prompt": "anything"})
 
     assert response.status_code == 502
+
+
+def test_generate_sql_shows_a_friendly_message_on_provider_failure_in_demo_mode() -> None:
+    # Regression: the public demo now runs AI features for real (Gemini's
+    # free tier, not a paid key public traffic could burn through -- see
+    # app/ai/api.py's own comment on why these routes no longer block
+    # outright in demo mode). When the free tier is genuinely unreachable
+    # (rate-limited, most likely), a visitor should see a friendly "this is
+    # a demo" message, not a raw provider error.
+    error = ChatProviderError("429 RESOURCE_EXHAUSTED")
+    client = _client(anthropic_responses=[error], demo=True)
+
+    response = client.post("/api/ai/sql", json={"prompt": "anything"})
+
+    assert response.status_code == 502
+    assert "demo" in response.json()["detail"].lower()
+    assert "RESOURCE_EXHAUSTED" not in response.json()["detail"]
 
 
 def test_generate_sql_accepts_variable_hints() -> None:
@@ -126,11 +154,8 @@ def test_generate_query_rule_sql_rejects_non_select_returns_502() -> None:
     assert response.status_code == 502
 
 
-def test_generate_query_rule_sql_returns_502_on_anthropic_failure() -> None:
-    error = anthropic.APIConnectionError(
-        message="connection refused",
-        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
-    )
+def test_generate_query_rule_sql_returns_502_on_provider_failure() -> None:
+    error = ChatProviderError("connection refused")
     client = _client(anthropic_responses=[error])
 
     response = client.post("/api/ai/query-rule-sql", json={"prompt": "anything"})
@@ -339,11 +364,8 @@ def test_copilot_returns_dashboard_suggestion() -> None:
     assert len(body["suggestion"]["state"]["panels"]) == 3
 
 
-def test_copilot_returns_502_on_anthropic_failure() -> None:
-    error = anthropic.APIConnectionError(
-        message="connection refused",
-        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
-    )
+def test_copilot_returns_502_on_provider_failure() -> None:
+    error = ChatProviderError("connection refused")
     client = _client(anthropic_responses=[error])
 
     response = client.post(
@@ -352,3 +374,17 @@ def test_copilot_returns_502_on_anthropic_failure() -> None:
     )
 
     assert response.status_code == 502
+
+
+def test_copilot_shows_a_friendly_message_on_provider_failure_in_demo_mode() -> None:
+    error = ChatProviderError("429 RESOURCE_EXHAUSTED")
+    client = _client(anthropic_responses=[error], demo=True)
+
+    response = client.post(
+        "/api/ai/copilot",
+        json={"project_id": "11111111-1111-1111-1111-111111111111", "question": "any alerts?"},
+    )
+
+    assert response.status_code == 502
+    assert "demo" in response.json()["detail"].lower()
+    assert "RESOURCE_EXHAUSTED" not in response.json()["detail"]
