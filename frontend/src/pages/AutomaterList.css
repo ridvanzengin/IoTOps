@@ -51,6 +51,28 @@
   flex-shrink: 0;
 }
 
+@media (max-width: 640px) {
+  /* .automater-list__header-main is itself a flex row (chevron, name,
+     project, status badge, rule count) with no wrap -- on a phone-width
+     card, that row plus .automater-list__header-actions (Stop/Deploy +
+     the menu trigger) side by side has nowhere near enough width, so
+     everything just got crushed together instead of stacking. Let both
+     rows wrap onto as many lines as they need instead of forcing one. */
+  .automater-list__header {
+    flex-wrap: wrap;
+  }
+
+  .automater-list__header-main {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .automater-list__header-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
 .automater-list__project {
   color: var(--text);
   font-size: 13px;

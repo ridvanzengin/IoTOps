@@ -121,8 +121,8 @@ const FEATURES: Feature[] = [
             chart's timeline.
           </li>
           <li>
-            <strong>AI SQL builder</strong> — describe what you want in natural language; the Anthropic API
-            (Claude) drafts the query.
+            <strong>AI SQL builder</strong> — describe what you want in natural language; Google Gemini (the
+            default backend) or Anthropic Claude drafts the query.
           </li>
         </ul>
       </>
@@ -135,8 +135,10 @@ const FEATURES: Feature[] = [
     body: (
       <p className="docs-p">
         A chat panel (not a separate page) for natural-language Q&amp;A, SQL generation/explanation, and
-        automation/dashboard-panel/dashboard suggestions grounded in your live telemetry, backed by the
-        Anthropic API (Claude). It drafts changes; it never applies them without explicit user approval.
+        automation/dashboard-panel/dashboard suggestions grounded in your live telemetry. Runs on Google
+        Gemini by default (a free tier keeps the public demo's AI features running at no cost); Anthropic
+        Claude is also supported as a self-hosted alternative backend. It drafts changes; it never applies
+        them without explicit user approval.
       </p>
     ),
   },
@@ -173,12 +175,13 @@ export function Docs() {
             objects — <strong>Collectors</strong>, <strong>Rules</strong>, and <strong>Dashboards</strong> — that
             users configure through forms instead of hand-editing config files. Every one of those objects is a
             Pydantic model; the UI, the generated Telegraf TOML, the Docker containers, and the MongoDB documents
-            are all derived from the same source of truth.
+            are all derived from the same source of truth. An AI Co-pilot sits across all of it — grounded in
+            each project's own live telemetry, automation, dashboards, and event history.
           </p>
           <p className="docs-p">
-            The platform is domain-agnostic — smart beekeeping is the first showcase, but the same
-            Collector/Rule/Dashboard primitives apply to industrial monitoring, greenhouse automation, energy
-            metering, or any other telemetry-driven domain.
+            The platform is domain-agnostic — three showcases ship today (smart beekeeping over MQTT, solar
+            farm monitoring over HTTP, and Kafka-based manufacturing telemetry), and the same
+            Collector/Rule/Dashboard primitives apply just as well to any other telemetry-driven domain.
           </p>
 
           <div className="docs-stat-grid">
@@ -276,7 +279,7 @@ export function Docs() {
               </tr>
               <tr>
                 <td>AI</td>
-                <td>Anthropic API (Claude) — SQL generation/explanation, Co-pilot Q&amp;A and suggestions</td>
+                <td>Google Gemini (default) or Anthropic API (Claude) — SQL generation/explanation, Co-pilot Q&amp;A and suggestions</td>
               </tr>
               <tr>
                 <td>Custom Telegraf plugins</td>
