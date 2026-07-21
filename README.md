@@ -16,17 +16,19 @@ hand-writing Telegraf configuration files.
   overlays on charts, and an AI-assisted SQL builder
 - **Events** — every Rule match/clear persisted and streamed live into a
   searchable sidebar available from any page
-
-**Planned, not yet built**: an AI Co-pilot panel (natural-language SQL
-generation/explanation and dashboard/rule suggestions, backed by a local
-LLM) — the sidebar entry point and panel shell exist, but no actual AI
-integration is wired up yet. The Dashboard's own AI-assisted SQL builder
-(above) is separate and already works.
+- **AI Co-pilot** — a chat panel grounded in real tool-calling (not
+  context-stuffing) over live telemetry and events; answers data
+  questions, and proposes new Rules, dashboard panels, or whole
+  dashboards as reviewable, prefilled drafts — never auto-created. Runs
+  on Anthropic Claude or, as a free-tier default, Google Gemini. The
+  Dashboard's own AI-assisted SQL builder is a separate, simpler feature
+  and predates the Co-pilot.
 
 ## Tech Stack
 
 FastAPI · Pydantic · React · TypeScript · Vite · TimescaleDB · MongoDB ·
-Redis · Celery · Docker · [custom-telegraf](https://github.com/ridvanzengin/custom-telegraf)
+Redis · Celery · Docker · Anthropic Claude / Google Gemini ·
+[custom-telegraf](https://github.com/ridvanzengin/custom-telegraf)
 
 ## Prerequisites
 
@@ -35,13 +37,14 @@ Redis · Celery · Docker · [custom-telegraf](https://github.com/ridvanzengin/c
   `docker.sock`) to deploy Collector/Automater containers, so
   `HOST_RUNTIME_DIR` in `.env` must be set to this repo's `runtime/`
   directory as an absolute host path
-- Optional, for AI features: an [Anthropic](https://www.anthropic.com)
-  API key
+- Optional, for AI features: a free [Gemini](https://aistudio.google.com/apikey)
+  API key (default), or an [Anthropic](https://www.anthropic.com) API key
+  (set `AI_PROVIDER=anthropic`)
 
 ## Quickstart
 
 ```bash
-cp .env.example .env   # set HOST_RUNTIME_DIR (and ANTHROPIC_API_KEY if using AI features)
+cp .env.example .env   # set HOST_RUNTIME_DIR (and GEMINI_API_KEY or ANTHROPIC_API_KEY if using AI features)
 docker compose up
 ```
 
