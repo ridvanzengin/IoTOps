@@ -114,9 +114,17 @@ export function Sidebar() {
 
   // Closing on navigation matches every off-canvas mobile nav convention --
   // otherwise the drawer stays open over the new page until manually
-  // dismissed, which reads as stuck/broken.
+  // dismissed, which reads as stuck/broken. Also closes the right-side
+  // Events/Co-pilot panel on mobile specifically -- desktop keeps it open
+  // across navigation on purpose (a persistent panel you browse alongside
+  // as you move between pages), but on mobile it's a near-full-screen
+  // overlay; tapping a nav item is a clear "take me somewhere else"
+  // signal, and leaving that overlay obscuring the page you just asked
+  // for would read as stuck, same as the drawer would.
   useEffect(() => {
     setMobileOpen(false);
+    if (isMobile) closePanel();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
   const navItems: NavItem[] = [
