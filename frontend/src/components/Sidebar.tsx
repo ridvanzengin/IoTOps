@@ -157,7 +157,11 @@ export function Sidebar() {
   return (
     <>
       {isMobile && (
-        <div className="mobile-topbar">
+        <>
+          {/* Standalone, not nested in .mobile-topbar below -- see its own
+              CSS comment for why it has to be an independent fixed element
+              to stay reachable above EventsPanel's full-screen mobile
+              overlay. */}
           <button
             type="button"
             className="mobile-topbar__menu-btn"
@@ -166,13 +170,15 @@ export function Sidebar() {
           >
             <MenuIcon />
           </button>
-          <NavLink to="/" end className="mobile-topbar__brand">
-            <span className="sidebar__brand-mark">
-              <LogoMark className="mobile-topbar__brand-icon" />
-            </span>
-            <span>IoTOps</span>
-          </NavLink>
-        </div>
+          <div className="mobile-topbar">
+            <NavLink to="/" end className="mobile-topbar__brand">
+              <span className="sidebar__brand-mark">
+                <LogoMark className="mobile-topbar__brand-icon" />
+              </span>
+              <span>IoTOps</span>
+            </NavLink>
+          </div>
+        </>
       )}
       {isMobile && mobileOpen && (
         <div className="sidebar-backdrop" onClick={() => setMobileOpen(false)} />

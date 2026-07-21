@@ -208,12 +208,12 @@
     gap: 10px;
     position: fixed;
     top: 0;
-    left: 0;
-    /* Leaves room for ActivityBar's own mobile trigger (ActivityBar.css's
-       .activity-bar__mobile-trigger), a same-height fixed element sitting
-       flush against this bar's right edge -- not a shared component, so
-       they coordinate purely through this reserved width matching that
-       trigger's own width. */
+    /* .mobile-topbar__menu-btn used to be this row's first flex child --
+       now a standalone fixed element (see its own comment below), so this
+       reserves the same space for it via the row's own left bound instead
+       of flex layout, the same way `right: 52px` already reserves space
+       for ActivityBar's own mobile trigger on the opposite edge. */
+    left: 56px;
     right: 52px;
     height: 52px;
     padding: 0 12px;
@@ -223,7 +223,21 @@
     z-index: 30;
   }
 
+  /* Independent fixed element, not a flex child of .mobile-topbar --
+     .mobile-topbar's own position:fixed + z-index:30 establishes a
+     stacking context for its children, which caps how high any z-index
+     on a *child* can ever visually render: no value would let this
+     button escape above a *sibling* of .mobile-topbar itself, like
+     EventsPanel's full-screen mobile overlay (z-index 45, EventsPanel.css)
+     -- it would stay trapped under that overlay regardless. Being its own
+     top-level fixed element (same pattern as ActivityBar's own mobile
+     trigger) sidesteps that entirely, so it stays reachable as a way out
+     of that overlay instead of being covered by it. */
   .mobile-topbar__menu-btn {
+    position: fixed;
+    top: 8px;
+    left: 12px;
+    z-index: 46;
     display: flex;
     align-items: center;
     justify-content: center;
