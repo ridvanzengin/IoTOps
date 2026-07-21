@@ -164,7 +164,8 @@ export function Docs() {
           <h1 className="docs-title">Documentation</h1>
           <p className="docs-subtitle">
             IoTOps — a self-hosted IoT Operations Platform: visually configure telemetry collection, automate
-            event-driven workflows, and build dashboards without hand-writing Telegraf configuration files.
+            event-driven workflows, build dashboards, and get AI-assisted answers and suggestions — all
+            without hand-writing Telegraf configuration files.
           </p>
         </div>
 

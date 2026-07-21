@@ -117,3 +117,22 @@
 .automater-list__rules-table {
   table-layout: fixed;
 }
+
+@media (max-width: 640px) {
+  /* table-layout:fixed (above) makes the colgroup's percentage widths a
+     hard constraint against the table's own width, not a hint -- with no
+     floor, those percentages get crushed proportionally to fit
+     .collector-table-wrapper's mobile-narrow width (Collector.css),
+     regardless of any column's actual minimum readable content. Observed
+     live: rule names wrapping letter-by-letter ("high-", "hive-",
+     "temperature") with the Deactivate button and row's dropdown-menu
+     trigger overlapping that wrapped text. This floor is sized so each
+     column (16/12/34/10/12/16%) gets a sane minimum -- Actions in
+     particular needs room for both the button and the menu trigger --
+     and forces the wrapper's own overflow-x:auto to do real horizontal
+     scrolling instead of crushing columns.
+  */
+  .automater-list__rules-table {
+    min-width: 820px;
+  }
+}
