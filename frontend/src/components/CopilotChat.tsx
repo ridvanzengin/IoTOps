@@ -5,6 +5,7 @@ import { askCopilot } from "../api/ai";
 import { ApiError } from "../api/client";
 import { addPanel, createDashboard } from "../api/dashboard";
 import { useEvents } from "../context/EventsContext";
+import { useMediaQuery, MOBILE_QUERY } from "../hooks/useMediaQuery";
 import { DEFAULT_POSITION, findFreePosition } from "../utils/panelLayout";
 import type { Project } from "../types/project";
 import type { CopilotIntent, CopilotSuggestion, DashboardSuggestionState } from "../types/ai";
@@ -217,9 +218,22 @@ export function CopilotChat({
   dashboardId?: string;
   projectId?: string;
 }) {
-  const { projects, copilotSession, updateCopilotSession } = useEvents();
+  const { projects, copilotSession, updateCopilotSession, closePanel } = useEvents();
   const navigate = useNavigate();
+  const isMobile = useMediaQuery(MOBILE_QUERY);
   const listRef = useRef<HTMLDivElement>(null);
+
+  // On mobile, this whole chat lives inside a full-screen overlay
+  // (EventsPanel.css's .events-panel--mobile) -- a plain navigate() call
+  // changes the route underneath it, but with nothing closing the
+  // overlay, it just keeps covering the screen with the same chat,
+  // making a real navigation look like the button did nothing at all.
+  // Desktop doesn't have this problem (the panel's just a persistent
+  // docked rail there), so this only closes on isMobile.
+  function navigateAndClosePanel(to: string, options?: { state?: unknown }) {
+    if (isMobile) closePanel();
+    navigate(to, options);
+  }
 
   const {
     project,
@@ -328,15 +342,15 @@ export function CopilotChat({
 
   function handleAddContext() {
     if (!project) return;
-    navigate(`/projects/${project.id}/edit`, { state: { focusField: "ai_context" } });
+    navigateAndClosePanel(`/projects/${project.id}/edit`, { state: { focusField: "ai_context" } });
   }
 
   function handleOpenSuggestion(suggestion: Exclude<CopilotSuggestion, { kind: "dashboard" }>) {
     if (suggestion.kind === "panel") {
-      navigate(`/dashboards/${suggestion.state.dashboard_id}/panels/new`, { state: suggestion.state });
+      navigateAndClosePanel(`/dashboards/${suggestion.state.dashboard_id}/panels/new`, { state: suggestion.state });
       return;
     }
-    navigate(suggestionRoute(suggestion.kind), { state: suggestion.state });
+    navigateAndClosePanel(suggestionRoute(suggestion.kind), { state: suggestion.state });
   }
 
   // Unlike every other suggestion kind, there's no existing form to
@@ -380,7 +394,7 @@ export function CopilotChat({
           event_rule_ids: [],
         });
       }
-      navigate(`/dashboards/${dashboard.id}`);
+      navigateAndClosePanel(`/dashboards/${dashboard.id}`);
     } catch (err) {
       updateCopilotSession({ error: err instanceof ApiError ? err.message : "Failed to create dashboard." });
     } finally {
