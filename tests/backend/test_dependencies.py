@@ -42,7 +42,26 @@ def test_get_chat_provider_raises_a_clean_error_when_gemini_key_is_missing(monke
     # every other AI failure already produces.
     monkeypatch.setattr(settings, "ai_provider", "gemini")
     monkeypatch.setattr(settings, "gemini_api_key", "")
+    monkeypatch.setattr(settings, "demo", False)
     monkeypatch.setattr(dependencies, "_gemini_client", None)
 
     with pytest.raises(AiGenerationError, match="GEMINI_API_KEY is not set"):
+        get_chat_provider()
+
+
+def test_get_chat_provider_shows_the_demo_message_when_gemini_key_is_missing_in_demo_mode(
+    monkeypatch,
+) -> None:
+    # Regression: this specific failure (missing key) is raised at
+    # dependency-construction time, before AiService's own try/except
+    # around ChatProviderError ever runs -- without its own demo-mode
+    # branch, a public demo visitor would see the raw "GEMINI_API_KEY is
+    # not set" message instead of the same friendly one every other AI
+    # failure already degrades to in demo mode.
+    monkeypatch.setattr(settings, "ai_provider", "gemini")
+    monkeypatch.setattr(settings, "gemini_api_key", "")
+    monkeypatch.setattr(settings, "demo", True)
+    monkeypatch.setattr(dependencies, "_gemini_client", None)
+
+    with pytest.raises(AiGenerationError, match="This is a demo"):
         get_chat_provider()

@@ -9,7 +9,7 @@ from google import genai
 from app.ai.chat_provider import ChatProvider
 from app.ai.providers.anthropic_provider import AnthropicChatProvider
 from app.ai.providers.gemini_provider import GeminiChatProvider
-from app.ai.service import AiService
+from app.ai.service import AiService, DEMO_PROVIDER_UNAVAILABLE_MESSAGE
 from app.automater.docker import AutomaterDockerManager
 from app.automater.repository import AutomaterRepository
 from app.automater.service import AutomaterService
@@ -156,8 +156,16 @@ def get_gemini_client() -> genai.Client:
         # the same AiGenerationError type every other AI failure already
         # uses, so it gets the existing 502 handling for free.
         if not settings.gemini_api_key:
+            # In demo mode, this is the one AiGenerationError raised outside
+            # AiService's own try/except around ChatProviderError (see
+            # DEMO_PROVIDER_UNAVAILABLE_MESSAGE's own comment) -- it happens
+            # at dependency-construction time, before that try/except ever
+            # runs, so it needs its own demo-mode branch here rather than
+            # relying on AiService to catch and re-wrap it.
             raise AiGenerationError(
-                "GEMINI_API_KEY is not set -- required because AI_PROVIDER=gemini."
+                DEMO_PROVIDER_UNAVAILABLE_MESSAGE
+                if settings.demo
+                else "GEMINI_API_KEY is not set -- required because AI_PROVIDER=gemini."
             )
         _gemini_client = genai.Client(api_key=settings.gemini_api_key)
     return _gemini_client

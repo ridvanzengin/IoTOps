@@ -82,11 +82,15 @@ _SUGGESTION_CONTEXT_END = "[[/suggestion-context]]"
 
 # Shown instead of the real ChatProviderError detail when AiService._demo is
 # True -- deliberately vaguer than the self-hosted message (no raw exception
-# text), both because a public demo visitor can't act on that detail anyway
-# and because it shouldn't leak provider/key specifics.
-_DEMO_PROVIDER_UNAVAILABLE_MESSAGE = (
-    "AI features in this demo run on a free-tier budget and are temporarily "
-    "limited -- please try again in a moment."
+# text, no mention of which provider/tier is behind it), both because a
+# public demo visitor can't act on that detail anyway and because it
+# shouldn't leak provider/key specifics. Not module-private (no leading
+# underscore): app/dependencies.py's get_gemini_client() also raises this
+# for the missing-API-key case, which happens at dependency-construction
+# time, before AiService's own try/except around ChatProviderError ever
+# gets a chance to run.
+DEMO_PROVIDER_UNAVAILABLE_MESSAGE = (
+    "This is a demo -- AI features are temporarily limited. Please try again in a moment."
 )
 
 # Lets the model offer a small set of clickable choices (see
@@ -227,7 +231,7 @@ class AiService:
             )
         except ChatProviderError as exc:
             if self._demo:
-                raise AiGenerationError(_DEMO_PROVIDER_UNAVAILABLE_MESSAGE) from exc
+                raise AiGenerationError(DEMO_PROVIDER_UNAVAILABLE_MESSAGE) from exc
             raise AiGenerationError(f"AI SQL generation failed: {exc}") from exc
 
         raw = next((block.text for block in response.content if block.type == "text"), "")
@@ -287,7 +291,7 @@ class AiService:
                 )
             except ChatProviderError as exc:
                 if self._demo:
-                    raise AiGenerationError(_DEMO_PROVIDER_UNAVAILABLE_MESSAGE) from exc
+                    raise AiGenerationError(DEMO_PROVIDER_UNAVAILABLE_MESSAGE) from exc
                 raise AiGenerationError(
                     "The AI didn't return an answer -- try rephrasing the question."
                 ) from exc
