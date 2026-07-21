@@ -145,7 +145,18 @@ export function Sidebar() {
     {
       label: "AI Co-pilot",
       icon: CopilotIcon,
-      onClick: () => (copilotOpen ? closePanel() : openCopilotPanel()),
+      // Doesn't navigate (no route change), so neither the drawer's own
+      // pathname effect nor handleNavLinkClick (wired only to real
+      // NavLink items) ever ran for this one -- left the mobile drawer
+      // open on top of the Co-pilot panel it just opened underneath.
+      onClick: () => {
+        setMobileOpen(false);
+        if (copilotOpen) {
+          closePanel();
+        } else {
+          openCopilotPanel();
+        }
+      },
     },
   ];
 

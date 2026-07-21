@@ -233,6 +233,11 @@
      top-level fixed element (same pattern as ActivityBar's own mobile
      trigger) sidesteps that entirely, so it stays reachable as a way out
      of that overlay instead of being covered by it. */
+  /* Borderless, solid background matching .mobile-topbar's own -- an
+     outlined box here (this used to have one) read as a separate button
+     floating on top of the header instead of belonging to it, unlike
+     ActivityBar's own mobile trigger (.activity-bar__mobile-trigger,
+     borderless, ActivityBar.css) sitting flush on the opposite corner. */
   .mobile-topbar__menu-btn {
     position: fixed;
     top: 8px;
@@ -244,9 +249,9 @@
     width: 36px;
     height: 36px;
     flex-shrink: 0;
-    border: 1px solid var(--border);
+    border: none;
     border-radius: 6px;
-    background: none;
+    background: var(--bg);
     color: var(--text-h);
     cursor: pointer;
   }
