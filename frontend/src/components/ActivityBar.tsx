@@ -75,23 +75,30 @@ export function ActivityBar() {
         <nav className={`activity-bar--mobile${mobileOpen ? " activity-bar--mobile-open" : ""}`}>
           <div className="activity-bar__mobile-header">
             <strong>Activity</strong>
-            <button
-              type="button"
-              className="activity-bar__mobile-close"
-              onClick={() => setMobileOpen(false)}
-              aria-label="Close menu"
-            >
-              ×
-            </button>
+            <div className="activity-bar__mobile-header-actions">
+              <button
+                type="button"
+                className="activity-bar__mobile-theme-btn"
+                onClick={toggleTheme}
+                title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+                aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+              >
+                {theme === "dark" ? (
+                  <SunIcon className="activity-bar__mobile-theme-icon" />
+                ) : (
+                  <MoonIcon className="activity-bar__mobile-theme-icon" />
+                )}
+              </button>
+              <button
+                type="button"
+                className="activity-bar__mobile-close"
+                onClick={() => setMobileOpen(false)}
+                aria-label="Close menu"
+              >
+                ×
+              </button>
+            </div>
           </div>
-          <button type="button" className="activity-bar__mobile-row" onClick={toggleTheme}>
-            {theme === "dark" ? (
-              <SunIcon className="activity-bar__mobile-row-icon" />
-            ) : (
-              <MoonIcon className="activity-bar__mobile-row-icon" />
-            )}
-            <span>{theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}</span>
-          </button>
           {projects.map((project, index) => {
             const count = unresolvedCounts[project.id] ?? 0;
             const isActive = activePanel?.kind === "project" && activePanel.projectId === project.id;
@@ -115,7 +122,9 @@ export function ActivityBar() {
             className={`activity-bar__mobile-row${activePanel?.kind === "copilot" ? " activity-bar__mobile-row--active" : ""}`}
             onClick={() => (activePanel?.kind === "copilot" ? closePanel() : openCopilotPanel())}
           >
-            <CopilotIcon className="activity-bar__mobile-row-icon" />
+            <span className="activity-bar__mobile-row-badge activity-bar__mobile-row-badge--copilot">
+              <CopilotIcon className="activity-bar__mobile-row-copilot-icon" />
+            </span>
             <span>Co-pilot</span>
           </button>
         </nav>

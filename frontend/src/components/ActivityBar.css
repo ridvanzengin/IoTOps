@@ -175,6 +175,33 @@
     color: var(--text-h);
   }
 
+  .activity-bar__mobile-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Same 26x26 outlined-square treatment as .activity-bar__mobile-close
+     right next to it, so the two header buttons read as a matched pair. */
+  .activity-bar__mobile-theme-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: none;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .activity-bar__mobile-theme-icon {
+    width: 15px;
+    height: 15px;
+    display: block;
+  }
+
   .activity-bar__mobile-close {
     display: flex;
     align-items: center;
@@ -215,12 +242,6 @@
     outline: 1px solid var(--accent-border);
   }
 
-  .activity-bar__mobile-row-icon {
-    width: 18px;
-    height: 18px;
-    flex-shrink: 0;
-  }
-
   .activity-bar__mobile-row-badge {
     display: inline-flex;
     align-items: center;
@@ -232,6 +253,20 @@
     font-size: 11px;
     font-weight: 700;
     flex-shrink: 0;
+  }
+
+  /* Same accent purple as the desktop rail's own Co-pilot icon
+     (.activity-bar__icon--copilot) -- this row's badge otherwise reuses
+     .activity-bar__mobile-row-badge's project-initials box unstyled
+     (transparent), which read as "missing a color" next to every actual
+     project's badge above it. */
+  .activity-bar__mobile-row-badge--copilot {
+    background: var(--accent);
+  }
+
+  .activity-bar__mobile-row-copilot-icon {
+    width: 16px;
+    height: 16px;
   }
 
   .activity-bar__mobile-row-label {
