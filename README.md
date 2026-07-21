@@ -4,6 +4,10 @@ Self-hosted IoT Operations Platform — visually configure telemetry
 collection, automate event-driven workflows, and build dashboards without
 hand-writing Telegraf configuration files.
 
+![IoTOps Dashboard](docs/screenshot.png)
+
+**[Live Demo →](https://iotops.online)**
+
 ## Features
 
 - **Data Ingestion (Collectors)** — build an MQTT/HTTP/Kafka/AMQP input
