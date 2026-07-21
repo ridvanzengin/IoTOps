@@ -179,7 +179,7 @@ export function Sidebar() {
             onClick={() => setMobileOpen(true)}
             aria-label="Open menu"
           >
-            <MenuIcon />
+            <MenuIcon className="mobile-topbar__menu-icon" />
           </button>
           <div className="mobile-topbar">
             <NavLink to="/" end className="mobile-topbar__brand">

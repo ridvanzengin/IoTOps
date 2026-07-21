@@ -212,8 +212,10 @@
        now a standalone fixed element (see its own comment below), so this
        reserves the same space for it via the row's own left bound instead
        of flex layout, the same way `right: 52px` already reserves space
-       for ActivityBar's own mobile trigger on the opposite edge. */
-    left: 56px;
+       for ActivityBar's own mobile trigger on the opposite edge. Same
+       52px as that trigger's own width -- this button is now sized to
+       match it exactly (see below). */
+    left: 52px;
     right: 52px;
     height: 52px;
     padding: 0 12px;
@@ -233,27 +235,34 @@
      top-level fixed element (same pattern as ActivityBar's own mobile
      trigger) sidesteps that entirely, so it stays reachable as a way out
      of that overlay instead of being covered by it. */
-  /* Borderless, solid background matching .mobile-topbar's own -- an
-     outlined box here (this used to have one) read as a separate button
-     floating on top of the header instead of belonging to it, unlike
-     ActivityBar's own mobile trigger (.activity-bar__mobile-trigger,
-     borderless, ActivityBar.css) sitting flush on the opposite corner. */
+  /* Sized and positioned to match ActivityBar's own mobile trigger
+     exactly (full 52x52, flush to the corner, ActivityBar.css) rather
+     than a smaller icon floating with margin inside the row -- that
+     inset look (plus the outlined box it used to also have) read as a
+     separate button on top of the header instead of a cell that
+     actually belongs to it, unlike the bell sitting flush on the
+     opposite corner. */
   .mobile-topbar__menu-btn {
     position: fixed;
-    top: 8px;
-    left: 12px;
+    top: 0;
+    left: 0;
     z-index: 46;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
-    flex-shrink: 0;
+    width: 52px;
+    height: 52px;
+    box-sizing: border-box;
     border: none;
-    border-radius: 6px;
+    border-bottom: 1px solid var(--border);
     background: var(--bg);
     color: var(--text-h);
     cursor: pointer;
+  }
+
+  .mobile-topbar__menu-icon {
+    width: 20px;
+    height: 20px;
   }
 
   .mobile-topbar__menu-btn:hover {

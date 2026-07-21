@@ -18,15 +18,15 @@
    pull that off). */
 .events-panel--mobile .events-panel__header {
   /* Clears Sidebar's floating .mobile-topbar__menu-btn (fixed at
-     left:12px, 36px wide) so this panel's own title doesn't render
-     underneath it -- same 56px reservation .mobile-topbar's own left
-     bound already uses for the identical reason. Right side clears
-     ActivityBar's own floating trigger (fixed at right:0, 52px wide,
-     ActivityBar.css) the same way, so this header's own close/refresh
-     buttons don't end up underneath *that* -- both now render above
-     this panel (z-index 46 each) specifically so a project switch or a
-     way back to the left nav doesn't require closing this panel first. */
-  padding-left: 56px;
+     left:0, 52px wide -- same size/position as ActivityBar's own mobile
+     trigger) so this panel's own title doesn't render underneath it.
+     Right side clears that ActivityBar trigger itself (fixed at right:0,
+     52px wide, ActivityBar.css) the same way, so this header's own
+     close/refresh buttons don't end up underneath *that* -- both now
+     render above this panel (z-index 46 each) specifically so a project
+     switch or a way back to the left nav doesn't require closing this
+     panel first. */
+  padding-left: 52px;
   padding-right: 52px;
 }
 
