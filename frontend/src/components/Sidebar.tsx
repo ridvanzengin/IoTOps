@@ -60,7 +60,11 @@ function loadStoredCollapsed(): boolean {
   return typeof window !== "undefined" && window.localStorage.getItem(COLLAPSED_STORAGE_KEY) === "1";
 }
 
-function renderNavItem(item: NavItem, collapsed: boolean) {
+// onNavigate fires only for a plain NavLink (real in-app navigation to a
+// different page) -- never for item.onClick entries like AI Co-pilot,
+// which manage the right-side panel's open/closed state directly and
+// deliberately don't navigate anywhere.
+function renderNavItem(item: NavItem, collapsed: boolean, onNavigate?: () => void) {
   const Icon = item.icon;
   const title = collapsed ? item.label : undefined;
   if (item.disabled) {
@@ -93,6 +97,7 @@ function renderNavItem(item: NavItem, collapsed: boolean) {
       end={item.end}
       className={({ isActive }) => `sidebar__link${isActive ? " sidebar__link--active" : ""}`}
       title={title}
+      onClick={onNavigate}
     >
       <Icon className="sidebar__icon" />
       {!collapsed && item.label}
@@ -114,18 +119,21 @@ export function Sidebar() {
 
   // Closing on navigation matches every off-canvas mobile nav convention --
   // otherwise the drawer stays open over the new page until manually
-  // dismissed, which reads as stuck/broken. Also closes the right-side
-  // Events/Co-pilot panel on mobile specifically -- desktop keeps it open
-  // across navigation on purpose (a persistent panel you browse alongside
-  // as you move between pages), but on mobile it's a near-full-screen
-  // overlay; tapping a nav item is a clear "take me somewhere else"
-  // signal, and leaving that overlay obscuring the page you just asked
-  // for would read as stuck, same as the drawer would.
+  // dismissed, which reads as stuck/broken.
   useEffect(() => {
     setMobileOpen(false);
-    if (isMobile) closePanel();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
+
+  // Only for an actual left-nav click (wired to NavLink's onClick via
+  // renderNavItem below) -- NOT a pathname-watching effect. A pathname
+  // effect fired for every navigation regardless of source, including
+  // ActivityBar's own project click, which navigates to that project's
+  // dashboard *and* opens its Events panel in the same click -- the
+  // effect's closePanel() ran right after and undid that in the same
+  // render pass. This only ever runs for a real left-nav navigation.
+  function handleNavLinkClick() {
+    if (isMobile) closePanel();
+  }
 
   const navItems: NavItem[] = [
     { label: "Overview", to: "/", icon: HomeIcon, end: true },
@@ -192,10 +200,10 @@ export function Sidebar() {
           </button>
         </div>
         <nav className="sidebar__nav">
-          {navItems.map((item) => renderNavItem(item, effectiveCollapsed))}
+          {navItems.map((item) => renderNavItem(item, effectiveCollapsed, handleNavLinkClick))}
 
           {!effectiveCollapsed && <p className="sidebar__section-label">Reference</p>}
-          {REFERENCE_NAV_ITEMS.map((item) => renderNavItem(item, effectiveCollapsed))}
+          {REFERENCE_NAV_ITEMS.map((item) => renderNavItem(item, effectiveCollapsed, handleNavLinkClick))}
           {EXTERNAL_LINKS.map((item) => {
             const Icon = item.icon;
             return (
