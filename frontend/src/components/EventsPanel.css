@@ -8,13 +8,23 @@
   flex-direction: column;
 }
 
-/* Mobile: full-screen overlay instead of a resizable docked panel -- the
-   inline width style is dropped in EventsPanel.tsx (isMobile ? undefined
-   : {width}) so this can own sizing entirely. */
+/* Mobile: near-full-screen overlay instead of a resizable docked panel --
+   the inline width style is dropped in EventsPanel.tsx (isMobile ?
+   undefined : {width}) so this can own sizing entirely. Deliberately not
+   a true inset:0 -- that covered the entire viewport, including
+   Sidebar's own mobile hamburger trigger (top:0, left:0), leaving this
+   panel's own close button as the only way out. Reserves a strip on the
+   left just wide enough for that button to stay visible/tappable as a
+   second way out, mirroring how ActivityBar's mobile trigger reserves
+   its own 52px on the right edge of Sidebar's topbar (see Sidebar.css's
+   .mobile-topbar comment) -- just mirrored to the left here. */
 .events-panel--mobile {
   position: fixed;
-  inset: 0;
-  width: 100% !important;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 56px;
+  width: auto !important;
   height: 100%;
   z-index: 45;
   border-left: none;

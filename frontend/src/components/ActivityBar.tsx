@@ -41,6 +41,14 @@ export function ActivityBar() {
   const totalUnresolved = projects.reduce((sum, project) => sum + (unresolvedCounts[project.id] ?? 0), 0);
 
   function handleProjectClick(projectId: string) {
+    // Explicit, not just relying on the pathname-change effect above --
+    // that only fires when this click also navigates, which doesn't
+    // happen for a project with no dashboards yet (openProjectPanel-only
+    // branch below). Left stale open otherwise, its backdrop would sit on
+    // top of everything at full-viewport inset, including the reserved
+    // hamburger strip this mobile drawer and EventsPanel's own mobile
+    // rule both leave open specifically so it stays reachable.
+    setMobileOpen(false);
     const isActive = activePanel?.kind === "project" && activePanel.projectId === projectId;
     if (isActive) {
       closePanel();
@@ -120,7 +128,17 @@ export function ActivityBar() {
           <button
             type="button"
             className={`activity-bar__mobile-row${activePanel?.kind === "copilot" ? " activity-bar__mobile-row--active" : ""}`}
-            onClick={() => (activePanel?.kind === "copilot" ? closePanel() : openCopilotPanel())}
+            onClick={() => {
+              // Never navigates (no route change to trigger the pathname
+              // effect above) -- see handleProjectClick's own comment for
+              // why this needs to be explicit rather than relying on that.
+              setMobileOpen(false);
+              if (activePanel?.kind === "copilot") {
+                closePanel();
+              } else {
+                openCopilotPanel();
+              }
+            }}
           >
             <span className="activity-bar__mobile-row-badge activity-bar__mobile-row-badge--copilot">
               <CopilotIcon className="activity-bar__mobile-row-copilot-icon" />

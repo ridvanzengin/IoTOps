@@ -155,7 +155,9 @@
     border-left: 1px solid var(--border);
     padding: 12px;
     box-sizing: border-box;
-    z-index: 40;
+    /* Matches Sidebar.css's .sidebar--mobile (same tier, its own comment
+       explains why) -- above .events-panel--mobile's 45, not under it. */
+    z-index: 50;
     transform: translateX(100%);
     transition: transform 0.2s ease;
     box-shadow: var(--shadow);

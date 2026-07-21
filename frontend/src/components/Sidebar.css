@@ -257,11 +257,16 @@
     flex-shrink: 0;
   }
 
+  /* Above .events-panel--mobile's own 45 (EventsPanel.css) -- opening
+     either off-canvas drawer (this one or ActivityBar's own, which
+     shares this exact backdrop class) while the Events/Co-pilot panel
+     is already open needs to come out on top of it, not get stacked
+     underneath where it'd be unreachable. */
   .sidebar-backdrop {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.5);
-    z-index: 39;
+    z-index: 48;
   }
 
   .sidebar--mobile {
@@ -271,7 +276,7 @@
     bottom: 0;
     width: 260px;
     min-height: 100svh;
-    z-index: 40;
+    z-index: 50;
     transform: translateX(-100%);
     transition: transform 0.2s ease;
     box-shadow: var(--shadow);
