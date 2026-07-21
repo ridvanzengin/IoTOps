@@ -209,7 +209,12 @@
     position: fixed;
     top: 0;
     left: 0;
-    right: 0;
+    /* Leaves room for ActivityBar's own mobile trigger (ActivityBar.css's
+       .activity-bar__mobile-trigger), a same-height fixed element sitting
+       flush against this bar's right edge -- not a shared component, so
+       they coordinate purely through this reserved width matching that
+       trigger's own width. */
+    right: 52px;
     height: 52px;
     padding: 0 12px;
     box-sizing: border-box;

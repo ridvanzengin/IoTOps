@@ -90,3 +90,154 @@
 .activity-bar__spacer {
   flex: 1;
 }
+
+.activity-bar__badge--inline {
+  position: static;
+  border: none;
+  flex-shrink: 0;
+}
+
+.activity-bar__mobile-trigger {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  /* Same visual row as Sidebar.css's .mobile-topbar (which reserves this
+     exact 52px on its own right edge) -- matching background/border/
+     z-index so the two fixed elements read as one continuous bar. */
+  .activity-bar__mobile-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 52px;
+    height: 52px;
+    box-sizing: border-box;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-h);
+    cursor: pointer;
+    z-index: 30;
+  }
+
+  .activity-bar__mobile-trigger-icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* .activity-bar__mobile-trigger's own badge (rendered via the shared
+     .activity-bar__badge class) needs repositioning -- that class is
+     normally absolutely positioned against a 36px icon square, not this
+     52px fixed trigger button. */
+  .activity-bar__mobile-trigger .activity-bar__badge {
+    top: 4px;
+    right: 4px;
+  }
+
+  /* Mirrors Sidebar.css's .sidebar--mobile/.sidebar--mobile-open exactly
+     (off-canvas drawer, backdrop-dismissed, closes on navigate) but slides
+     in from the right instead of the left -- see ActivityBar.tsx's own
+     comment for why this collapses Co-pilot in here too, unlike Sidebar's
+     drawer which keeps it as a persistent top-level nav entry. */
+  .activity-bar--mobile {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 260px;
+    min-height: 100svh;
+    background: var(--bg);
+    border-left: 1px solid var(--border);
+    padding: 12px;
+    box-sizing: border-box;
+    z-index: 40;
+    transform: translateX(100%);
+    transition: transform 0.2s ease;
+    box-shadow: var(--shadow);
+    gap: 2px;
+  }
+
+  .activity-bar--mobile-open {
+    transform: translateX(0);
+  }
+
+  .activity-bar__mobile-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 8px;
+    margin-bottom: 12px;
+    color: var(--text-h);
+  }
+
+  .activity-bar__mobile-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: none;
+    color: var(--text);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .activity-bar__mobile-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 8px;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--text-h);
+    font: inherit;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .activity-bar__mobile-row:hover {
+    background: var(--bg-subtle);
+  }
+
+  .activity-bar__mobile-row--active {
+    background: var(--bg-subtle);
+    outline: 1px solid var(--accent-border);
+  }
+
+  .activity-bar__mobile-row-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+
+  .activity-bar__mobile-row-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .activity-bar__mobile-row-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
