@@ -103,8 +103,15 @@
 
 @media (max-width: 640px) {
   /* Same visual row as Sidebar.css's .mobile-topbar (which reserves this
-     exact 52px on its own right edge) -- matching background/border/
-     z-index so the two fixed elements read as one continuous bar. */
+     exact 52px on its own right edge) -- matching background/border so
+     the two fixed elements read as one continuous bar. Already its own
+     top-level fixed element (not nested inside a lower-z-index wrapper
+     the way Sidebar's hamburger used to be, see that button's own CSS
+     comment for the stacking-context pitfall), so getting this to render
+     above EventsPanel's full-screen mobile overlay (z-index 45) needs
+     nothing more than clearing that value here -- 46 matches the
+     hamburger's own for the same reason. Lets a project switch happen
+     without closing the Events/Co-pilot panel first. */
   .activity-bar__mobile-trigger {
     display: flex;
     align-items: center;
@@ -120,7 +127,7 @@
     background: var(--bg);
     color: var(--text-h);
     cursor: pointer;
-    z-index: 30;
+    z-index: 46;
   }
 
   .activity-bar__mobile-trigger-icon {
