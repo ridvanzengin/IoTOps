@@ -11,11 +11,13 @@ v1.1) has its core engine done — real rule/Redis/Celery logic in both
 custom-telegraf plugins, Automater backend + frontend, automated tests,
 and a persisted Events feature (Mongo-backed, SSE-delivered sidebar with
 activity-bar redesign, Panel-chart overlays) — with the beekeeping
-swarm-alert wiring still open. Milestone 6 (AI Assistant, v1.2) has the
-Co-pilot's Q&A slice and rule-suggestion slice (Slices 1–2) shipped —
-real Anthropic tool-calling, a suggestion always available in every
-conversation (not gated behind a specific entry point), never
-auto-creating anything. See
+swarm-alert wiring still open. Milestone 6 (AI Assistant, v1.2) is fully
+shipped — Q&A (Slice 1), rule suggestions (Slice 2), and panel/dashboard
+suggestions with session persistence (Slice 3), all live-tested against
+the real Anthropic and Gemini APIs: real tool-calling, a suggestion
+always available in every conversation (not gated behind a specific
+entry point), never auto-creating anything. Gemini also ships as a
+free-tier alternative to Anthropic, switchable via `AI_PROVIDER`. See
 [docs/development-plan.md](docs/development-plan.md) for current
 milestone status.
 
@@ -36,7 +38,9 @@ just the first showcase — more domain showcases are planned post-v1. See
 - Runtime: Docker containers running Telegraf (Collector + Automater
   services)
 - Async tasks: Celery workers
-- AI: Anthropic API (Claude) for both SQL generation and the Co-pilot chat
+- AI: Anthropic API (Claude) or Google Gemini (free-tier default,
+  switchable via `AI_PROVIDER`) for both SQL generation and the Co-pilot
+  chat
 
 ## Core principles
 

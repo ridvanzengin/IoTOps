@@ -12,6 +12,24 @@ just "fixed a typo"), that's kept; blow-by-blow debugging steps aren't.
 
 ## 2026-07-20
 
+**Milestone 6 Slice 3 shipped: Co-pilot panel and dashboard suggestions,
+plus session persistence (PR #25).** The Co-pilot can now propose either
+a single new dashboard panel (`suggest_panel`) or a whole multi-panel
+dashboard (`suggest_dashboard`) as a reviewable, prefilled draft — never
+auto-created — grounded in real telemetry stats and existing
+panel/dashboard/variable awareness (`list_existing_panels`). Panel
+suggestions land in the existing Panel Builder prefill flow; dashboard
+suggestions land in a new in-memory draft-dashboard state in the
+Dashboard Editor (name + variables + panels, nothing persisted until an
+explicit Save) — the one part of this slice with no existing form to
+reuse. Both follow the always-available-tools lesson from Slice 2 from
+the start (no intent-gating). Co-pilot conversations also now persist
+across the panel being closed/reopened or the Events sidebar being shown
+instead (moved into `EventsContext`'s `copilotSession`, previously reset
+on unmount), with a "New session" control to start over deliberately.
+This completes Milestone 6 (AI Assistant, v1.2) — all three Co-pilot
+slices (Q&A, rule suggestions, panel/dashboard suggestions) are shipped.
+
 **Gemini added as a free-tier alternative AI backend, switchable via
 `AI_PROVIDER`.** `AiService`'s tool-calling loop and SQL generation now go
 through a small `ChatProvider` interface (`app/ai/chat_provider.py`)

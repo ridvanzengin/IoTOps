@@ -540,8 +540,14 @@ project's $5 budget.
    entry-point/refinement/interoperability decisions there are still
    accurate; the *tool-availability-gated-by-intent* part is superseded,
    see the lesson-learned callout right below it).
-3. **Dashboard/panel suggestions** — same idea, proposing a chart from a
-   schema + usage pattern, landing in the Panel Builder. Not yet built.
+3. ~~**Dashboard/panel suggestions**~~ **Done (2026-07-20, PR #25/#26).**
+   Proposes either a single panel or a whole multi-panel dashboard from
+   real schema + telemetry stats + existing-panel awareness, landing in
+   the Panel Builder or a new in-memory draft dashboard respectively.
+   Co-pilot sessions now also persist (`EventsContext`'s `copilotSession`)
+   instead of resetting on panel close. See CHANGELOG.md's 2026-07-20
+   entries for the live-tested fixes this took (token-truncation bug,
+   `DashboardSuggestionState` invariants).
 
 **Lesson learned building Slice 2, apply to Slice 3 from the start:**
 `suggest_automation`/`list_existing_rules` were originally gated behind
@@ -684,16 +690,16 @@ Fix opportunistically, not preemptively.
 
 # Future — Suggested Dashboards & Automations
 
-Milestone 6's remaining two slices (rule suggestions, panel/dashboard
-suggestions). **Design decided 2026-07-17; rule suggestions shipped the
-same day** (see CHANGELOG.md's 2026-07-17 entry) — this supersedes the
-standalone-single-shot-endpoint sketch this section previously had
-(`POST /api/ai/dashboard` / `POST /api/ai/automation` as plain generation
-endpoints, a model-selection dropdown). Both ideas are superseded by
-routing everything through the Co-pilot chat instead — see below for why.
-Panel/dashboard suggestions are still unbuilt; the design below is the
-plan for those, and doubles as a record of what rule suggestions already
-implemented.
+Milestone 6's last two slices (rule suggestions, panel/dashboard
+suggestions) — **all now shipped.** Design decided 2026-07-17; rule
+suggestions shipped the same day (see CHANGELOG.md's 2026-07-17 entry),
+panel and dashboard suggestions shipped 2026-07-20 (PR #25/#26) — this
+supersedes the standalone-single-shot-endpoint sketch this section
+previously had (`POST /api/ai/dashboard` / `POST /api/ai/automation` as
+plain generation endpoints, a model-selection dropdown). Both ideas were
+superseded by routing everything through the Co-pilot chat instead — see
+below for why. The design below is kept as the record of what actually
+shipped, not a forward-looking plan.
 
 ## Decided: all three "Suggest..." entry points open the Co-pilot, not a separate prefilled-form flow
 
@@ -736,9 +742,9 @@ message) far better than a hardcoded decision tree of scripted UI prompts.
   still holds; the tool-switching part doesn't — see the superseded note
   above.
 - Three new tools alongside `query_occurrences`/`query_telemetry`:
-  `suggest_automation` (shipped, always available), `suggest_panel`,
-  `suggest_dashboard` (not yet built — build these always-available too).
-  Each does its own read-only introspection before proposing anything:
+  `suggest_automation`, `suggest_panel`, `suggest_dashboard` — all shipped,
+  all always available. Each does its own read-only introspection before
+  proposing anything:
   - **What already exists** — a new read tool over current Rules/
     Automaters (for `suggest_automation`) or Panels/Variables (for
     `suggest_panel`/`suggest_dashboard`), so the model doesn't propose a
@@ -795,6 +801,9 @@ prior SQL/conditions, not a paraphrase.
 
 ## The one part that's a bigger lift: "Suggest a dashboard"
 
+**Status: done (2026-07-20, PR #25).** The in-memory draft dashboard
+described below shipped as designed.
+
 "Suggest a panel" and "Suggest an automation" both land in an *existing*
 form (Panel Builder / Rule creation form) via the same prefill mechanism.
 "Suggest a dashboard" doesn't have an existing form to prefill — it needs
@@ -821,12 +830,11 @@ hardcoded as a toggle.
    by making the tools always-available (see the "Lesson learned" callout
    above) — build Slices 2/3 that way from the start next time, skip
    re-discovering this the hard way.
-2. **Panel suggestions** — not yet started. Reuses the same pattern;
-   smaller lift since it plugs into the existing Panel Builder prefill
-   flow (already used by the NL-to-SQL button), just model-initiated
-   instead of user-typed.
-3. **Dashboard suggestions** — last, since it needs the new draft-editor
-   capability above.
+2. ~~**Panel suggestions**~~ **Done (2026-07-20, PR #25).** Plugged into
+   the existing Panel Builder prefill flow, as planned.
+3. ~~**Dashboard suggestions**~~ **Done (2026-07-20, PR #25/#26).** Built
+   the new in-memory draft-dashboard capability described above; shipped
+   same day as panel suggestions rather than as a separate follow-up.
 
 ## One concrete constraint to keep in mind once suggestion logic gets built
 
