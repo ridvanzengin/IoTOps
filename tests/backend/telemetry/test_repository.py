@@ -118,6 +118,22 @@ async def test_execute_bounded_propagates_timeout() -> None:
         await repository.execute_bounded(sql, limit=50, timeout_seconds=10.0)
 
 
+async def test_execute_readonly_propagates_timeout() -> None:
+    # Regression guard: this is the actual dashboard-panel-rendering path
+    # (DashboardService.run_panel_query -> TelemetryService.run_query), the
+    # one query path that used to have no timeout at all -- see
+    # docs/development-plan.md's "No runaway-query timeout on interactive
+    # Panel queries" Known Issue. A stuck panel query used to pin one of
+    # the (deliberately tiny, production-constrained) pool's connections
+    # indefinitely instead of failing fast.
+    sql = "SELECT time, temperature FROM hive_metrics"
+    pool = FakePool(tables=["hive_metrics"], query_timeouts={sql})
+    repository = TelemetryRepository(pool)
+
+    with pytest.raises(TimeoutError):
+        await repository.execute_readonly(sql, limit=50, timeout_seconds=10.0)
+
+
 async def test_execute_readonly_keeps_most_recent_rows_when_over_limit() -> None:
     # Regression guard: a panel's SQL is always ordered oldest-first
     # within its time window (see DashboardService._substitute_and_run).

@@ -674,17 +674,25 @@ Fix opportunistically, not preemptively.
   indefinitely — harmless (wasted subscription, no incorrect behavior),
   not worth the GC logic unless it becomes an actual operational
   nuisance.
-- **No runaway-query timeout on interactive Panel queries.** Query Rules'
-  scheduled evaluation has a hard 10s `asyncpg` timeout
-  (`TelemetryRepository.execute_match_query`); the equivalent
-  interactive path (Panel Builder's ad hoc SQL) has none at all. One
-  concrete vector through this gap is closed (2026-07-18): allowing `WITH`
-  in `validate_select_only_sql` (for AI-suggested CTEs) briefly reopened
-  it to `WITH RECURSIVE` specifically, since Postgres can spin forever on
-  an unbounded recursive CTE with no query-level timeout to stop it —
+- ~~**No runaway-query timeout on interactive Panel queries.**~~ **Fixed.**
+  Query Rules' scheduled evaluation had a hard 10s `asyncpg` timeout
+  (`TelemetryRepository.execute_match_query`); the equivalent interactive
+  path (`execute_readonly`, backing both the Panel Builder's ad hoc SQL
+  preview and actual dashboard-panel rendering via
+  `DashboardService.run_panel_query`) had none at all. One concrete vector
+  through this gap was closed earlier (2026-07-18): allowing `WITH` in
+  `validate_select_only_sql` (for AI-suggested CTEs) briefly reopened it to
+  `WITH RECURSIVE` specifically, since Postgres can spin forever on an
+  unbounded recursive CTE with no query-level timeout to stop it —
   `RECURSIVE` is now in the forbidden-keyword blocklist. The general gap
-  (any ordinary long-running query, recursive or not, still has no
-  timeout on this path) remains open.
+  is now closed too: this surfaced in production as dashboard panels
+  failing to load with "remaining connection slots are reserved for roles
+  with the SUPERUSER attribute" — a slow panel query (telemetry tables
+  have grown well past their size at initial deployment) pinned one of
+  the deliberately tiny production pool's 5 connections indefinitely,
+  and enough of those exhausted the shared TimescaleDB instance's
+  connection cap. `execute_readonly`/`run_query` now take the same 10s
+  timeout every other query path already used.
 
 ---
 
