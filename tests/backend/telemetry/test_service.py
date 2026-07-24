@@ -116,6 +116,20 @@ async def test_run_query_wraps_database_errors_as_query_execution_error() -> Non
         )
 
 
+async def test_run_query_wraps_timeout_as_query_execution_error() -> None:
+    # Regression guard for the dashboard-panel connection-exhaustion bug:
+    # run_query is what actually renders a saved panel's chart data
+    # (DashboardService.run_panel_query), and used to have no timeout at
+    # all -- a stuck query held a pool connection forever instead of
+    # failing fast as a QueryExecutionError like every other query path
+    # already does.
+    sql = "SELECT * FROM device_metrics"
+    service = _service(tables=["device_metrics"], query_timeouts={sql})
+
+    with pytest.raises(QueryExecutionError):
+        await service.run_query(TelemetrySqlQuery(sql=sql), timeout_seconds=0.01)
+
+
 async def test_run_bounded_query_rejects_non_select_statement() -> None:
     service = _service(tables=["device_metrics"])
 

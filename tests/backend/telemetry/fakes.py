@@ -44,6 +44,8 @@ class FakeConnection:
         )
         if readonly_match:
             sql = readonly_match.group("sql")
+            if sql in self.query_timeouts:
+                raise TimeoutError(f"query timed out: {sql}")
             if sql in self.query_errors:
                 raise asyncpg.exceptions.PostgresError(self.query_errors[sql])
             (limit,) = args

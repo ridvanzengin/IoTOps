@@ -80,7 +80,9 @@ class TelemetryRepository:
             records = await conn.fetch(sql, timeout=timeout_seconds)
         return [dict(record) for record in records]
 
-    async def execute_readonly(self, sql: str, limit: int) -> list[dict[str, Any]]:
+    async def execute_readonly(
+        self, sql: str, limit: int, timeout_seconds: float = 10.0
+    ) -> list[dict[str, Any]]:
         # `sql` (built by DashboardService._substitute_and_run) is already
         # ordered oldest-first within the requested time window -- a plain
         # `LIMIT $1` here would keep the *oldest* rows and silently drop
@@ -99,7 +101,7 @@ class TelemetryRepository:
             f"OFFSET GREATEST(0, (SELECT count(*) FROM _panel_rows) - $1)"
         )
         async with self._pool.acquire() as conn:
-            records = await conn.fetch(query, limit)
+            records = await conn.fetch(query, limit, timeout=timeout_seconds)
         return [dict(record) for record in records]
 
     async def execute_bounded(

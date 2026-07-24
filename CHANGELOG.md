@@ -10,6 +10,26 @@ Newest first. Each entry is a compressed summary, not a full narrative —
 where a bug fix taught something worth remembering (a real footgun, not
 just "fixed a typo"), that's kept; blow-by-blow debugging steps aren't.
 
+## 2026-07-22
+
+**Fixed dashboard panels failing to load in production with "remaining
+connection slots are reserved for roles with the SUPERUSER attribute."**
+Root cause was a known, documented gap (see development-plan.md's
+now-closed "No runaway-query timeout on interactive Panel queries" Known
+Issue): `TelemetryRepository.execute_readonly` -- the query path behind
+`DashboardService.run_panel_query`, i.e. actual panel-chart rendering, not
+just the Panel Builder's SQL preview -- had no `asyncpg` timeout, unlike
+every other query path (Query Rules' scheduled evaluation, the AI
+Co-pilot's `query_telemetry` tool), which already enforce a 10s timeout.
+As the demo's telemetry tables grew well past their size at initial
+deployment, some panel queries got slow enough to hang, pinning one of
+the production pool's deliberately tiny 5 connections indefinitely;
+enough of those piling up exhausted the shared TimescaleDB instance's
+connection cap entirely. Added the same 10s timeout convention to
+`execute_readonly`/`TelemetryService.run_query`, with regression tests
+mirroring the existing `execute_bounded`/`run_bounded_query` timeout
+coverage.
+
 ## 2026-07-20
 
 **Milestone 6 Slice 3 shipped: Co-pilot panel and dashboard suggestions,

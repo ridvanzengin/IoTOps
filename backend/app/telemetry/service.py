@@ -34,11 +34,15 @@ class TelemetryService:
     async def get_schema(self) -> list[TelemetryTableSchema]:
         return await self._repository.get_schema()
 
-    async def run_query(self, query: TelemetrySqlQuery) -> TelemetrySqlQueryResult:
+    async def run_query(
+        self, query: TelemetrySqlQuery, timeout_seconds: float = 10.0
+    ) -> TelemetrySqlQueryResult:
         validate_select_only_sql(query.sql)
         try:
-            rows = await self._repository.execute_readonly(query.sql, query.limit)
-        except asyncpg.PostgresError as exc:
+            rows = await self._repository.execute_readonly(
+                query.sql, query.limit, timeout_seconds
+            )
+        except (asyncpg.PostgresError, TimeoutError) as exc:
             raise QueryExecutionError(str(exc)) from exc
         columns = list(rows[0].keys()) if rows else []
         return TelemetrySqlQueryResult(columns=columns, rows=rows)
@@ -47,11 +51,13 @@ class TelemetryService:
         self, sql: str, limit: int = 50, timeout_seconds: float = 10.0
     ) -> TelemetrySqlQueryResult:
         # Used by the AI Co-pilot's query_telemetry tool -- a row cap and a
-        # timeout, distinct from run_query above (which serves the Panel
-        # Builder's ad hoc SQL preview and has no timeout of its own; see
-        # docs/development-plan.md's Known Issues). Model-generated SQL gets
-        # both bounds since nobody is watching it hang or eyeballing an
-        # unbounded result set.
+        # timeout, same bound run_query above now enforces too (see
+        # execute_readonly/execute_bounded in the repository). Distinct
+        # from run_query in ordering assumptions only: this wraps arbitrary
+        # model-generated SQL with a plain LIMIT (no assumption about which
+        # column it's ordered by), where run_query's execute_readonly keeps
+        # the newest N rows via an OFFSET, assuming oldest-first ordering
+        # (see that method's own comment).
         validate_select_only_sql(sql)
         try:
             rows = await self._repository.execute_bounded(sql, limit, timeout_seconds)
